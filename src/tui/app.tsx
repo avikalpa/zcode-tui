@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { SyntaxStyle } from "@opentui/core";
 import type { AppServer } from "../protocol/client";
+import { recentInputs } from "../store/history";
 
 const MD_STYLE = SyntaxStyle.create();
 
@@ -77,6 +78,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
   const [mode, setMode] = useState<string | undefined>(undefined);
+  const [history, setHistory] = useState<string[]>([]);
+  const historyIdx = useRef(-1);
   const [thoughtLevel, setThoughtLevel] = useState<string>("enabled");
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
@@ -258,6 +261,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const send = async (content: string) => {
     if (!activeId || running) return;
     setRunning(true);
+    setHistory((h) => [content, ...h.filter((x) => x !== content)]);
+    historyIdx.current = -1;
     setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "" }]);
     setStatus("streaming…");
     try {
@@ -390,6 +395,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   }, [client]);
 
   useEffect(() => {
+    setHistory(recentInputs(process.cwd(), 50));
     void refresh();
     void loadModels();
     // v4 sessions-index subscription: delivers a snapshot at boot; cross-
@@ -536,6 +542,16 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         <box style={{ height: 1, backgroundColor: C.chrome, flexShrink: 0 }}>
           <input
             ref={inputRef as never}
+            onKeyDown={((key: { name?: string; shift?: boolean }) => {
+              if (key.name !== "up" && key.name !== "down") return;
+              if (history.length === 0) return;
+              let idx = historyIdx.current;
+              if (key.name === "up") idx = Math.min(idx + 1, history.length - 1);
+              else idx = Math.max(idx - 1, -1);
+              historyIdx.current = idx;
+              const inp = inputRef.current as unknown as { value?: string };
+              if (inp && "value" in inp) inp.value = idx >= 0 ? history[idx] : "";
+            }) as never}
             placeholder={activeId ? "i focused · type a prompt, Enter sends" : "a new session · Enter opens selected · i to type"}
             onSubmit={((value: string) => {
               const text = String(value).trim();
