@@ -37,7 +37,7 @@ above the bridge work.
 ## Keys
 
 `a` new session · `i` focus composer · Enter open/send · `m` model dialog ·
-**Ctrl+K** command palette (all verbs, type-to-filter) · `f` fork ·
+**Ctrl+K** command palette (all verbs, type-to-filter) · `f` fork · `b` fork at message… ·
 `c` compact · `o` cycle mode (plan/build/edit/yolo/auto) · `e` thinking
 on/off · `[`/`]` page conversation · `/` filter sidebar · `t` theme
 (zai-dark/zai-light) · `r` refresh (respawns the backend after a loss) ·

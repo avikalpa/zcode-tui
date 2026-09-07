@@ -29,6 +29,7 @@ export interface TurnMessage {
   toolOk?: boolean;
   toolMs?: number;
   toolOut?: string;
+  messageId?: string;
 }
 
 // zai arms from zcodereversed FINDINGS.md (desktop 3.11.2 theme tokens)
@@ -75,7 +76,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [running, setRunning] = useState(false);
   const [thinking, setThinking] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<"model" | "palette" | null>(null);
+  const [dialog, setDialog] = useState<"model" | "palette" | "fork" | null>(null);
+  const [forkOptions, setForkOptions] = useState<DialogOption<string>[]>([]);
   const [theme, setTheme] = useState<ThemeName>("zai-dark");
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
@@ -174,6 +176,16 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     }
   };
 
+  const openForkDialog = async () => {
+    if (!activeId || running || msgs.length === 0) return;
+    const opts: DialogOption<string>[] = msgs
+      .map((m) => ({ id: m.messageId ?? "", value: m.messageId ?? "", label: `${m.role}: ${m.text.slice(0, 50)}` }))
+      .filter((o) => o.id !== "");
+    if (opts.length === 0) { setStatus("no message ids available for fork target"); return; }
+    setForkOptions(opts);
+    setDialog("fork");
+  };
+
   const forkActive = async () => {
     if (!activeId || running) return;
     setStatus("forking…");
@@ -230,6 +242,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         role: String(m.info?.role ?? "?"),
         text: extractText(m.parts),
         model: String((m.info?.model as Record<string, unknown> | undefined)?.modelId ?? ""),
+        messageId: String(m.info?.id ?? m.info?.messageId ?? ""),
       }));
       setMsgs(turns);
       setActiveId(row.sessionId);
@@ -491,6 +504,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     else if (key.name === "o") void cycleMode();
     else if (key.name === "e") void toggleThinking();
     else if (key.name === "f") void forkActive();
+    else if (key.name === "b") void openForkDialog();
     else if (key.name === "c") void compactActive();
     else if (key.name === "i") inputRef.current?.focus();
     else if (key.name === "down" || key.name === "j") setSel((s) => Math.min(s + 1, shown.length - 1));
@@ -517,13 +531,39 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       />
     );
   }
+  if (dialog === "fork") {
+    return (
+      <SelectDialog
+        title="fork at message"
+        options={forkOptions}
+        onSelect={(messageId) => {
+          setDialog(null);
+          setStatus("forking…");
+          void client.request("session/fork", { sessionId: activeId, target: { kind: "message", messageId } })
+            .then((res) => {
+              const fid = (res as { forkedSessionId?: string }).forkedSessionId;
+              if (!fid) throw new Error("no forkedSessionId");
+              setMsgs([]);
+              setActiveId(fid);
+              setPage(0);
+              void subscribe(fid);
+              setStatus(`fork ${fid.slice(0, 13)} · i to type`);
+              void refresh();
+            })
+            .catch((e) => setStatus(`fork failed: ${e instanceof Error ? e.message : e}`));
+        }}
+        onClose={() => setDialog(null)}
+      />
+    );
+  }
   if (dialog === "palette") {
     const verbs: DialogOption<() => void>[] = [
       { id: "new", label: "new session", value: () => void newSession() },
       { id: "model", label: "switch model…", value: () => setDialog("model") },
       { id: "mode", label: "cycle mode (plan/build/edit/yolo/auto)", value: () => void cycleMode() },
       { id: "think", label: "toggle thinking", value: () => void toggleThinking() },
-      { id: "fork", label: "fork session", value: () => void forkActive() },
+      { id: "fork", label: "fork session (latest checkpoint)", value: () => void forkActive() },
+      { id: "forkat", label: "fork at message…", value: () => void openForkDialog() },
       { id: "compact", label: "compact session", value: () => void compactActive() },
       { id: "theme", label: "toggle theme", value: () => setTheme((t) => (t === "zai-dark" ? "zai-light" : "zai-dark")) },
       { id: "refresh", label: "refresh sessions", value: () => void refresh() },
