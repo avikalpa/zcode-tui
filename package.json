@@ -1,6 +1,6 @@
 {
   "name": "@avikalpa/zcode-tui",
-  "version": "0.5.1",
+  "version": "0.5.3",
   "private": false,
   "type": "module",
   "scripts": {
@@ -52,6 +52,7 @@
     "SUPPORT.md",
     "CODE_OF_CONDUCT.md",
     "ARCHITECTURE.md",
-    "SKILL.md"
+    "SKILL.md",
+    "docs/probes.md"
   ]
 }

@@ -1,24 +1,45 @@
 #!/usr/bin/env node
 // zcode-tui launcher — the TUI runtime is Bun-first (bun:sqlite, OpenTUI bun
 // entries). Prefers the repo's compiled binary, then bun, then fails honestly.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pkg = dirname(fileURLToPath(import.meta.url)) + "/..";
+const args = process.argv.slice(2);
+
+// The provisioner's health check runs `--version` and requires exit 0 —
+// answer from package.json BEFORE anything boots. A run without a TTY never
+// boots the full-screen UI either: it would hang the check.
+if (args.includes("--version") || args.includes("-V") || !process.stdin.isTTY) {
+  const { version } = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
+  console.log(`zcode-tui ${version}`);
+  if (args.includes("--version") || args.includes("-V")) process.exit(0);
+}
+if (args.includes("--help") || args.includes("-h")) {
+  console.log("zcode-tui - a TUI for the ZCode runtime (GPL-3.0-or-later)");
+  console.log("usage: zcode-tui [--resume <sessionId>] [--model <modelId>]");
+  console.log("requires bun (https://bun.sh) or a compiled dist/zcode-tui binary");
+  process.exit(0);
+}
+
 const bin = join(pkg, "dist/zcode-tui");
 if (existsSync(bin)) {
-  const p = spawn(bin, process.argv.slice(2), { stdio: "inherit" });
+  const p = spawn(bin, args, { stdio: "inherit" });
   p.on("exit", (c) => process.exit(c ?? 0));
-} else if (process.env.ZCODE_TUI_RUNTIME === "bun" || true) {
-  const bun = ["bun", "/usr/bin/bun", process.env.HOME + "/.bun/bin/bun"].find((b) => {
-    try { return existsSync(b) && !b.startsWith("/usr/bin/b") ? true : existsSync(b); } catch { return false; }
+} else {
+  const bun = ["bun", process.env.HOME + "/.bun/bin/bun", "/usr/local/bin/bun"].find((b) => {
+    try {
+      return existsSync(b);
+    } catch {
+      return false;
+    }
   });
   if (!bun) {
     console.error("zcode-tui needs bun (https://bun.sh) or a compiled dist/zcode-tui binary.");
     process.exit(1);
   }
-  const p = spawn(bun, [join(pkg, "src/tui/main.tsx"), ...process.argv.slice(2)], { stdio: "inherit" });
+  const p = spawn(bun, [join(pkg, "src/tui/main.tsx"), ...args], { stdio: "inherit" });
   p.on("exit", (c) => process.exit(c ?? 0));
 }

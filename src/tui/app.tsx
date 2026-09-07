@@ -7,6 +7,7 @@ import { SyntaxStyle } from "@opentui/core";
 import { SelectDialog, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
+import { probe } from "./probes";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 const MD_STYLE = SyntaxStyle.create();
@@ -151,6 +152,8 @@ export function App({ client, onQuit, resumeId, modelId }: {
       };
       const rows = (res.sessions ?? []).sort((a, b) => b.updatedAt - a.updatedAt);
       setSessions(rows);
+      probe("backend-live", "");
+      probe("list-ok", `${rows.length} sessions`);
       setStatus(`${rows.length} sessions`);
     } catch (e) {
       setStatus(`error: ${e instanceof Error ? e.message : e}`);
@@ -307,6 +310,7 @@ export function App({ client, onQuit, resumeId, modelId }: {
 
   const send = async (content: string) => {
     if (!activeId || running) return;
+    probe("turn-start", content.slice(0, 40));
     setRunning(true);
     setPage(0);
     setHistory((h) => [content, ...h.filter((x) => x !== content)]);
@@ -341,6 +345,7 @@ export function App({ client, onQuit, resumeId, modelId }: {
         const opts = Array.isArray(params.options) ? params.options as Record<string, unknown>[] : [];
         askOptionsRef.current = opts.map((o) => ({ id: String(o.optionId), response: o.response }));
         return new Promise((resolve) => {
+          probe("permission-ask", `${toolName}:${detail.slice(0, 40)}`);
           askRef.current = resolve as (v: unknown) => void;
           setAsk({ toolName, detail, riskLevel });
           setStatus(`permission: ${toolName}`);
@@ -396,7 +401,8 @@ export function App({ client, onQuit, resumeId, modelId }: {
           });
           setThinking("");
           if (usage && typeof usage.totalTokens === "number") {
-            setStatus(`turn done · ${usage.totalTokens} tokens · i to type`);
+            probe("turn-end", `tokens=${usage.totalTokens}`);
+          setStatus(`turn done · ${usage.totalTokens} tokens · i to type`);
           }
         } else if (typeof payload.response === "string" && !payload.usage) {
           setMsgs((m) => {
@@ -550,6 +556,7 @@ export function App({ client, onQuit, resumeId, modelId }: {
   });
 
   const inputRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
+  if (inputRef.current === null) probe("renderer-live", "");
 
   if (dialog === "model") {
     return (

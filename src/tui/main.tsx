@@ -2,6 +2,9 @@
 // OpenTUI core is ESM-with-TLA: dynamic import (fleet law from the
 // mock-tui-opentui staging), bun-native entry picked automatically.
 import { AppServer } from "../protocol/client";
+import { probe, initProbeDir } from "./probes";
+
+initProbeDir();
 
 async function main() {
   // Launch flags: --resume <sessionId> opens straight into a resumed
@@ -14,6 +17,8 @@ async function main() {
     if (argv[i] === "--resume") resumeId = argv[++i] ?? null;
     else if (argv[i] === "--model") modelId = argv[++i] ?? null;
   }
+  probe("boot", `pid=${process.pid} argv=${JSON.stringify(argv)}`);
+  probe("backend-spawn", "");
   const client = new AppServer({
     onNotification: () => {},
     onServerRequest: (m) => {
