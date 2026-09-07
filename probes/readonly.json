@@ -1,0 +1,10 @@
+[
+  {"method": "session/list", "params": {"limit": 3}},
+  {"method": "workspace/readState", "params": {"workspaceKey": "/home/pi/.zcode/workspace/default"}},
+  {"method": "mcp/list", "params": {}},
+  {"method": "session/read", "params": {"sessionId": "sess_dd7eeb30-7a7e-471c-a156-10d7f7a17894", "messageLimit": 3}},
+  {"method": "session/messages", "params": {"sessionId": "sess_dd7eeb30-7a7e-471c-a156-10d7f7a17894", "limit": 3}},
+  {"method": "session/events", "params": {"sessionId": "sess_dd7eeb30-7a7e-471c-a156-10d7f7a17894", "limit": 5}},
+  {"method": "session/subscribe", "params": {"sessionId": "sess_dd7eeb30-7a7e-471c-a156-10d7f7a17894", "deliveryKind": "desktop-continuous", "includeSnapshot": false}},
+  {"method": "plugins/list", "params": {}}
+]

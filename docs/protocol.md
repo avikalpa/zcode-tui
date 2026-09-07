@@ -181,6 +181,76 @@ session included (fields: `sessionId, title, titleSource, sessionKind,
 status, mode, traceId, createdAt, updatedAt,
 workspace{workspaceKey,workspacePath}`). Same store, same identity: proven.
 
+## Phase 2 — param schemas + live loop (2026-09-07, same sitting)
+
+All pinned statically (zod in zcode.cjs) AND confirmed live via
+`bun run probe:script` / `bun run probe:live`. Zod is `.strict()` — unknown
+keys are rejected with `-32602` and a field-accurate message (use that to
+iterate).
+
+- `session/list` `{workspace?, includeArchived?=false, limit?}` →
+  `{sessions:[{sessionId,title,titleSource,sessionKind,status,mode,traceId,createdAt,updatedAt,workspace{…}}]}`
+- `session/create` `{workspace:{workspacePath,workspaceKey} (REQUIRED),
+  mode?:"plan|build|edit|yolo|auto", model?{providerId,modelId,variant?},
+  persistence?:"immediate|deferred", thoughtLevel?, titleGenerationEnabled?,
+  mcpServers?, toolAllowlist?, toolDenylist?, parentSessionId?,
+  importedHistory?, sessionId? (only for imported history), runtimeModel?}`
+  → `{session:{sessionId,model,title,…}, messages:[], projection:{status,
+  mode, contextUsed, contextWindow, turnCount,…}, runtime:{eventSeq,…},
+  settings:{mode,model{available:[…]}}, protocol:{name,version}}`
+- `session/resume` `{sessionId, workspace?, runtimeModel?, thoughtLevel?,
+  mcpServers?, toolAllowlist?, toolDenylist?}` → same shape WITH history
+  (`messages:[{info:{role,model,tokens,time,semantics,…},
+  parts:[{partId,…}]}]`). Activates the store session in THIS instance.
+- `session/read` `{sessionId, deliveryKind?, messageLimit?, afterSeq?}`
+- `session/messages` `{sessionId, afterMessageId?, limit?}` → `{messages}`
+- `session/events` `{sessionId, afterSeq?, limit?}` → `{events}`
+- `session/subscribe` `{sessionId, deliveryKind:"desktop-continuous"|
+  "web-remote-replayable" (REQUIRED), afterSeq?, includeSnapshot?=false}` →
+  `{eventSeq, events, sessionId, snapshot?}`
+- `session/send` `{sessionId, content:string (REQUIRED plain string),
+  inputId?, queryId?, attachments?, expectedRevision?,
+  expectedProviderRevision?, runtimeModel?, …}` →
+  `{accepted:true, sessionId, stateRevision}`; `-32010` if a prompt is
+  already running
+- `session/stop` `{sessionId}` → `{}`
+- workspace-scoped methods (`workspace/readState`, `mcp/list`,
+  `plugins/list`, …) ALL take
+  `{workspace:{workspacePath,workspaceKey}}`
+- `workspace/readState` → model catalog: GLM-5.1 (200k ctx, 64k out),
+  GLM-4.7 (204.8k ctx, 131k out) on "Z.AI Coding Plan", reasoning
+  levels enabled/disabled — this is the TUI's model-picker source.
+
+### Session ownership (architectural)
+
+Sessions are **per-app-server-instance**: `session/list` reads the shared
+store, but read/messages/events/subscribe on a session owned by ANOTHER
+instance (e.g. the desktop's cli child) fail `-32004 "Session is not
+active"`. The TUI drives sessions it `create`s or `resume`s in its own
+app-server.
+
+### Server→client asks (answer or the flow stalls)
+
+- `session/requestRuntimePreferences` (scopes `runtime-materialization` and
+  `user-execution`, fires on create/resume AND on send) → reply
+  `{nativeSearchEnhancementsEnabled:boolean}` (zod MEt; defaults cover the
+  rest — `memoryEnabled=false`, `askUserQuestionAutoResolutionEnabled=true`,
+  `modelContextBudgetStrategy="preflight-v1"`)
+- `interaction/requestOfficialMcpAuthHeaders` (un-authed official plugin
+  MCP, e.g. image_search) — failing it is harmless
+- `interaction/requestPermission` / `interaction/requestUserInput` — the
+  ask flows (reply shapes still to pin under load)
+
+### Live stream taxonomy (from probe:live, tiny prompt, turn done in ~8.5 s)
+
+Pushes during a turn: `state.updated` (`{patch:{status},reason,revision,
+scope,sessionId}`), `session/event` (the main feed: title change, turn
+lifecycle, text content deltas, final `response`), `v4/telemetry/event`
+mirror (`turn.started`, `model.request.status`, `usage.delta`,
+`turn.terminal`), `computer-use/operation-event`, `process/mcpTelemetry`.
+`send ack {accepted, stateRevision}` arrives immediately; first content at
+~10.9 s wall (model latency included).
+
 ## Not-our-layer notes
 
 - `out/main/chunk-WR3FEWGO.js` implements "web-remote-control" RPC framing

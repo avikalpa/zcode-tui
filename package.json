@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "probe": "bun run src/bin/probe.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "probe:script": "bun run src/bin/probe-script.ts",
+    "probe:live": "bun run src/bin/live.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
