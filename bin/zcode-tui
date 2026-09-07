@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+// zcode-tui launcher — the TUI runtime is Bun-first (bun:sqlite, OpenTUI bun
+// entries). Prefers the repo's compiled binary, then bun, then fails honestly.
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const pkg = dirname(fileURLToPath(import.meta.url)) + "/..";
+const bin = join(pkg, "dist/zcode-tui");
+if (existsSync(bin)) {
+  const p = spawn(bin, process.argv.slice(2), { stdio: "inherit" });
+  p.on("exit", (c) => process.exit(c ?? 0));
+} else if (process.env.ZCODE_TUI_RUNTIME === "bun" || true) {
+  const bun = ["bun", "/usr/bin/bun", process.env.HOME + "/.bun/bin/bun"].find((b) => {
+    try { return existsSync(b) && !b.startsWith("/usr/bin/b") ? true : existsSync(b); } catch { return false; }
+  });
+  if (!bun) {
+    console.error("zcode-tui needs bun (https://bun.sh) or a compiled dist/zcode-tui binary.");
+    process.exit(1);
+  }
+  const p = spawn(bun, [join(pkg, "src/tui/main.tsx"), ...process.argv.slice(2)], { stdio: "inherit" });
+  p.on("exit", (c) => process.exit(c ?? 0));
+}

@@ -1,7 +1,7 @@
 {
   "name": "@avikalpa/zcode-tui",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.5.0",
+  "private": false,
   "type": "module",
   "scripts": {
     "probe": "bun run src/bin/probe.ts",
@@ -31,5 +31,27 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  }
+  },
+  "bin": {
+    "zcode-tui": "bin/zcode-tui"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "docs/protocol.md",
+    "docs/verification.md",
+    "docs/screenshots/",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "TRADEMARKS.md",
+    "THIRD-PARTY-NOTICES.md",
+    "CLA.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "CODE_OF_CONDUCT.md",
+    "ARCHITECTURE.md",
+    "SKILL.md"
+  ]
 }
