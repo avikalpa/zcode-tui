@@ -4,6 +4,16 @@
 import { AppServer } from "../protocol/client";
 
 async function main() {
+  // Launch flags: --resume <sessionId> opens straight into a resumed
+  // session; --model <modelId> is applied to the first created session.
+  // (yggterm's launch/resume contract expects both to exist.)
+  const argv = process.argv.slice(2);
+  let resumeId: string | null = null;
+  let modelId: string | null = null;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--resume") resumeId = argv[++i] ?? null;
+    else if (argv[i] === "--model") modelId = argv[++i] ?? null;
+  }
   const client = new AppServer({
     onNotification: () => {},
     onServerRequest: (m) => {
@@ -23,7 +33,7 @@ async function main() {
   const renderer = await createCliRenderer();
   renderer.setBackgroundColor("#161616");
   createRoot(renderer).render(
-    <App client={client} onQuit={() => process.exit(0)} />,
+    <App client={client} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
   );
 }
 

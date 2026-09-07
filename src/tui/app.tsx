@@ -100,7 +100,12 @@ function extractText(parts: unknown): string {
   return out.join("");
 }
 
-export function App({ client, onQuit }: { client: AppServer; onQuit: () => void }) {
+export function App({ client, onQuit, resumeId, modelId }: {
+  client: AppServer;
+  onQuit: () => void;
+  resumeId?: string | null;
+  modelId?: string | null;
+}) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sel, setSel] = useState(0);
   const [msgs, setMsgs] = useState<TurnMessage[]>([]);
@@ -283,6 +288,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         },
         mode: "build",
         persistence: "immediate",
+        model: modelId ? { providerId: "zai", modelId } : undefined,
       })) as { session?: SessionRow };
       const row = res.session;
       if (!row) throw new Error("create returned no session");
