@@ -58,6 +58,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [status, setStatus] = useState("connecting…");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [thinking, setThinking] = useState("");
   const dims = useTerminalDimensions();
   const sideInner = 34 - 2; // sidebar width minus borders
   const maxTitle = sideInner - 1 /* pad */ - 2 /* cursor */;
@@ -78,6 +79,18 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     }
   };
 
+  const subscribe = async (sessionId: string) => {
+    try {
+      await client.request("session/subscribe", {
+        sessionId,
+        deliveryKind: "desktop-continuous",
+        includeSnapshot: false,
+      });
+    } catch (e) {
+      setStatus(`subscribe failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
   const open = async (row: SessionRow) => {
     setStatus(`opening ${row.sessionId.slice(0, 13)}…`);
     try {
@@ -91,6 +104,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       }));
       setMsgs(turns);
       setActiveId(row.sessionId);
+      await subscribe(row.sessionId);
       setStatus(`${row.title || row.sessionId.slice(0, 13)} — ${turns.length} messages · i to type`);
     } catch (e) {
       setStatus(`open failed: ${e instanceof Error ? e.message : e}`);
@@ -114,6 +128,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       setSel(0);
       setMsgs([]);
       setActiveId(row.sessionId);
+      await subscribe(row.sessionId);
       setStatus(`new ${row.sessionId.slice(0, 13)} · i to type`);
     } catch (e) {
       setStatus(`create failed: ${e instanceof Error ? e.message : e}`);
@@ -140,20 +155,42 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       const params = msg.params as Record<string, unknown> | undefined;
       if (method === "session/event") {
         const payload = (params?.payload ?? {}) as Record<string, unknown>;
-        if (typeof payload.content === "string") {
+        const type = String(payload.type ?? payload.kind ?? "");
+        const appendTail = (delta: string) =>
           setMsgs((m) => {
             if (m.length === 0) return m;
             const last = m[m.length - 1];
             if (last.role !== "assistant") return m;
-            return [...m.slice(0, -1), { ...last, text: last.text + payload.content }];
+            return [...m.slice(0, -1), { ...last, text: last.text + delta }];
           });
-        } else if (typeof payload.response === "string") {
+        if (type === "text_delta") {
+          const d = (payload.delta ?? payload.text ?? payload.content) as string | undefined;
+          if (typeof d === "string" && d) appendTail(d);
+        } else if (type === "reasoning_delta") {
+          const d = (payload.delta ?? payload.text ?? payload.content) as string | undefined;
+          if (typeof d === "string" && d) setThinking((t) => t + d);
+        } else if (typeof payload.content === "string" && payload.stopReason) {
+          // final authoritative turn content + usage
+          const usage = payload.usage as Record<string, unknown> | undefined;
+          setMsgs((m) => {
+            if (m.length === 0) return m;
+            const last = m[m.length - 1];
+            if (last.role !== "assistant") return m;
+            return [...m.slice(0, -1), { ...last, text: payload.content as string }];
+          });
+          setThinking("");
+          if (usage && typeof usage.totalTokens === "number") {
+            setStatus(`turn done · ${usage.totalTokens} tokens · i to type`);
+          }
+        } else if (typeof payload.response === "string" && !payload.usage) {
           setMsgs((m) => {
             if (m.length === 0) return m;
             const last = m[m.length - 1];
             if (last.role !== "assistant" || last.text) return m;
             return [...m.slice(0, -1), { ...last, text: payload.response as string }];
           });
+        } else if (payload.title && payload.previousTitle === "") {
+          setStatus(`${String(payload.title).slice(0, 40)}`);
         }
       } else if (method === "state.updated") {
         const patch = (params?.patch ?? {}) as Record<string, unknown>;
@@ -161,7 +198,6 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         if (patch.status === "idle" || patch.status === "completed") setRunning(false);
       } else if (method === "v4/telemetry/event" && params?.kind === "turn.terminal") {
         setRunning(false);
-        setStatus("turn complete · i to type");
         void refresh();
       }
     });
@@ -227,7 +263,10 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
                   content={`${m.role === "user" ? "you" : m.role}${m.model ? ` (${m.model})` : ""}`}
                   fg={m.role === "user" ? C.user : C.assistant}
                 />
-                <text content={m.text.slice(0, 2000) || "∅"} fg={C.fg} />
+                <text content={m.text.slice(0, 2000) || (running ? "…" : "∅")} fg={C.fg} />
+                {running && i === msgs.length - 1 && thinking ? (
+                  <text content={thinking.slice(-200)} fg={C.faint} />
+                ) : null}
               </box>
             ))
           )}

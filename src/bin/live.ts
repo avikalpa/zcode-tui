@@ -28,15 +28,18 @@ const sv = new AppServer({
     let kind: string | undefined;
     let summary = "";
     const params = m.params as Record<string, unknown> | undefined;
-    if (method === "v4/telemetry/event") {
+    if (method === "session/event") {
+      const payload = (params?.payload ?? {}) as Record<string, unknown>;
+      kind = String(payload.type ?? payload.kind ?? "untyped");
+      const keys = Object.keys(payload).filter((k) => k !== "type" && k !== "kind");
+      summary = `keys=[${keys.join(",")}]=${JSON.stringify(payload).slice(0, 160)}`;
+    } else if (method === "v4/telemetry/event") {
       kind = String(params?.kind);
       const ch = params?.channel ? `/${String(params.channel)}` : "";
-      summary = `${kind}${ch} seq=${params?.eventSeq} sess=${String(params?.sessionId).slice(0, 13)}`;
-    } else if (method === "v4/conversation/frame") {
-      kind = String(params?.topic);
-      const payload = (params?.frame as Record<string, unknown>)?.payload as Record<string, unknown> | undefined;
-      const deltas = Array.isArray(payload?.deltas) ? payload!.deltas as Record<string, unknown>[] : [];
-      summary = `ord=${params?.logicalFrameOrdinal} ops=[${deltas.map((d) => String(d.op)).join(",")}]`;
+      summary = `${kind}${ch} seq=${params?.eventSeq}`;
+    } else if (method === "state.updated") {
+      kind = "state.updated";
+      summary = JSON.stringify(params).slice(0, 120);
     } else {
       summary = JSON.stringify(m).slice(0, 150);
     }
