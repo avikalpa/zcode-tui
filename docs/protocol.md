@@ -214,6 +214,11 @@ iterate).
   `{accepted:true, sessionId, stateRevision}`; `-32010` if a prompt is
   already running
 - `session/stop` `{sessionId}` → `{}`
+- `session/fork` `{sessionId, target?:{kind:"turn",turnIndex}|{kind:"message",messageId}|{kind:"checkpoint",checkpointId}|{kind:"latestCheckpoint"} (default), expectedRevision?}`
+  → `{forkedSessionId, parentSessionId?, …}`; refuses a session with no
+  checkpoint yet ("No workspace checkpoint is available yet")
+- `session/compact` `{sessionId, inputId?, instructions?, expectedRevision?}`
+  → `{response, snapshot, compact:{state,…}}`; accepted on empty sessions
 - workspace-scoped methods (`workspace/readState`, `mcp/list`,
   `plugins/list`, …) ALL take
   `{workspace:{workspacePath,workspaceKey}}`

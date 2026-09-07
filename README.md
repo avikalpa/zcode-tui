@@ -26,9 +26,23 @@ above the bridge work.
 - UX reference: the opencode2 TUI. Quality bar: beat ZCode's built-in
   default `tui` command (exists today; not polished).
 
+## Install / run
+
+- **Binary** (linux x64): grab `zcode-tui` from
+  [releases](https://github.com/avikalpa/zcode-tui/releases), `chmod +x`,
+  run. Requires the ZCode desktop install (`/opt/ZCode`) — the binary
+  spawns its packaged runtime as the protocol server.
+- **From source**: `bun install && bun run tui` (bun ≥ 1.1).
+
+## Keys
+
+`a` new session · `i` focus composer · Enter open/send · `m` cycle model ·
+`f` fork · `c` compact · `[`/`]` scroll conversation · `/` filter sidebar ·
+`t` theme (zai-dark/zai-light) · `r` refresh · `q` quit
+
 ## Status
 
-**FUNCTIONING (2026-09-07).** The TUI lists/resumes/streams/sends against
+**v0.1.0 — FUNCTIONING (2026-09-07).** The TUI lists/resumes/streams/sends against
 the real backend with the same store and identity as the desktop.
 
 - `bun run tui` — the TUI (keys: `a` new · `i` type · Enter send/open ·
@@ -39,7 +53,8 @@ the real backend with the same store and identity as the desktop.
 
 Phases landed: protocol captured (docs/protocol.md) · full loop proven ·
 TUI v0 read-only · send path + streaming · scrollbox/markdown polish ·
-model switcher · battery.
+model switcher · acceptance battery · fork + compact verbs · theme arms ·
+release v0.1.0.
 
 ## Layout
 
