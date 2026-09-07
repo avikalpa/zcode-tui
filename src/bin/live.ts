@@ -65,8 +65,9 @@ async function main() {
     workspace: WORKSPACE,
     mode: "build",
     persistence: "immediate",
-  }) as { session?: Record<string, unknown> };
-  sessionId = String((created.session ?? created).sessionId);
+  }) as Record<string, unknown>;
+  const createdSession = (created.session ?? created) as Record<string, unknown>;
+  sessionId = String(createdSession.sessionId);
   console.log(`created ${sessionId}`);
 
   const sub = await sv.request("session/subscribe", {
