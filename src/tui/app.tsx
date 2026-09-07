@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { SyntaxStyle } from "@opentui/core";
+import { SelectDialog, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 
@@ -73,6 +74,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [running, setRunning] = useState(false);
   const [thinking, setThinking] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<"model" | "palette" | null>(null);
   const [theme, setTheme] = useState<ThemeName>("zai-dark");
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
@@ -464,7 +466,11 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       } else void refresh();
     }
     else if (key.name === "a") void newSession();
-    else if (key.name === "m") void cycleModel();
+    else if (key.name === "m") {
+      if (models.length > 0) setDialog("model");
+      else setStatus("model catalog not loaded yet");
+    }
+    else if (key.name === "k" && key.ctrl) setDialog("palette");
     else if (key.name === "t") setTheme((t) => (t === "zai-dark" ? "zai-light" : "zai-dark"));
     else if (key.name === "o") void cycleMode();
     else if (key.name === "e") void toggleThinking();
@@ -478,6 +484,44 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
 
   const inputRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
 
+  if (dialog === "model") {
+    return (
+      <SelectDialog
+        title="model"
+        options={models.map((m, i) => ({ id: m.modelId, label: m.label, description: `${m.providerId}/${m.modelId}`, value: m })) as DialogOption<{ label: string; providerId: string; modelId: string }>[]}
+        currentId={modelIdx >= 0 ? models[modelIdx]?.modelId : undefined}
+        onSelect={(m) => {
+          if (!activeId) { setDialog(null); return; }
+          void client.request("session/setModel", { sessionId: activeId, model: { providerId: m.providerId, modelId: m.modelId } })
+            .then(() => { setModelIdx(models.findIndex((x) => x.modelId === m.modelId)); setStatus(`model → ${m.label} (${m.modelId})`); })
+            .catch((e) => setStatus(`setModel failed: ${e instanceof Error ? e.message : e}`));
+          setDialog(null);
+        }}
+        onClose={() => setDialog(null)}
+      />
+    );
+  }
+  if (dialog === "palette") {
+    const verbs: DialogOption<() => void>[] = [
+      { id: "new", label: "new session", value: () => void newSession() },
+      { id: "model", label: "switch model…", value: () => setDialog("model") },
+      { id: "mode", label: "cycle mode (plan/build/edit/yolo/auto)", value: () => void cycleMode() },
+      { id: "think", label: "toggle thinking", value: () => void toggleThinking() },
+      { id: "fork", label: "fork session", value: () => void forkActive() },
+      { id: "compact", label: "compact session", value: () => void compactActive() },
+      { id: "theme", label: "toggle theme", value: () => setTheme((t) => (t === "zai-dark" ? "zai-light" : "zai-dark")) },
+      { id: "refresh", label: "refresh sessions", value: () => void refresh() },
+      { id: "quit", label: "quit", value: () => onQuit() },
+    ];
+    return (
+      <SelectDialog
+        title="commands"
+        options={verbs}
+        onSelect={(fn) => { setDialog(null); setTimeout(fn, 30); }}
+        onClose={() => setDialog(null)}
+      />
+    );
+  }
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
       <box style={{ flexDirection: "row", flexGrow: 1 }}>
