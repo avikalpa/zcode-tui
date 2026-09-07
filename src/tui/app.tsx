@@ -446,21 +446,23 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     setHistory(recentInputs(process.cwd(), 50));
     void refresh();
     void loadModels();
-    // v4 sessions-index subscription: delivers a snapshot at boot; cross-
-    // instance live deltas are desktop-host-only (measured — see docs).
-    client
-      .request("v4/conversation/subscribe", {
-        topic: `sessions-index/${process.cwd()}`,
-        connectionId: `tui-${Math.random().toString(36).slice(2, 10)}`,
-        clientMode: "desktop-continuous",
-      })
-      .catch(() => {});
+    if (process.env.ZCODE_TUI_DISABLE_V4 !== "1") {
+      // v4 sessions-index subscription: snapshot at boot (see docs).
+      client
+        .request("v4/conversation/subscribe", {
+          topic: `sessions-index/${process.cwd()}`,
+          connectionId: `tui-${Math.random().toString(36).slice(2, 10)}`,
+          clientMode: "desktop-continuous",
+        })
+        .catch(() => {});
+    }
     // freshness: light poll (the desktop gets push via its host gateway)
     const poll = setInterval(() => void refresh(), 20000);
     return () => clearInterval(poll);
   }, []);
 
   useKeyboard((key) => {
+    if (dialog !== null) return; // the dialog's own handler owns keys
     if (askRef.current) {
       const resolve = askRef.current;
       if (key.name === "y") {

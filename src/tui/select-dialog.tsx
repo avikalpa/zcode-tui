@@ -1,7 +1,10 @@
-// opencode2-style select dialog: filter input + option list (React).
-// Typing filters natively via the input; Up/Down move the selection;
-// Enter selects; Esc cancels. App renders it in place of the main pane.
+// opencode2-style select dialog (React, global-key variant).
+// No focused <input>: while open, the dialog's own useKeyboard consumes
+// printable chars (filter), Up/Down (selection), Enter (select), Esc
+// (cancel). This avoids OpenTUI focus routing entirely — a focused input
+// that unmounts leaves a zombie focus target and eats all later keys.
 import { useState } from "react";
+import { useKeyboard } from "@opentui/react";
 
 export interface DialogOption<T> {
   id: string;
@@ -35,6 +38,19 @@ export function SelectDialog<T>({
   const winStart = Math.max(0, Math.min(sel - 8, shown.length - 12));
   const visible = shown.slice(winStart, winStart + 12);
 
+  useKeyboard((key) => {
+    if (key.name === "escape") { onClose(); return; }
+    if (key.name === "return") { select(); return; }
+    if (key.name === "up") { setIdx((i) => Math.max(0, i - 1)); return; }
+    if (key.name === "down") { setIdx((i) => Math.min(shown.length - 1, i + 1)); return; }
+    if (key.name === "backspace") { setFilter((f) => f.slice(0, -1)); setIdx(0); return; }
+    if (key.sequence && !key.ctrl && /^[\x20-\x7E]+$/.test(key.sequence)) {
+      setFilter((f) => f + key.sequence);
+      setIdx(0);
+      return;
+    }
+  });
+
   const select = () => {
     const o = shown[sel];
     if (o) onSelect(o.value, o.id);
@@ -50,21 +66,7 @@ export function SelectDialog<T>({
       title={title}
     >
       <box style={{ height: 1, flexShrink: 0, backgroundColor: "#202020" }}>
-        <input
-          ref={(r: never) => (r as { focus?: () => void })?.focus?.()}
-          placeholder="type to filter…"
-          onChange={(v: string) => {
-            setFilter(v);
-            setIdx(0);
-          }}
-          onKeyDown={((key: { name?: string }) => {
-            if (key.name === "up") { setIdx((i) => Math.max(0, i - 1)); return; }
-            if (key.name === "down") { setIdx((i) => Math.min(shown.length - 1, i + 1)); return; }
-            if (key.name === "escape") { onClose(); return; }
-          }) as never}
-          onSubmit={(() => select()) as never}
-          style={{ backgroundColor: "#202020", focusedBackgroundColor: "#202020", textColor: "#d4d4d4" }}
-        />
+        <text content={` ${filter || "type to filter…"}▏`} fg={filter ? "#ffffff" : "#6b6b6b"} />
       </box>
       {visible.map((o, i) => {
         const abs = winStart + i;

@@ -10,9 +10,14 @@ export function projectIdForCwd(cwd: string): string {
 export function recentInputs(cwd: string, limit = 50): string[] {
   const dbPath = `${process.env.HOME}/.zcode/cli/db/db.sqlite`;
   if (!existsSync(dbPath)) return [];
-  const db = new Database(dbPath, { readonly: true });
+  let db: Database;
   try {
+    db = new Database(dbPath, { readonly: true });
     db.exec("PRAGMA busy_timeout = 2000");
+  } catch {
+    return [];
+  }
+  try {
     const rows = db
       .query(
         `SELECT text FROM input_history

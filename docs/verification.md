@@ -36,3 +36,18 @@ Latest run: 4/8 in-script; every "failing" stage has an isolated proof:
 
 First real-terminal pass is the owner's to eyeball (per the PTY-proof
 law: declare per-row only after reading the viewport).
+
+## Update (late 2026-09-07, same sitting)
+
+- **Real bug found by the staged pass and fixed**: a focused `<input>` that
+  unmounts (dialog close) left OpenTUI's focus on a detached renderable —
+  every later keystroke vanished. SelectDialog now uses the GLOBAL
+  useKeyboard (no focused input at all); mode/thinking stages went
+  green in-combination immediately after.
+- Instrument law learned: raw PTY captures are frame-DIFFS; stripping
+  escapes must INSERT a space (adjacent fragments concatenate otherwise),
+  and status text redrawn cell-by-cell defeats regex markers. The staged
+  combined run over-packs: per-verb isolation is the reliable shape
+  (tools/verify.sh final form).
+- Boot shows an occasional long warm-up (backend reconnects all MCP
+  servers per spawn; network-dependent). Not a TUI defect; budget 8-25s.
