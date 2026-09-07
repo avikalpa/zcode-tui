@@ -12,6 +12,15 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 const MD_STYLE = SyntaxStyle.create();
 
+// ⛔ MODEL ALLOWLIST (owner ruling 2026-09-08): exactly these two on the zai
+// provider. Everything else the runtime catalog offers (glm-5.1, glm-4.7 —
+// the stale login-written list) is PAID and burned ~1B input tokens from
+// probe sessions before being banned here. The flash is the free tier.
+const ALLOWED_MODELS = [
+  { label: "GLM-5.3-Flash (free)", providerId: "zai", modelId: "glm-5.3-flash", isDefault: true },
+  { label: "GLM-5.3 (1M ctx)", providerId: "zai", modelId: "glm-5.3", isDefault: false },
+] as const;
+
 export interface SessionRow {
   sessionId: string;
   title: string;
@@ -164,13 +173,26 @@ export function App({ client, onQuit, resumeId, modelId }: {
     try {
       const ws = { workspacePath: process.cwd(), workspaceKey: process.cwd() };
       const res = (await client.request("workspace/readState", { workspace: ws })) as {
-        modelCatalog?: { available?: { label: string; ref: { providerId: string; modelId: string } }[] };
+        modelCatalog?: {
+          available?: { label: string; ref?: { providerId: string; modelId: string }; modelId?: string }[];
+        };
       };
-      const avail = (res.modelCatalog?.available ?? []).map((m) => ({
-        label: m.label, providerId: m.ref.providerId, modelId: m.ref.modelId,
+      const runtimeIds = new Set(
+        (res.modelCatalog?.available ?? []).map(
+          (m) => m.ref?.modelId ?? (m as { modelId?: string }).modelId ?? "",
+        ),
+      );
+      // The allowlist is the source of truth — the runtime catalog (a stale
+      // login-written list) must never re-introduce paid models here.
+      void runtimeIds;
+      const avail = ALLOWED_MODELS.map((m) => ({
+        label: m.label,
+        providerId: m.providerId,
+        modelId: m.modelId,
+        isDefault: m.isDefault,
       }));
       setModels(avail);
-      if (avail.length > 0) setModelIdx(0);
+      setModelIdx(avail.findIndex((m) => m.isDefault) >= 0 ? avail.findIndex((m) => m.isDefault) : 0);
     } catch {
       // catalog is optional polish; the status line already says why
     }
@@ -291,7 +313,9 @@ export function App({ client, onQuit, resumeId, modelId }: {
         },
         mode: "build",
         persistence: "immediate",
-        model: modelId ? { providerId: "zai", modelId } : undefined,
+        model: modelId
+          ? { providerId: "zai", modelId }
+          : { providerId: "zai", modelId: "glm-5.3-flash" },
       })) as { session?: SessionRow };
       const row = res.session;
       if (!row) throw new Error("create returned no session");
