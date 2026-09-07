@@ -33,6 +33,11 @@ export class AppServer {
     this.pushListeners.push(cb);
   }
 
+  /** Test hook: feed a message through the push listeners. */
+  emitPush(msg: Record<string, unknown>) {
+    for (const cb of this.pushListeners) cb(msg);
+  }
+
   constructor(
     readonly handlers: {
       onNotification?: (msg: Record<string, unknown>) => void;

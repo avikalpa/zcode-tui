@@ -287,6 +287,36 @@ first TUI send path; symptom: "streaming…" forever, answer only in store.)
 Baseline system-prompt cost observed: a trivial turn reports ~38.5k input
 tokens on glm-5.1 (system + memories + tools).
 
+### Tool-call flow (measured live; Bash ran end-to-end)
+
+`tool_input_start{toolCallId,toolName}` → `tool_input_delta` (JSON input
+streams) → `tool_input_end` → `tool_call{input:{command,description}}` →
+final-content event with `stopReason:"tool-calls"` → `scheduled{…,
+parallelGroupIndex,canRunParallel}` → `started{startedAt}` →
+`result{result:{success,content,perf:{totalMs}}}` → `batch{successCount,
+errorCount}` → `tool_result{anchorId,resultPartId,committedToolCallIds,
+committedAt}` → next model round (`iteration` counter in the
+`{messageCount,model,modelRef,toolCount,iteration}` event).
+
+Note: build mode auto-approved a read-only `echo` — no
+`interaction/requestPermission` fired for it. The permission-ask reply
+shape is still unpinned (needs a write/escalate tool).
+
+`state.updated` patches also carry `permission{mode}`, `thoughtLevel
+{available,current,defaultLevel}`, and the full model `available/current/
+lastUsed` triple (setModel persisted as workspace last-used).
+
+### v4 sessions-index subscription (live sidebar attempt)
+
+`v4/conversation/subscribe {topic:"sessions-index/<ws>", connectionId,
+clientMode:"desktop-continuous"}` → ack `{subscriptionId, mode:"snapshot",
+logEpoch}` + ONE snapshot `v4/conversation/frame`. Same- and cross-instance
+`session/create` produced NO follow-up delta frames (0 upserts over 8s) —
+live propagation needs whatever the desktop host adds on top (likely the
+`v4/connection/flow` registration + its gateway semantics). The
+subscription is kept in the TUI (harmless, delivers the snapshot); true
+live deltas are an open item.
+
 ## Not-our-layer notes
 
 - `out/main/chunk-WR3FEWGO.js` implements "web-remote-control" RPC framing

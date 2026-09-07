@@ -18,9 +18,14 @@ export interface SessionRow {
 }
 
 export interface TurnMessage {
-  role: string;
+  role: string; // "user" | "assistant" | "tool"
   text: string;
   model?: string;
+  toolName?: string;
+  toolCallId?: string;
+  toolOk?: boolean;
+  toolMs?: number;
+  toolOut?: string;
 }
 
 // zai arms from zcodereversed FINDINGS.md (desktop 3.11.2 theme tokens)
@@ -246,7 +251,22 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
             if (last.role !== "assistant") return m;
             return [...m.slice(0, -1), { ...last, text: last.text + delta }];
           });
-        if (type === "text_delta") {
+        if (type === "tool_call") {
+          setMsgs((m) => [...m, {
+            role: "tool",
+            text: String((payload.input as Record<string, unknown>)?.command ?? (payload.input as Record<string, unknown>)?.description ?? JSON.stringify(payload.input ?? {}).slice(0, 80)),
+            toolName: String(payload.toolName ?? "tool"),
+            toolCallId: String(payload.toolCallId ?? ""),
+          }]);
+        } else if (type === "result" && payload.toolCallId) {
+          const result = (payload.result ?? {}) as Record<string, unknown>;
+          setMsgs((m) => m.map((x) => x.toolCallId === payload.toolCallId ? {
+            ...x,
+            toolOut: String(result.content ?? result.error ?? "").slice(0, 200),
+            toolOk: result.success !== false,
+            toolMs: Number((result.perf as Record<string, unknown> | undefined)?.totalMs ?? 0) || undefined,
+          } : x));
+        } else if (type === "text_delta") {
           const d = (payload.delta ?? payload.text ?? payload.content) as string | undefined;
           if (typeof d === "string" && d) appendTail(d);
         } else if (type === "reasoning_delta") {
@@ -275,6 +295,30 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         } else if (payload.title && payload.previousTitle === "") {
           setStatus(`${String(payload.title).slice(0, 40)}`);
         }
+      } else if (method === "v4/conversation/frame") {
+        const frame = (params?.frame ?? {}) as Record<string, unknown>;
+        const payload = (frame.payload ?? {}) as Record<string, unknown>;
+        const deltas = Array.isArray(payload.deltas) ? (payload.deltas as Record<string, unknown>[]) : [];
+        for (const d of deltas) {
+          const op = String(d.op);
+          if (op.startsWith("session.upserted") && d.session) {
+            const s = d.session as Record<string, unknown>;
+            const row: SessionRow = {
+              sessionId: String(s.sessionId),
+              title: String(s.title ?? ""),
+              status: String(s.phase ?? s.status ?? "idle"),
+              mode: s.mode as string | undefined,
+              updatedAt: Number(s.lastActivityAt ?? Date.now()),
+            };
+            setSessions((prev) => {
+              const rest = prev.filter((x) => x.sessionId !== row.sessionId);
+              return [row, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
+            });
+          } else if (op.startsWith("session.deleted") || op.startsWith("session.removed")) {
+            const id = String((d.session as Record<string, unknown> | undefined)?.sessionId ?? d.sessionId ?? "");
+            setSessions((prev) => prev.filter((x) => x.sessionId !== id));
+          }
+        }
       } else if (method === "state.updated") {
         const patch = (params?.patch ?? {}) as Record<string, unknown>;
         if (patch.status === "running") setRunning(true);
@@ -289,6 +333,14 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   useEffect(() => {
     void refresh();
     void loadModels();
+    // Live sidebar: subscribe the workspace's sessions-index topic (v4 plane).
+    client
+      .request("v4/conversation/subscribe", {
+        topic: `sessions-index/${process.cwd()}`,
+        connectionId: `tui-${Math.random().toString(36).slice(2, 10)}`,
+        clientMode: "desktop-continuous",
+      })
+      .catch((e) => setStatus(`live sidebar off: ${e instanceof Error ? e.message : e}`));
   }, []);
 
   useKeyboard((key) => {
@@ -366,10 +418,17 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
                 const isTail = i === msgs.length - 1;
                 return (
                   <box key={i} style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
-                    <text
-                      content={`${m.role === "user" ? "you" : m.role}${m.model ? ` (${m.model})` : ""}`}
-                      fg={m.role === "user" ? C.user : C.assistant}
-                    />
+                    {m.role === "tool" ? (
+                      <text
+                        content={`⚙ ${m.toolName}: ${(m.toolOut ?? m.text).slice(0, 70)}${m.toolOk !== undefined ? (m.toolOk ? ` ✓${m.toolMs ? ` ${m.toolMs}ms` : ""}` : " ✗") : " …"}`}
+                        fg={m.toolOk === false ? C.user : C.faint}
+                      />
+                    ) : (
+                      <text
+                        content={`${m.role === "user" ? "you" : m.role}${m.model ? ` (${m.model})` : ""}`}
+                        fg={m.role === "user" ? C.user : C.assistant}
+                      />
+                    )}
                     {m.role === "assistant" && !(running && isTail) ? (
                       <markdown content={m.text || "∅"} syntaxStyle={MD_STYLE} />
                     ) : (
