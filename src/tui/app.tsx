@@ -62,15 +62,20 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [thinking, setThinking] = useState("");
+  const [filter, setFilter] = useState<string | null>(null);
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
+  const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const [modelIdx, setModelIdx] = useState(-1);
   const dims = useTerminalDimensions();
   const sideInner = 34 - 2; // sidebar width minus borders
   const maxTitle = sideInner - 1 /* pad */ - 2 /* cursor */;
   const maxRows = Math.max(1, Math.floor((dims.height - 4) / 2));
-  const start = Math.min(Math.max(0, sel - Math.floor(maxRows / 2)), Math.max(0, sessions.length - maxRows));
+  const shown = sessions.filter(
+    (s) => filter === null || (s.title ?? "").toLowerCase().includes(filter.toLowerCase()),
+  );
+  const start = Math.min(Math.max(0, sel - Math.floor(maxRows / 2)), Math.max(0, shown.length - maxRows));
   const activeTitle = activeId ? (sessions.find((s) => s.sessionId === activeId)?.title ?? "") : "";
-  const visible = sessions.slice(start, start + maxRows);
+  const visible = shown.slice(start, start + maxRows);
 
   const refresh = async () => {
     try {
@@ -247,14 +252,27 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   }, []);
 
   useKeyboard((key) => {
+    if (filter !== null) {
+      // filter capture mode: printable keys append, backspace deletes
+      if (key.name === "escape") setFilter(null);
+      else if (key.name === "backspace") setFilter((f) => ((f ?? "").length > 0 ? (f ?? "").slice(0, -1) : f));
+      else if (key.sequence && !key.ctrl && /^[\x20-\x7E]+$/.test(key.sequence)) {
+        setFilter((f) => (f ?? "") + key.sequence);
+        setSel(0);
+      }
+      return;
+    }
     if (key.name === "q" || key.name === "escape") onQuit();
+    else if (key.name === "/") setFilter("");
+    else if (key.name === "[") { const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = Math.max(0, (sb.scrollTop ?? 0) - 10); }
+    else if (key.name === "]") { const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = (sb.scrollTop ?? 0) + 10; }
     else if (key.name === "r") void refresh();
     else if (key.name === "a") void newSession();
     else if (key.name === "m") void cycleModel();
     else if (key.name === "i") inputRef.current?.focus();
-    else if (key.name === "down" || key.name === "j") setSel((s) => Math.min(s + 1, sessions.length - 1));
+    else if (key.name === "down" || key.name === "j") setSel((s) => Math.min(s + 1, shown.length - 1));
     else if (key.name === "up" || key.name === "k") setSel((s) => Math.max(s - 1, 0));
-    else if (key.name === "return" && sessions[sel]) void open(sessions[sel]);
+    else if (key.name === "return" && shown[sel]) void open(shown[sel]);
   });
 
   const inputRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
@@ -300,7 +318,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
           {msgs.length === 0 ? (
             <text content="  a new session · Enter open · i type · r refresh · q quit" fg={C.faint} />
           ) : (
-            <scrollbox style={{ flexGrow: 1, flexDirection: "column" }}>
+            <scrollbox ref={scrollRef as never} style={{ flexGrow: 1, flexDirection: "column" }}>
               {msgs.map((m, i) => {
                 const isTail = i === msgs.length - 1;
                 return (
@@ -344,6 +362,11 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
           <text content={` ${activeId ? activeId.slice(0, 18) : "no active session"}`} fg={C.faint} />
         </box>
       </box>
+      {filter !== null ? (
+        <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
+          <text content={` filter: ${filter}▏ (Esc clears · type to match titles)`} fg={C.brand} />
+        </box>
+      ) : null}
       {/* status bar */}
       <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
         <text content={` zcode-tui · ${status}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
