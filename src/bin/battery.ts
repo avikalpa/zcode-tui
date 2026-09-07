@@ -47,6 +47,24 @@ try {
   const read = (await sv.request("session/read", { sessionId })) as Record<string, unknown>;
   check("session/read", read.sessionId === sessionId || read.messages !== undefined);
 
+  // A fresh session has no checkpoint — fork must refuse it (contract).
+  const forkErr = await sv.request("session/fork", {
+    sessionId, target: { kind: "latestCheckpoint" },
+  }).then(() => null, (e: Error) => e);
+  check(
+    "session/fork refuses fresh session",
+    forkErr !== null && /checkpoint/i.test(forkErr.message),
+    forkErr?.message.slice(0, 60),
+  );
+
+  const compacted = await sv.request("session/compact", { sessionId })
+    .then((r) => r as { compact?: { state?: string } }, (e: Error) => e);
+  const compactState = compacted instanceof Error ? undefined : compacted.compact?.state;
+  check(
+    "session/compact on empty session",
+    compacted instanceof Error || typeof compactState === "string",
+    compacted instanceof Error ? compacted.message.slice(0, 60) : compactState,
+  );
   const stopped = await sv.request("session/stop", { sessionId });
   check("session/stop", stopped !== undefined);
 

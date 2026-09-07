@@ -122,6 +122,40 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     }
   };
 
+  const forkActive = async () => {
+    if (!activeId || running) return;
+    setStatus("forking…");
+    try {
+      const res = (await client.request("session/fork", {
+        sessionId: activeId,
+        target: { kind: "latestCheckpoint" },
+      })) as { forkedSessionId?: string };
+      const fid = res.forkedSessionId;
+      if (!fid) throw new Error("no forkedSessionId in response");
+      setMsgs([]);
+      setActiveId(fid);
+      await subscribe(fid);
+      setStatus(`fork ${fid.slice(0, 13)} · i to type`);
+      void refresh();
+    } catch (e) {
+      setStatus(`fork failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const compactActive = async () => {
+    if (!activeId || running) return;
+    setStatus("compacting…");
+    try {
+      const res = (await client.request("session/compact", { sessionId: activeId })) as {
+        compact?: { state?: string };
+      };
+      setStatus(`compact: ${res.compact?.state ?? "done"}`);
+      void open({ sessionId: activeId, title: activeTitle, status: "", updatedAt: 0 });
+    } catch (e) {
+      setStatus(`compact failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
   const subscribe = async (sessionId: string) => {
     try {
       await client.request("session/subscribe", {
@@ -269,6 +303,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     else if (key.name === "r") void refresh();
     else if (key.name === "a") void newSession();
     else if (key.name === "m") void cycleModel();
+    else if (key.name === "f") void forkActive();
+    else if (key.name === "c") void compactActive();
     else if (key.name === "i") inputRef.current?.focus();
     else if (key.name === "down" || key.name === "j") setSel((s) => Math.min(s + 1, shown.length - 1));
     else if (key.name === "up" || key.name === "k") setSel((s) => Math.max(s - 1, 0));
