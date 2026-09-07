@@ -38,7 +38,8 @@ above the bridge work.
 
 `a` new session · `i` focus composer · Enter open/send · `m` cycle model ·
 `f` fork · `c` compact · `[`/`]` scroll conversation · `/` filter sidebar ·
-`t` theme (zai-dark/zai-light) · `r` refresh · `q` quit
+`t` theme (zai-dark/zai-light) · `r` refresh · `q` quit ·
+permission asks: `y` allow / `n` deny
 
 ## Status
 

@@ -299,8 +299,16 @@ committedAt}` → next model round (`iteration` counter in the
 `{messageCount,model,modelRef,toolCount,iteration}` event).
 
 Note: build mode auto-approved a read-only `echo` — no
-`interaction/requestPermission` fired for it. The permission-ask reply
-shape is still unpinned (needs a write/escalate tool).
+`interaction/requestPermission` fired for it. Write/high-risk tools DO ask:
+
+`interaction/requestPermission` params: `{input:{…tool input…}, reason,
+requestId:"perm_<uuid>", riskLevel:"medium|high", sessionId, options:
+[{optionId:"allow_once", kind:"allow_once", name:"Allow once", response:
+{decision:"allow",…}}, …]}`. **Reply `{decision:"allow"}`** (proven live:
+echo event `decision:"allow"` → `result.success:true` → batch 1/0 → turn
+completed). Replying with the option OBJECT is rejected (recorded deny).
+Server echoes every resolution as a
+`{requestId, toolCallId, decision, reason}` event.
 
 `state.updated` patches also carry `permission{mode}`, `thoughtLevel
 {available,current,defaultLevel}`, and the full model `available/current/

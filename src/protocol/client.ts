@@ -27,10 +27,17 @@ export class AppServer {
   >();
   private buffer = "";
   private pushListeners: ((msg: Record<string, unknown>) => void)[] = [];
+  private askListeners: ((msg: Record<string, unknown>) => unknown)[] = [];
 
   /** Register a listener for server pushes (no-id notifications). */
   onPush(cb: (msg: Record<string, unknown>) => void) {
     this.pushListeners.push(cb);
+  }
+
+  /** Register a handler for server→client requests (asks). The handler's
+   * return value (or resolved promise) is sent back as the response. */
+  onAsk(cb: (msg: Record<string, unknown>) => unknown) {
+    this.askListeners.push(cb);
   }
 
   /** Test hook: feed a message through the push listeners. */
@@ -91,6 +98,11 @@ export class AppServer {
       if (msg.method !== undefined && msg.id !== undefined) {
         // server→client request (ids look like "server-<n>")
         this.handlers.onServerRequest?.(msg);
+        for (const cb of this.askListeners) {
+          Promise.resolve(cb(msg))
+            .then((result) => this.respond(msg.id as string, result ?? {}))
+            .catch(() => this.respond(msg.id as string, {}));
+        }
         continue;
       }
       const id = msg.id !== undefined ? String(msg.id) : undefined;

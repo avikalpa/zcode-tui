@@ -73,6 +73,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [thinking, setThinking] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeName>("zai-dark");
+  const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
+  const askRef = useRef<((v: unknown) => void) | null>(null);
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const [modelIdx, setModelIdx] = useState(-1);
@@ -238,6 +240,25 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
 
   // Live turn updates: subscribe once, mutate the streaming assistant tail.
   useEffect(() => {
+    client.onAsk((msg) => {
+      const method = String(msg.method);
+      const params = (msg.params ?? {}) as Record<string, unknown>;
+      if (method === "session/requestRuntimePreferences") {
+        return { nativeSearchEnhancementsEnabled: false };
+      }
+      if (method === "interaction/requestPermission") {
+        const input = (params.input ?? {}) as Record<string, unknown>;
+        const detail = String(input.command ?? input.file_path ?? input.path ?? input.url ?? JSON.stringify(input).slice(0, 60));
+        const toolName = String(params.toolName ?? "tool");
+        const riskLevel = String(params.riskLevel ?? "");
+        return new Promise((resolve) => {
+          askRef.current = resolve as (v: unknown) => void;
+          setAsk({ toolName, detail, riskLevel });
+          setStatus(`permission: ${toolName}`);
+        });
+      }
+      return {};
+    });
     client.onPush((msg) => {
       const method = String(msg.method);
       const params = msg.params as Record<string, unknown> | undefined;
@@ -344,6 +365,21 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   }, []);
 
   useKeyboard((key) => {
+    if (askRef.current) {
+      const resolve = askRef.current;
+      if (key.name === "y") {
+        askRef.current = null;
+        setAsk(null);
+        resolve({ decision: "allow" });
+        setStatus("allowed");
+      } else if (key.name === "n" || key.name === "escape") {
+        askRef.current = null;
+        setAsk(null);
+        resolve({ decision: "deny" });
+        setStatus("denied");
+      }
+      return;
+    }
     if (filter !== null) {
       // filter capture mode: printable keys append, backspace deletes
       if (key.name === "escape") setFilter(null);
@@ -464,6 +500,11 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
           <text content={` ${activeId ? activeId.slice(0, 18) : "no active session"}`} fg={C.faint} />
         </box>
       </box>
+      {ask ? (
+        <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
+          <text content={` ⚠ ${ask.toolName}${ask.riskLevel ? ` (${ask.riskLevel})` : ""}: ${ask.detail.slice(0, 55)} — y allow / n deny`} fg={C.user} />
+        </box>
+      ) : null}
       {filter !== null ? (
         <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
           <text content={` filter: ${filter}▏ (Esc clears · type to match titles)`} fg={C.brand} />
