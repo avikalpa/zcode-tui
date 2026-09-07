@@ -75,6 +75,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [filter, setFilter] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeName>("zai-dark");
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
+  const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
   const [page, setPage] = useState(0); // 0 = live tail; N = pages back
@@ -294,6 +295,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         const detail = String(input.command ?? input.file_path ?? input.path ?? input.url ?? JSON.stringify(input).slice(0, 60));
         const toolName = String(params.toolName ?? "tool");
         const riskLevel = String(params.riskLevel ?? "");
+        const opts = Array.isArray(params.options) ? params.options as Record<string, unknown>[] : [];
+        askOptionsRef.current = opts.map((o) => ({ id: String(o.optionId), response: o.response }));
         return new Promise((resolve) => {
           askRef.current = resolve as (v: unknown) => void;
           setAsk({ toolName, detail, riskLevel });
@@ -583,7 +586,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       </box>
       {ask ? (
         <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
-          <text content={` ⚠ ${ask.toolName}${ask.riskLevel ? ` (${ask.riskLevel})` : ""}: ${ask.detail.slice(0, 55)} — y allow / n deny`} fg={C.user} />
+          <text content={` ⚠ ${ask.toolName}${ask.riskLevel ? ` (${ask.riskLevel})` : ""}: ${ask.detail.slice(0, 45)} — y allow · a always · n deny`} fg={C.user} />
         </box>
       ) : null}
       {filter !== null ? (
