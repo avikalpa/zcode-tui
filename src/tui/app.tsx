@@ -77,6 +77,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
+  const [page, setPage] = useState(0); // 0 = live tail; N = pages back
   const [mode, setMode] = useState<string | undefined>(undefined);
   const [history, setHistory] = useState<string[]>([]);
   const historyIdx = useRef(-1);
@@ -227,6 +228,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       }));
       setMsgs(turns);
       setActiveId(row.sessionId);
+      setPage(0);
       await subscribe(row.sessionId);
       setStatus(`${row.title || row.sessionId.slice(0, 13)} — ${turns.length} messages · i to type`);
     } catch (e) {
@@ -251,6 +253,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       setSel(0);
       setMsgs([]);
       setActiveId(row.sessionId);
+      setPage(0);
       await subscribe(row.sessionId);
       setStatus(`new ${row.sessionId.slice(0, 13)} · i to type`);
     } catch (e) {
@@ -261,6 +264,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const send = async (content: string) => {
     if (!activeId || running) return;
     setRunning(true);
+    setPage(0);
     setHistory((h) => [content, ...h.filter((x) => x !== content)]);
     historyIdx.current = -1;
     setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "" }]);
@@ -440,8 +444,14 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     }
     if (key.name === "q" || key.name === "escape") onQuit();
     else if (key.name === "/") setFilter("");
-    else if (key.name === "[") { const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = Math.max(0, (sb.scrollTop ?? 0) - 10); }
-    else if (key.name === "]") { const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = (sb.scrollTop ?? 0) + 10; }
+    else if (key.name === "[") {
+      if (page * 30 < msgs.length) setPage((p) => p + 1);
+      const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = Math.max(0, (sb.scrollTop ?? 0) - 10);
+    }
+    else if (key.name === "]") {
+      if (page > 0) setPage((p) => p - 1);
+      const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = (sb.scrollTop ?? 0) + 10;
+    }
     else if (key.name === "r") {
       if (lost) {
         setStatus("respawning backend…");
@@ -507,8 +517,11 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
             <text content="  a new session · Enter open · i type · r refresh · q quit" fg={C.faint} />
           ) : (
             <scrollbox ref={scrollRef as never} style={{ flexGrow: 1, flexDirection: "column" }}>
-              {msgs.map((m, i) => {
-                const isTail = i === msgs.length - 1;
+              {(() => {
+                const end = Math.max(30, msgs.length - page * 30);
+                const startIdx = Math.max(0, end - 30);
+                return msgs.slice(startIdx, end).map((m, i) => {
+                const isTail = page === 0 && startIdx + i === msgs.length - 1;
                 return (
                   <box key={i} style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
                     {m.role === "tool" ? (
@@ -532,7 +545,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
                     ) : null}
                   </box>
                 );
-              })}
+                });
+              })()}
             </scrollbox>
           )}
         </box>
