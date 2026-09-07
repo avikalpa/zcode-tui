@@ -23,18 +23,22 @@ export interface TurnMessage {
   model?: string;
 }
 
-const C = {
-  bg: "#161616",
-  chrome: "#202020",
-  border: "#ffffff1a",
-  fg: "#d4d4d4",
-  subtle: "#a3a3a3",
-  faint: "#6b6b6b",
-  brand: "#ffffff",
-  user: "#60a5fa",
-  assistant: "#2dd4bf",
-  selected: "#ffffff1a",
-};
+// zai arms from zcodereversed FINDINGS.md (desktop 3.11.2 theme tokens)
+const THEMES = {
+  "zai-dark": {
+    bg: "#161616", chrome: "#202020", border: "#ffffff1a",
+    fg: "#d4d4d4", subtle: "#a3a3a3", faint: "#6b6b6b",
+    brand: "#ffffff", user: "#60a5fa", assistant: "#2dd4bf",
+    selected: "#ffffff1a",
+  },
+  "zai-light": {
+    bg: "#f8f8f8", chrome: "#ffffff", border: "#0d0d0d1a",
+    fg: "#262626", subtle: "#595959", faint: "#8c8c8c",
+    brand: "#000000", user: "#2563eb", assistant: "#0f766e",
+    selected: "#0d0d0d0d",
+  },
+} as const;
+type ThemeName = keyof typeof THEMES;
 
 function relTime(ts: number): string {
   const s = Math.max(1, Math.floor((Date.now() - ts) / 1000));
@@ -63,10 +67,12 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [running, setRunning] = useState(false);
   const [thinking, setThinking] = useState("");
   const [filter, setFilter] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemeName>("zai-dark");
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const [modelIdx, setModelIdx] = useState(-1);
   const dims = useTerminalDimensions();
+  const C = THEMES[theme];
   const sideInner = 34 - 2; // sidebar width minus borders
   const maxTitle = sideInner - 1 /* pad */ - 2 /* cursor */;
   const maxRows = Math.max(1, Math.floor((dims.height - 4) / 2));
@@ -303,6 +309,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     else if (key.name === "r") void refresh();
     else if (key.name === "a") void newSession();
     else if (key.name === "m") void cycleModel();
+    else if (key.name === "t") setTheme((t) => (t === "zai-dark" ? "zai-light" : "zai-dark"));
     else if (key.name === "f") void forkActive();
     else if (key.name === "c") void compactActive();
     else if (key.name === "i") inputRef.current?.focus();
