@@ -7,6 +7,7 @@ import { SyntaxStyle } from "@opentui/core";
 import { SelectDialog, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 const MD_STYLE = SyntaxStyle.create();
 
@@ -85,6 +86,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [history, setHistory] = useState<string[]>([]);
   const historyIdx = useRef(-1);
   const [thoughtLevel, setThoughtLevel] = useState<string>("enabled");
+  const [ctx, setCtx] = useState<{ used: number; window: number } | null>(null);
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const [modelIdx, setModelIdx] = useState(-1);
@@ -344,6 +346,9 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         } else if (typeof payload.content === "string" && payload.stopReason) {
           // final authoritative turn content + usage
           const usage = payload.usage as Record<string, unknown> | undefined;
+          if (typeof payload.contextWindow === "number" && typeof usage?.inputTokens === "number") {
+            setCtx({ used: usage.inputTokens as number, window: payload.contextWindow as number });
+          }
           setMsgs((m) => {
             if (m.length === 0) return m;
             const last = m[m.length - 1];
@@ -404,6 +409,10 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   }, [client]);
 
   useEffect(() => {
+    try {
+      const saved = readFileSync(`${process.env.HOME}/.config/zcode-tui/theme`, "utf8").trim();
+      if (saved === "zai-light" || saved === "zai-dark") setTheme(saved as ThemeName);
+    } catch { /* first run */ }
     setHistory(recentInputs(process.cwd(), 50));
     void refresh();
     void loadModels();
@@ -471,7 +480,14 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       else setStatus("model catalog not loaded yet");
     }
     else if (key.name === "k" && key.ctrl) setDialog("palette");
-    else if (key.name === "t") setTheme((t) => (t === "zai-dark" ? "zai-light" : "zai-dark"));
+    else if (key.name === "t") setTheme((t) => {
+      const next = t === "zai-dark" ? "zai-light" : "zai-dark";
+      try {
+        mkdirSync(`${process.env.HOME}/.config/zcode-tui`, { recursive: true });
+        writeFileSync(`${process.env.HOME}/.config/zcode-tui/theme`, next);
+      } catch { /* best effort */ }
+      return next;
+    });
     else if (key.name === "o") void cycleMode();
     else if (key.name === "e") void toggleThinking();
     else if (key.name === "f") void forkActive();
@@ -640,7 +656,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       ) : null}
       {/* status bar */}
       <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
-        <text content={` zcode-tui${lost ? " [backend lost]" : ""} · ${status}${mode ? ` · ${mode}` : ""}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
+        <text content={` zcode-tui${lost ? " [backend lost]" : ""} · ${status}${mode ? ` · ${mode}` : ""}${ctx ? ` · ctx ${(ctx.used / 1000).toFixed(0)}k/${(ctx.window / 1000).toFixed(0)}k` : ""}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
       </box>
     </box>
   );
