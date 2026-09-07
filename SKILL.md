@@ -38,8 +38,12 @@ bun build --compile src/tui/main.tsx --outfile dist/zcode-tui
    (setproctitle) — never trust it for the desktop's own children.
 7. **OpenTUI core is ESM-with-TLA**: dynamic import; `@opentui/react/test-utils`
    gives headless `testRender`/`captureCharFrame`; `<input>` refs have
-   focus/blur/value; mock-keys pressKey/typeText target the renderer bridge,
-   NOT the React keyHandler (useKeyboard won't see them).
+   focus/blur/value and `onKeyDown` is OBSERVATIONAL (cannot consume keys —
+   arrows still move the caret; design dialogs accordingly); mock-keys
+   pressKey/typeText target the renderer bridge, NOT the React keyHandler
+   (useKeyboard won't see them — drive dialogs through a real PTY).
+8. **useKeyboard closures are fresh** (useEffectEvent) but a typed burst
+   may arrive as ONE KeyEvent per char — never assume batching.
 8. **zod is `.strict()` everywhere** — send `{}` first, read the error's
    named fields, iterate. That is the fastest schema discovery loop.
 
