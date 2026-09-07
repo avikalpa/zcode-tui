@@ -166,22 +166,6 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     }
   };
 
-  const cycleModel = async () => {
-    if (!activeId || models.length === 0) return;
-    const next = (modelIdx + 1) % models.length;
-    const m = models[next];
-    try {
-      await client.request("session/setModel", {
-        sessionId: activeId,
-        model: { providerId: m.providerId, modelId: m.modelId },
-      });
-      setModelIdx(next);
-      setStatus(`model → ${m.label} (${m.modelId})`);
-    } catch (e) {
-      setStatus(`setModel failed: ${e instanceof Error ? e.message : e}`);
-    }
-  };
-
   const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
 
   const cycleMode = async () => {
