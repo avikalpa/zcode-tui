@@ -323,7 +323,15 @@ logEpoch}` + ONE snapshot `v4/conversation/frame`. Same- and cross-instance
 live propagation needs whatever the desktop host adds on top (likely the
 `v4/connection/flow` registration + its gateway semantics). The
 subscription is kept in the TUI (harmless, delivers the snapshot); true
-live deltas are an open item.
+live deltas are an open item. DEEPER (static): the gateway's
+SessionsIndexPublisher has full delta-log machinery (ingestConversation/
+removeSession/resume/resync, deltaLog 512) and fanOutToIndex publishes on
+session events — but standalone `session/create`+turns in another instance
+produce no frames even with `v4/connection/flow {state:"drained"}` first.
+The desktop's host wires `getSessionWorkspaceId/getStoredSessionSummaries/
+listWorkspaceSessionIds/refreshLegacySessionSummaries` into the gateway;
+the missing live path is inside those host bindings. TUI uses a 20s poll
+for sidebar freshness.
 
 ## Not-our-layer notes
 

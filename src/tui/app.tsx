@@ -354,14 +354,18 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   useEffect(() => {
     void refresh();
     void loadModels();
-    // Live sidebar: subscribe the workspace's sessions-index topic (v4 plane).
+    // v4 sessions-index subscription: delivers a snapshot at boot; cross-
+    // instance live deltas are desktop-host-only (measured — see docs).
     client
       .request("v4/conversation/subscribe", {
         topic: `sessions-index/${process.cwd()}`,
         connectionId: `tui-${Math.random().toString(36).slice(2, 10)}`,
         clientMode: "desktop-continuous",
       })
-      .catch((e) => setStatus(`live sidebar off: ${e instanceof Error ? e.message : e}`));
+      .catch(() => {});
+    // freshness: light poll (the desktop gets push via its host gateway)
+    const poll = setInterval(() => void refresh(), 20000);
+    return () => clearInterval(poll);
   }, []);
 
   useKeyboard((key) => {
