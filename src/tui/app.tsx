@@ -1,7 +1,7 @@
 // zcode-tui v0 — the ZCode sessions surface on OpenTUI.
 // zai-dark tokens from zcodereversed FINDINGS.md (bg #161616, chrome #202020,
 // border white 10%, fg neutral-300).
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { SyntaxStyle } from "@opentui/core";
 import { SelectDialog, type DialogOption } from "./select-dialog";
@@ -56,6 +56,39 @@ function relTime(ts: number): string {
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
 }
+
+const TurnView = memo(function TurnView({
+  m, running, thinking, C, isTail,
+}: {
+  m: TurnMessage; running: boolean; thinking: string;
+  C: Record<keyof (typeof THEMES)["zai-dark"], string>; isTail: boolean;
+}) {
+  return (
+    <box style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
+      {m.role === "tool" ? (
+        <text
+          content={`⚙ ${m.toolName}: ${(m.toolOut ?? m.text).slice(0, 70)}${m.toolOk !== undefined ? (m.toolOk ? ` ✓${m.toolMs ? ` ${m.toolMs}ms` : ""}` : " ✗") : " …"}`}
+          fg={m.toolOk === false ? C.user : C.faint}
+        />
+      ) : (
+        <>
+          <text
+            content={`${m.role === "user" ? "you" : m.role}${m.model ? ` (${m.model})` : ""}`}
+            fg={m.role === "user" ? C.user : C.assistant}
+          />
+          {m.role === "assistant" && !running ? (
+            <markdown content={m.text || "∅"} syntaxStyle={MD_STYLE} />
+          ) : (
+            <text content={m.text || (running ? "…" : "∅")} fg={C.fg} />
+          )}
+          {running && isTail && thinking ? (
+            <text content={thinking.slice(-200)} fg={C.faint} />
+          ) : null}
+        </>
+      )}
+    </box>
+  );
+});
 
 function extractText(parts: unknown): string {
   if (!Array.isArray(parts)) return "";
@@ -626,27 +659,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
                 return msgs.slice(startIdx, end).map((m, i) => {
                 const isTail = page === 0 && startIdx + i === msgs.length - 1;
                 return (
-                  <box key={i} style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
-                    {m.role === "tool" ? (
-                      <text
-                        content={`⚙ ${m.toolName}: ${(m.toolOut ?? m.text).slice(0, 70)}${m.toolOk !== undefined ? (m.toolOk ? ` ✓${m.toolMs ? ` ${m.toolMs}ms` : ""}` : " ✗") : " …"}`}
-                        fg={m.toolOk === false ? C.user : C.faint}
-                      />
-                    ) : (
-                      <text
-                        content={`${m.role === "user" ? "you" : m.role}${m.model ? ` (${m.model})` : ""}`}
-                        fg={m.role === "user" ? C.user : C.assistant}
-                      />
-                    )}
-                    {m.role === "assistant" && !(running && isTail) ? (
-                      <markdown content={m.text || "∅"} syntaxStyle={MD_STYLE} />
-                    ) : (
-                      <text content={m.text || (running && isTail ? "…" : "∅")} fg={C.fg} />
-                    )}
-                    {running && isTail && thinking ? (
-                      <text content={thinking.slice(-200)} fg={C.faint} />
-                    ) : null}
-                  </box>
+                  <TurnView key={`${m.messageId ?? i}-${m.role}`} m={m} running={running} thinking={thinking} C={C} isTail={isTail} />
                 );
                 });
               })()}
