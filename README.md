@@ -69,3 +69,15 @@ release v0.1.0.
 - `docs/screenshots/` — captured character frames (real app, real data).
 - `docs/` — capture notes + evidence. `docs/evidence/strace-cli-50s.txt` is
   **local-only** (gitignored; contains owner conversation bytes).
+
+
+## Licence
+
+GPL-3.0-or-later — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Contributions welcome (see [CONTRIBUTING.md](CONTRIBUTING.md) and
+[CLA.md](CLA.md)); third-party notices in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+**Trademark:** ZCode is a trademark of Z.ai. zcode-tui is an unofficial,
+independent client for a locally installed ZCode runtime; it is not
+affiliated with or endorsed by Z.ai. See [TRADEMARKS.md](TRADEMARKS.md).

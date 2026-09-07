@@ -1,5 +1,5 @@
 {
-  "name": "zcode-tui",
+  "name": "@avikalpa/zcode-tui",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -22,5 +22,14 @@
     "@opentui/core": "^0.5.11",
     "@opentui/react": "^0.5.11",
     "react": "^19.2.8"
+  },
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/avikalpa/zcode-tui.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

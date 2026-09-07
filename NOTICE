@@ -1,0 +1,24 @@
+zcode-tui
+Copyright 2026 Avikalpa Kundu <avi@gour.top>
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE.
+
+zcode-tui is an unofficial, independent client. It is not affiliated with,
+endorsed by, or connected to Z.ai, and it contains no code from the ZCode
+desktop or runtime: it spawns the locally installed, unmodified ZCode runtime
+in protocol mode and speaks a documented wire protocol to it.
+
+Runtime dependencies (npm, per package.json; licences verified
+GPL-compatible at adoption — see THIRD-PARTY-NOTICES.md):
+  @opentui/core, @opentui/react          MIT   (Anomaly)
+  react                                  MIT   (Meta / open source)
+  typescript (devDependency)             Apache-2.0
+  diff (transitive)                      BSD-3-Clause
+  bun (runtime / build tool)             MIT   (Oven)
+
+The bundled release binaries are produced by `bun build --compile`; the Bun
+runtime is MIT-licensed. The corresponding source for every released binary
+is this repository at the tagged commit.
