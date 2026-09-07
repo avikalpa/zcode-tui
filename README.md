@@ -37,9 +37,10 @@ above the bridge work.
 ## Keys
 
 `a` new session · `i` focus composer · Enter open/send · `m` cycle model ·
-`f` fork · `c` compact · `[`/`]` scroll conversation · `/` filter sidebar ·
-`t` theme (zai-dark/zai-light) · `r` refresh · `q` quit ·
-permission asks: `y` allow / `n` deny
+`f` fork · `c` compact · `o` cycle mode (plan/build/edit/yolo/auto) ·
+`e` thinking on/off · `[`/`]` scroll conversation · `/` filter sidebar ·
+`t` theme (zai-dark/zai-light) · `r` refresh (r respawns if backend lost) ·
+`q` quit · permission asks: `y` allow / `n` deny
 
 ## Status
 

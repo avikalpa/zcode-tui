@@ -76,6 +76,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
+  const [mode, setMode] = useState<string | undefined>(undefined);
+  const [thoughtLevel, setThoughtLevel] = useState<string>("enabled");
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const [modelIdx, setModelIdx] = useState(-1);
@@ -133,6 +135,33 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       setStatus(`model → ${m.label} (${m.modelId})`);
     } catch (e) {
       setStatus(`setModel failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
+
+  const cycleMode = async () => {
+    if (!activeId) return;
+    const cur = MODES.includes((mode ?? "build") as never) ? (mode as string) : "build";
+    const next = MODES[(MODES.indexOf(cur as never) + 1) % MODES.length];
+    try {
+      await client.request("session/setMode", { sessionId: activeId, mode: next });
+      setMode(next);
+      setStatus(`mode → ${next}`);
+    } catch (e) {
+      setStatus(`setMode failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const toggleThinking = async () => {
+    if (!activeId) return;
+    const next = thoughtLevel === "disabled" ? "enabled" : "disabled";
+    try {
+      await client.request("session/setThoughtLevel", { sessionId: activeId, thoughtLevel: next });
+      setThoughtLevel(next);
+      setStatus(`thinking → ${next}`);
+    } catch (e) {
+      setStatus(`setThoughtLevel failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -347,6 +376,10 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         }
       } else if (method === "state.updated") {
         const patch = (params?.patch ?? {}) as Record<string, unknown>;
+        const modePatch = patch.mode as Record<string, unknown> | undefined;
+        if (modePatch && typeof modePatch.current === "string") setMode(modePatch.current);
+        const tl = patch.thoughtLevel as Record<string, unknown> | undefined;
+        if (tl && typeof tl.current === "string") setThoughtLevel(tl.current);
         if (patch.status === "running") setRunning(true);
         if (patch.status === "idle" || patch.status === "completed") setRunning(false);
       } else if (method === "v4/telemetry/event" && params?.kind === "turn.terminal") {
@@ -414,6 +447,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     else if (key.name === "a") void newSession();
     else if (key.name === "m") void cycleModel();
     else if (key.name === "t") setTheme((t) => (t === "zai-dark" ? "zai-light" : "zai-dark"));
+    else if (key.name === "o") void cycleMode();
+    else if (key.name === "e") void toggleThinking();
     else if (key.name === "f") void forkActive();
     else if (key.name === "c") void compactActive();
     else if (key.name === "i") inputRef.current?.focus();
@@ -528,7 +563,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       ) : null}
       {/* status bar */}
       <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
-        <text content={` zcode-tui${lost ? " [backend lost]" : ""} · ${status}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
+        <text content={` zcode-tui${lost ? " [backend lost]" : ""} · ${status}${mode ? ` · ${mode}` : ""}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
       </box>
     </box>
   );

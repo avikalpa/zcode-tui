@@ -39,20 +39,23 @@ describe("client framing (fake server)", () => {
 describe("app-server (packaged runtime)", () => {
   const haveRuntime = existsSync(ELECTRON_BIN) && existsSync(RUNTIME_CJS);
 
-  test("session/list returns real store sessions", { skip: !haveRuntime }, async () => {
+  test("session/list returns real store sessions", async () => {
+    if (!haveRuntime) return;
     const sv = new AppServer();
     const res = (await sv.request("session/list", { limit: 5 })) as { sessions?: unknown[] };
     expect(Array.isArray(res.sessions)).toBe(true);
     await sv.close();
   }, 20000);
 
-  test("request timeout rejects cleanly", { skip: !haveRuntime }, async () => {
+  test("request timeout rejects cleanly", async () => {
+    if (!haveRuntime) return;
     const sv = new AppServer();
     await expect(sv.request("v4/controller/subscribe", {}, 1500)).rejects.toThrow();
     await sv.close();
   }, 20000);
 
-  test("backend-lost fires and respawn restores service", { skip: !haveRuntime }, async () => {
+  test("backend-lost fires and respawn restores service", async () => {
+    if (!haveRuntime) return;
     const sv = new AppServer();
     let lost = false;
     sv.onBackendLost(() => { lost = true; });
