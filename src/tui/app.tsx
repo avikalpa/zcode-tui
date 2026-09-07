@@ -3,7 +3,10 @@
 // border white 10%, fg neutral-300).
 import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { SyntaxStyle } from "@opentui/core";
 import type { AppServer } from "../protocol/client";
+
+const MD_STYLE = SyntaxStyle.create();
 
 export interface SessionRow {
   sessionId: string;
@@ -59,11 +62,14 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [thinking, setThinking] = useState("");
+  const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
+  const [modelIdx, setModelIdx] = useState(-1);
   const dims = useTerminalDimensions();
   const sideInner = 34 - 2; // sidebar width minus borders
   const maxTitle = sideInner - 1 /* pad */ - 2 /* cursor */;
   const maxRows = Math.max(1, Math.floor((dims.height - 4) / 2));
   const start = Math.min(Math.max(0, sel - Math.floor(maxRows / 2)), Math.max(0, sessions.length - maxRows));
+  const activeTitle = activeId ? (sessions.find((s) => s.sessionId === activeId)?.title ?? "") : "";
   const visible = sessions.slice(start, start + maxRows);
 
   const refresh = async () => {
@@ -76,6 +82,38 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       setStatus(`${rows.length} sessions`);
     } catch (e) {
       setStatus(`error: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const loadModels = async () => {
+    try {
+      const ws = { workspacePath: process.cwd(), workspaceKey: process.cwd() };
+      const res = (await client.request("workspace/readState", { workspace: ws })) as {
+        modelCatalog?: { available?: { label: string; ref: { providerId: string; modelId: string } }[] };
+      };
+      const avail = (res.modelCatalog?.available ?? []).map((m) => ({
+        label: m.label, providerId: m.ref.providerId, modelId: m.ref.modelId,
+      }));
+      setModels(avail);
+      if (avail.length > 0) setModelIdx(0);
+    } catch {
+      // catalog is optional polish; the status line already says why
+    }
+  };
+
+  const cycleModel = async () => {
+    if (!activeId || models.length === 0) return;
+    const next = (modelIdx + 1) % models.length;
+    const m = models[next];
+    try {
+      await client.request("session/setModel", {
+        sessionId: activeId,
+        model: { providerId: m.providerId, modelId: m.modelId },
+      });
+      setModelIdx(next);
+      setStatus(`model → ${m.label} (${m.modelId})`);
+    } catch (e) {
+      setStatus(`setModel failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -205,12 +243,14 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
 
   useEffect(() => {
     void refresh();
+    void loadModels();
   }, []);
 
   useKeyboard((key) => {
     if (key.name === "q" || key.name === "escape") onQuit();
     else if (key.name === "r") void refresh();
     else if (key.name === "a") void newSession();
+    else if (key.name === "m") void cycleModel();
     else if (key.name === "i") inputRef.current?.focus();
     else if (key.name === "down" || key.name === "j") setSel((s) => Math.min(s + 1, sessions.length - 1));
     else if (key.name === "up" || key.name === "k") setSel((s) => Math.max(s - 1, 0));
@@ -254,21 +294,33 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
           style={{ flexGrow: 1, flexDirection: "column", borderStyle: "single", borderColor: C.border }}
           title="conversation"
         >
+          {activeTitle ? (
+            <text content={` ${activeTitle.slice(0, 60)}`} fg={C.subtle} />
+          ) : null}
           {msgs.length === 0 ? (
-            <text content="  select a session · Enter to open · r refresh · q quit" fg={C.faint} />
+            <text content="  a new session · Enter open · i type · r refresh · q quit" fg={C.faint} />
           ) : (
-            msgs.map((m, i) => (
-              <box key={i} style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
-                <text
-                  content={`${m.role === "user" ? "you" : m.role}${m.model ? ` (${m.model})` : ""}`}
-                  fg={m.role === "user" ? C.user : C.assistant}
-                />
-                <text content={m.text.slice(0, 2000) || (running ? "…" : "∅")} fg={C.fg} />
-                {running && i === msgs.length - 1 && thinking ? (
-                  <text content={thinking.slice(-200)} fg={C.faint} />
-                ) : null}
-              </box>
-            ))
+            <scrollbox style={{ flexGrow: 1, flexDirection: "column" }}>
+              {msgs.map((m, i) => {
+                const isTail = i === msgs.length - 1;
+                return (
+                  <box key={i} style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
+                    <text
+                      content={`${m.role === "user" ? "you" : m.role}${m.model ? ` (${m.model})` : ""}`}
+                      fg={m.role === "user" ? C.user : C.assistant}
+                    />
+                    {m.role === "assistant" && !(running && isTail) ? (
+                      <markdown content={m.text || "∅"} syntaxStyle={MD_STYLE} />
+                    ) : (
+                      <text content={m.text || (running && isTail ? "…" : "∅")} fg={C.fg} />
+                    )}
+                    {running && isTail && thinking ? (
+                      <text content={thinking.slice(-200)} fg={C.faint} />
+                    ) : null}
+                  </box>
+                );
+              })}
+            </scrollbox>
           )}
         </box>
       </box>
@@ -294,7 +346,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       </box>
       {/* status bar */}
       <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
-        <text content={` zcode-tui · ${status} `} fg={C.subtle} />
+        <text content={` zcode-tui · ${status}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
       </box>
     </box>
   );
