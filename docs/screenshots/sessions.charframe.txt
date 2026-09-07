@@ -1,0 +1,27 @@
+┌─sessions───────────────────────┐┌─conversation───────────────────────────────────────────────────┐
+│ › Continue zcode TUI campaign m││  a new session · Enter open · i type · r refresh · q quit      │
+│     idle · build · 1s ago      ││                                                                │
+│   ydesign Sidebar Row Lag Fix C││                                                                │
+│     idle · build · 6s ago      ││                                                                │
+│   Lobe Manager Campaign Dream I││                                                                │
+│     idle · build · 8s ago      ││                                                                │
+│   Ymacs M-x Command Palette and││                                                                │
+│     idle · build · 9s ago      ││                                                                │
+│   lobe-manager webapp with syst││                                                                │
+│     idle · build · 16s ago     ││                                                                │
+│   Audit Metadata SSOT Across CL││                                                                │
+│     idle · build · 20s ago     ││                                                                │
+│   Continue zcodereversed campai││                                                                │
+│     idle · build · 34s ago     ││                                                                │
+│   Continue practice-rs L3 Learn││                                                                │
+│     idle · build · 1m ago      ││                                                                │
+│   Continue practice-rs L2 Learn││                                                                │
+│     idle · build · 1m ago      ││                                                                │
+│   Multiplying 17 by 24         ││                                                                │
+│     idle · build · 7m ago      ││                                                                │
+└───Calculating─17─times─24──────┘└────────────────────────────────────────────────────────────────┘
+a new session · Enter opens selected · i to type                                                    
+ ○ idle no active session                                                                           
+                                                                                                    
+ zcode-tui · 83 sessions                                                                            
+

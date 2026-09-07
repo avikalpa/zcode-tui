@@ -251,6 +251,37 @@ mirror (`turn.started`, `model.request.status`, `usage.delta`,
 `send ack {accepted, stateRevision}` arrives immediately; first content at
 ~10.9 s wall (model latency included).
 
+### Live stream contract (phase-5 precision; probe:live classifies payloads)
+
+After `session/subscribe {sessionId, deliveryKind:"desktop-continuous"}`:
+
+- `session/event` with **typed** payloads: `type:"text_delta"`,
+  `type:"reasoning_delta"` (streaming deltas), plus untyped lifecycle
+  payloads discriminated by key shape:
+  - `{previousTitle,source,title}` — title generated/changed
+  - `{turnNumber,input,messageId,foregroundExecutionId,queryId}` — turn
+    started (echoes the user input)
+  - `{content,contextWindow,querySource,stopReason,usage,cacheHit,
+    contextUsageBreakdown,toolCallCount}` — **authoritative final turn
+    content** (replace the streamed tail with `content`)
+  - `{response,tokenCount,usage,toolCallCount,historyRoundCount,duration,
+    resultType,cacheStats}` — turn summary (backfills an empty tail)
+- `state.updated` `{patch:{status},reason,revision,scope,sessionId}` —
+  running/idle machine
+- `v4/telemetry/event` mirror: `turn.started`, `model.request.status`,
+  `usage.delta`, `turn.terminal`; also `process/mcpTelemetry`,
+  `process/resourceSample`, `computer-use/operation-event`
+- `session/event model_request_completed` (typed) carries provider
+  telemetry: `timeToFirstContentMs`, `timeToFirstTextMs`, `finishReason`,
+  `usage`, `maxAttempts`, `streamStallCount`, … (stats-line fodder)
+
+⚠ **A session MUST be subscribed or the UI sees no events** — send is
+accepted and runs server-side silently otherwise. (This exact bug bit the
+first TUI send path; symptom: "streaming…" forever, answer only in store.)
+
+Baseline system-prompt cost observed: a trivial turn reports ~38.5k input
+tokens on glm-5.1 (system + memories + tools).
+
 ## Not-our-layer notes
 
 - `out/main/chunk-WR3FEWGO.js` implements "web-remote-control" RPC framing

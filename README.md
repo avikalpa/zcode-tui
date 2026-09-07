@@ -28,15 +28,23 @@ above the bridge work.
 
 ## Status
 
-- **Phase 1 (2026-09-07): protocol captured.** Topology, wire format, full
-  `v4/*` method registry, topics/delta-feed shape, launch story — see
-  [docs/protocol.md](docs/protocol.md).
-- `bun run probe -- --method v4/connection/flow --params '{}'` — boots the
-  real `app-server` and speaks to it; iterate the handshake from here.
+**FUNCTIONING (2026-09-07).** The TUI lists/resumes/streams/sends against
+the real backend with the same store and identity as the desktop.
+
+- `bun run tui` — the TUI (keys: `a` new · `i` type · Enter send/open ·
+  `m` model · `r` refresh · `q` quit)
+- `bun run probe:battery` — protocol acceptance battery (no model calls)
+- `bun run probe:live` — scripted create→subscribe→send with stream capture
+- `bun run src/tui/live-smoke.tsx` — headless OpenTUI acceptance frame
+
+Phases landed: protocol captured (docs/protocol.md) · full loop proven ·
+TUI v0 read-only · send path + streaming · scrollbox/markdown polish ·
+model switcher · battery.
 
 ## Layout
 
 - `src/protocol/` — client + types for the v4 protocol (zero-dep).
-- `src/bin/probe.ts` — protocol probe/trace tool.
+- `src/bin/` — probe, probe-script, live (stream capture), battery.
+- `docs/screenshots/` — captured character frames (real app, real data).
 - `docs/` — capture notes + evidence. `docs/evidence/strace-cli-50s.txt` is
   **local-only** (gitignored; contains owner conversation bytes).
