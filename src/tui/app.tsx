@@ -122,6 +122,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const historyIdx = useRef(-1);
   const [thoughtLevel, setThoughtLevel] = useState<string>("enabled");
   const [ctx, setCtx] = useState<{ used: number; window: number } | null>(null);
+  const [draft, setDraft] = useState("");
+  const [typing, setTyping] = useState(false);
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const [modelIdx, setModelIdx] = useState(-1);
@@ -290,7 +292,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       setActiveId(row.sessionId);
       setPage(0);
       await subscribe(row.sessionId);
-      setStatus(`new ${row.sessionId.slice(0, 13)} · i to type`);
+      inputRef.current?.focus();
+      setStatus(`new ${row.sessionId.slice(0, 13)} · typing goes to the composer`);
     } catch (e) {
       setStatus(`create failed: ${e instanceof Error ? e.message : e}`);
     }
@@ -463,6 +466,15 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
 
   useKeyboard((key) => {
     if (dialog !== null) return; // the dialog's own handler owns keys
+    if (typing) {
+      // composer capture mode: printable bursts append, Enter sends
+      if (key.name === "escape") { setTyping(false); setDraft(""); return; }
+      if (key.name === "backspace") { setDraft((d) => d.slice(0, -1)); return; }
+      if (key.sequence && !key.ctrl && /^[\x20-\x7E]+$/.test(key.sequence)) { setDraft((d) => d + key.sequence); return; }
+      if (key.name === "return" && draft.trim() && !running) { const text = draft; setDraft(""); setTyping(false); void send(text); return; }
+      return;
+    }
+    if (key.name === "i") { setTyping(true); return; }
     if (askRef.current) {
       const resolve = askRef.current;
       if (key.name === "y") {
