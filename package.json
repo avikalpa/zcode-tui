@@ -10,7 +10,8 @@
     "probe:live": "bun run src/bin/live.ts",
     "probe:battery": "bun run src/bin/battery.ts",
     "tui": "bun run src/tui/main.tsx",
-    "tui:drive": "bun run src/tui/headless-drive.tsx"
+    "tui:drive": "bun run src/tui/headless-drive.tsx",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "^1.1.0",

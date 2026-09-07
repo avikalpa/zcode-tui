@@ -75,6 +75,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [theme, setTheme] = useState<ThemeName>("zai-dark");
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
   const askRef = useRef<((v: unknown) => void) | null>(null);
+  const [lost, setLost] = useState(false);
   const [models, setModels] = useState<{ label: string; providerId: string; modelId: string }[]>([]);
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const [modelIdx, setModelIdx] = useState(-1);
@@ -240,6 +241,10 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
 
   // Live turn updates: subscribe once, mutate the streaming assistant tail.
   useEffect(() => {
+    client.onBackendLost(() => {
+      setLost(true);
+      setStatus("backend lost — r respawns");
+    });
     client.onAsk((msg) => {
       const method = String(msg.method);
       const params = (msg.params ?? {}) as Record<string, unknown>;
@@ -398,7 +403,14 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
     else if (key.name === "/") setFilter("");
     else if (key.name === "[") { const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = Math.max(0, (sb.scrollTop ?? 0) - 10); }
     else if (key.name === "]") { const sb = scrollRef.current; if (sb?.scrollTop !== undefined) sb.scrollTop = (sb.scrollTop ?? 0) + 10; }
-    else if (key.name === "r") void refresh();
+    else if (key.name === "r") {
+      if (lost) {
+        setStatus("respawning backend…");
+        client.respawn();
+        setLost(false);
+        void refresh();
+      } else void refresh();
+    }
     else if (key.name === "a") void newSession();
     else if (key.name === "m") void cycleModel();
     else if (key.name === "t") setTheme((t) => (t === "zai-dark" ? "zai-light" : "zai-dark"));
@@ -516,7 +528,7 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
       ) : null}
       {/* status bar */}
       <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
-        <text content={` zcode-tui · ${status}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
+        <text content={` zcode-tui${lost ? " [backend lost]" : ""} · ${status}${modelIdx >= 0 && models[modelIdx] ? ` · ${models[modelIdx].label}` : ""} `} fg={C.subtle} />
       </box>
     </box>
   );

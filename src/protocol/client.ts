@@ -19,7 +19,7 @@ export interface AppServerOptions {
 }
 
 export class AppServer {
-  readonly proc: ChildProcess;
+  proc: ChildProcess;
   private nextId = 1;
   private pending = new Map<
     string,
@@ -28,6 +28,8 @@ export class AppServer {
   private buffer = "";
   private pushListeners: ((msg: Record<string, unknown>) => void)[] = [];
   private askListeners: ((msg: Record<string, unknown>) => unknown)[] = [];
+  private backendLostListeners: (() => void)[] = [];
+  private opts: AppServerOptions;
 
   /** Register a listener for server pushes (no-id notifications). */
   onPush(cb: (msg: Record<string, unknown>) => void) {
@@ -53,29 +55,53 @@ export class AppServer {
     } = {},
     opts: AppServerOptions = {},
   ) {
-    const bin = opts.electronBin ?? ELECTRON_BIN;
-    const cjs = opts.runtimeCjs ?? RUNTIME_CJS;
-    this.proc = spawn(bin, [cjs, "app-server"], {
+    this.opts = opts;
+    this.proc = this.#spawn();
+  }
+
+  #spawn(): ChildProcess {
+    const bin = this.opts.electronBin ?? ELECTRON_BIN;
+    const cjs = this.opts.runtimeCjs ?? RUNTIME_CJS;
+    const proc = spawn(bin, [cjs, "app-server"], {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
         NODE_NO_WARNINGS: "1",
-        ...opts.env,
+        ...this.opts.env,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
-    this.proc.on("exit", (code) => {
+    proc.on("exit", (code) => {
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
         p.reject(new Error(`app-server exited (${code})`));
       }
-      opts.onExit?.(code);
+      this.pending.clear();
+      if (!this.closing) {
+        for (const cb of this.backendLostListeners) cb();
+        this.opts.onExit?.(code);
+      }
     });
-    this.proc.stderr?.setEncoding("utf8");
-    this.proc.stderr?.on("data", (c: string) => opts.onStderr?.(c));
-    this.proc.stdout?.setEncoding("utf8");
-    this.proc.stdout?.on("data", (c: string) => this.#ingest(c));
+    proc.stderr?.setEncoding("utf8");
+    proc.stderr?.on("data", (c: string) => this.opts.onStderr?.(c));
+    proc.stdout?.setEncoding("utf8");
+    proc.stdout?.on("data", (c: string) => this.#ingest(c));
+    return proc;
   }
+
+  /** Register a callback fired when the backend dies unexpectedly. */
+  onBackendLost(cb: () => void) {
+    this.backendLostListeners.push(cb);
+  }
+
+  /** Restart the backend after a loss; in-flight requests are rejected. */
+  respawn() {
+    if (this.proc.exitCode === null) this.proc.kill();
+    this.buffer = "";
+    this.proc = this.#spawn();
+  }
+
+  private closing = false;
 
   #ingest(chunk: string) {
     this.buffer += chunk;
@@ -141,6 +167,7 @@ export class AppServer {
   }
 
   async close() {
+    this.closing = true;
     if (this.proc.exitCode !== null) return;
     this.proc.stdin?.end();
     this.proc.kill();
