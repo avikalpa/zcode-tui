@@ -26,6 +26,12 @@ export class AppServer {
     { resolve: (v: unknown) => void; reject: (e: unknown) => void; timer: NodeJS.Timeout }
   >();
   private buffer = "";
+  private pushListeners: ((msg: Record<string, unknown>) => void)[] = [];
+
+  /** Register a listener for server pushes (no-id notifications). */
+  onPush(cb: (msg: Record<string, unknown>) => void) {
+    this.pushListeners.push(cb);
+  }
 
   constructor(
     readonly handlers: {
@@ -93,6 +99,7 @@ export class AppServer {
         } else p.resolve(msg.result ?? {});
       } else if (msg.method !== undefined) {
         this.handlers.onNotification?.(msg);
+        for (const cb of this.pushListeners) cb(msg);
       } else {
         this.handlers.onResponse?.(msg);
       }

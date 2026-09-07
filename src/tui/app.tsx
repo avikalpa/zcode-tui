@@ -1,7 +1,7 @@
 // zcode-tui v0 — the ZCode sessions surface on OpenTUI.
 // zai-dark tokens from zcodereversed FINDINGS.md (bg #161616, chrome #202020,
 // border white 10%, fg neutral-300).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { AppServer } from "../protocol/client";
 
@@ -56,6 +56,8 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   const [sel, setSel] = useState(0);
   const [msgs, setMsgs] = useState<TurnMessage[]>([]);
   const [status, setStatus] = useState("connecting…");
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
   const dims = useTerminalDimensions();
   const sideInner = 34 - 2; // sidebar width minus borders
   const maxTitle = sideInner - 1 /* pad */ - 2 /* cursor */;
@@ -88,11 +90,82 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
         model: String((m.info?.model as Record<string, unknown> | undefined)?.modelId ?? ""),
       }));
       setMsgs(turns);
-      setStatus(`${row.title || row.sessionId.slice(0, 13)} — ${turns.length} messages`);
+      setActiveId(row.sessionId);
+      setStatus(`${row.title || row.sessionId.slice(0, 13)} — ${turns.length} messages · i to type`);
     } catch (e) {
       setStatus(`open failed: ${e instanceof Error ? e.message : e}`);
     }
   };
+
+  const newSession = async () => {
+    setStatus("creating session…");
+    try {
+      const res = (await client.request("session/create", {
+        workspace: {
+          workspacePath: process.cwd(),
+          workspaceKey: process.cwd(),
+        },
+        mode: "build",
+        persistence: "immediate",
+      })) as { session?: SessionRow };
+      const row = res.session;
+      if (!row) throw new Error("create returned no session");
+      setSessions((s) => [row as SessionRow, ...s]);
+      setSel(0);
+      setMsgs([]);
+      setActiveId(row.sessionId);
+      setStatus(`new ${row.sessionId.slice(0, 13)} · i to type`);
+    } catch (e) {
+      setStatus(`create failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const send = async (content: string) => {
+    if (!activeId || running) return;
+    setRunning(true);
+    setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "" }]);
+    setStatus("streaming…");
+    try {
+      await client.request("session/send", { sessionId: activeId, content });
+    } catch (e) {
+      setStatus(`send failed: ${e instanceof Error ? e.message : e}`);
+      setRunning(false);
+    }
+  };
+
+  // Live turn updates: subscribe once, mutate the streaming assistant tail.
+  useEffect(() => {
+    client.onPush((msg) => {
+      const method = String(msg.method);
+      const params = msg.params as Record<string, unknown> | undefined;
+      if (method === "session/event") {
+        const payload = (params?.payload ?? {}) as Record<string, unknown>;
+        if (typeof payload.content === "string") {
+          setMsgs((m) => {
+            if (m.length === 0) return m;
+            const last = m[m.length - 1];
+            if (last.role !== "assistant") return m;
+            return [...m.slice(0, -1), { ...last, text: last.text + payload.content }];
+          });
+        } else if (typeof payload.response === "string") {
+          setMsgs((m) => {
+            if (m.length === 0) return m;
+            const last = m[m.length - 1];
+            if (last.role !== "assistant" || last.text) return m;
+            return [...m.slice(0, -1), { ...last, text: payload.response as string }];
+          });
+        }
+      } else if (method === "state.updated") {
+        const patch = (params?.patch ?? {}) as Record<string, unknown>;
+        if (patch.status === "running") setRunning(true);
+        if (patch.status === "idle" || patch.status === "completed") setRunning(false);
+      } else if (method === "v4/telemetry/event" && params?.kind === "turn.terminal") {
+        setRunning(false);
+        setStatus("turn complete · i to type");
+        void refresh();
+      }
+    });
+  }, [client]);
 
   useEffect(() => {
     void refresh();
@@ -101,10 +174,14 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
   useKeyboard((key) => {
     if (key.name === "q" || key.name === "escape") onQuit();
     else if (key.name === "r") void refresh();
+    else if (key.name === "a") void newSession();
+    else if (key.name === "i") inputRef.current?.focus();
     else if (key.name === "down" || key.name === "j") setSel((s) => Math.min(s + 1, sessions.length - 1));
     else if (key.name === "up" || key.name === "k") setSel((s) => Math.max(s - 1, 0));
     else if (key.name === "return" && sessions[sel]) void open(sessions[sel]);
   });
+
+  const inputRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
 
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
@@ -154,6 +231,26 @@ export function App({ client, onQuit }: { client: AppServer; onQuit: () => void 
               </box>
             ))
           )}
+        </box>
+      </box>
+      {/* composer */}
+      <box style={{ height: 3, flexDirection: "column", flexShrink: 0 }}>
+        <box style={{ height: 1, backgroundColor: C.chrome, flexShrink: 0 }}>
+          <input
+            ref={inputRef as never}
+            placeholder={activeId ? "i focused · type a prompt, Enter sends" : "a new session · Enter opens selected · i to type"}
+            onSubmit={((value: string) => {
+              const text = String(value).trim();
+              inputRef.current?.blur?.();
+              if (!text) return;
+              if (activeId) void send(text);
+            }) as never}
+            style={{ backgroundColor: C.chrome, focusedBackgroundColor: C.chrome, textColor: C.fg }}
+          />
+        </box>
+        <box style={{ height: 1, backgroundColor: C.chrome, flexDirection: "row" }}>
+          <text content={running ? " ● running" : " ○ idle"} fg={running ? C.user : C.faint} />
+          <text content={` ${activeId ? activeId.slice(0, 18) : "no active session"}`} fg={C.faint} />
         </box>
       </box>
       {/* status bar */}
