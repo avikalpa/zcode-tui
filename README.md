@@ -36,11 +36,15 @@ above the bridge work.
 
 ## Keys
 
-`a` new session · `i` focus composer · Enter open/send · `m` cycle model ·
-`f` fork · `c` compact · `o` cycle mode (plan/build/edit/yolo/auto) ·
-`e` thinking on/off · `[`/`]` scroll conversation · `/` filter sidebar ·
-`t` theme (zai-dark/zai-light) · `r` refresh (r respawns if backend lost) ·
-`q` quit · permission asks: `y` allow / `n` deny
+`a` new session · `i` focus composer · Enter open/send · `m` model dialog ·
+**Ctrl+K** command palette (all verbs, type-to-filter) · `f` fork ·
+`c` compact · `o` cycle mode (plan/build/edit/yolo/auto) · `e` thinking
+on/off · `[`/`]` page conversation · `/` filter sidebar · `t` theme
+(zai-dark/zai-light) · `r` refresh (respawns the backend after a loss) ·
+`q` quit · permission asks: `y` allow · `a` always (project) · `n` deny
+
+Dialogs follow opencode2's dialog-select pattern: type-to-filter, arrows,
+Enter, Esc — the same OpenTUI stack, so the feel matches.
 
 ## Status
 
