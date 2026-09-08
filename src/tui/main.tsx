@@ -3,6 +3,7 @@
 // mock-tui-opentui staging), bun-native entry picked automatically.
 import { AppServer } from "../protocol/client";
 import { probe, initProbeDir } from "./probes";
+import { THEMES } from "./design";
 
 initProbeDir();
 
@@ -36,7 +37,7 @@ async function main() {
     import("./app"),
   ]);
   const renderer = await createCliRenderer();
-  renderer.setBackgroundColor("#161616");
+  renderer.setBackgroundColor(THEMES.opencode.bg);
   createRoot(renderer).render(
     <App client={client} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
   );
