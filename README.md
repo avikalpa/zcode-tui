@@ -52,8 +52,10 @@ OpenCode reference arm, Z.ai light/dark, and several popular terminal arms.
 
 ## Status
 
-**v0.1.0 — FUNCTIONING (2026-09-07).** The TUI lists/resumes/streams/sends against
-the real backend with the same store and identity as the desktop.
+**v0.5.7 — OpenCode-shaped UX (2026-09-08).** The TUI lists/resumes/streams/sends
+against the real backend with the same store and identity as the desktop, with
+an OpenCode-shaped home surface, `/sessions` browser, grouped session picker,
+state-controlled composer, and theme arms.
 
 - `bun run tui` — the TUI (keys: `a` new · `i` type · Enter send/open ·
   `m` model · `r` refresh · `q` quit)
