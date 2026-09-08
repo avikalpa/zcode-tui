@@ -204,7 +204,7 @@ function SlashPopup({
         const selected = matches.indexOf(c) === sel;
         return (
           <box key={c.name} style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: selected ? C.selected : undefined }}>
-            <text content={` ${c.name.padEnd(12)}${c.description}`} fg={selected ? C.brand : C.fg} />
+            <text content={` /${c.name.padEnd(11)}${c.description}`} fg={selected ? C.brand : C.fg} />
           </box>
         );
       })}
@@ -440,6 +440,14 @@ export function App({
   };
 
   const submitPrompt = async (content: string) => {
+    if (content.startsWith("/") && parseSlashCommand(content) === null) {
+      // Refuse locally instead of feeding the model a typo (owner law:
+      // unknown slash commands must never become a billed chat turn).
+      // Astra correction (2026-09-08): keep the rejected draft on screen so
+      // the user edits rather than retypes.
+      setStatus(`unknown command ${content.split(/\s+/, 1)[0]} · type / for the command list`);
+      return;
+    }
     setDraft("");
     draftRef.current = "";
     sugDismissed.current = false;
@@ -447,12 +455,6 @@ export function App({
     setTyping(true);
     if (content.startsWith("/")) {
       const command = parseSlashCommand(content);
-      if (command === null) {
-        // Refuse locally instead of feeding the model a typo (owner law:
-        // unknown slash commands must never become a billed chat turn).
-        setStatus(`unknown command ${content.split(/\s+/, 1)[0]} · type / for the command list`);
-        return;
-      }
       if (command === "sessions") { setDeleteId(null); setDialog("sessions"); return; }
       if (command === "home") { setView("home"); return; }
       if (command === "new") { await newSession(); return; }
