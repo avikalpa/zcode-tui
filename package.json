@@ -1,6 +1,6 @@
 {
   "name": "@avikalpa/zcode-tui",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": false,
   "type": "module",
   "scripts": {
@@ -54,5 +54,10 @@
     "ARCHITECTURE.md",
     "SKILL.md",
     "docs/probes.md"
+  ],
+  "bundledDependencies": [
+    "@opentui/core",
+    "@opentui/react",
+    "react"
   ]
 }
