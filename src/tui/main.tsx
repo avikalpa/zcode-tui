@@ -1,6 +1,7 @@
 // zcode-tui live entry — spawns app-server, renders the sessions surface.
 // OpenTUI core is ESM-with-TLA: dynamic import (fleet law from the
 // mock-tui-opentui staging), bun-native entry picked automatically.
+import pkg from "../../package.json";
 import { AppServer } from "../protocol/client";
 import { probe, initProbeDir } from "./probes";
 import { THEMES } from "./design";
@@ -15,6 +16,12 @@ async function main() {
   let resumeId: string | null = null;
   let modelId: string | null = null;
   for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--version" || argv[i] === "-V") {
+      // The compiled dist binary has no shim around it (ynpm dev installs
+      // take the ELF directly), so the version probe must live here.
+      console.log(`zcode-tui ${pkg.version}`);
+      process.exit(0);
+    }
     if (argv[i] === "--resume") resumeId = argv[++i] ?? null;
     else if (argv[i] === "--model") modelId = argv[++i] ?? null;
   }
