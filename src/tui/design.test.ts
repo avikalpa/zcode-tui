@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   formatDateHeading,
+  matchSlashCommands,
   parseSlashCommand,
   shortCwd,
+  SLASH_COMMANDS,
   THEMES,
   THEME_NAMES,
 } from "./design";
@@ -20,6 +22,16 @@ describe("OpenCode-shaped zcode-tui design model", () => {
     expect(parseSlashCommand("/sessions search words")).toBe("sessions");
     expect(parseSlashCommand("/new")).toBe("new");
     expect(parseSlashCommand("plain prompt")).toBeNull();
+  });
+
+  test("slash registry: prefix matches, unknown tokens stay null", () => {
+    expect(parseSlashCommand("/theme")).toBe("themes");
+    expect(parseSlashCommand("/nonsense")).toBeNull();
+    expect(parseSlashCommand("/help")).toBe("commands");
+    expect(SLASH_COMMANDS.length).toBeGreaterThanOrEqual(10);
+    expect(matchSlashCommands("").length).toBe(SLASH_COMMANDS.length);
+    expect(matchSlashCommands("ses").map((c) => c.name)).toContain("sessions");
+    expect(matchSlashCommands("zzz")).toHaveLength(0);
   });
 
   test("formats session groups and home paths deterministically", () => {

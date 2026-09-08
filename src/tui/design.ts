@@ -235,14 +235,51 @@ export function formatDateHeading(epochMs: number): string {
   return new Date(epochMs).toDateString();
 }
 
-export type SlashCommand = "sessions" | "new" | "home" | null;
+export interface SlashCommandSpec {
+  name: string;
+  aliases: string[];
+  description: string;
+}
+
+// The one command registry: the composer autocomplete popup, the
+// unknown-command refusal, and the ctrl+k palette all read this list. An
+// unregistered "/token" must never reach the model as chat — the 2026-09-08
+// parity wave measured a garbage "//sessions" turn costing ~51k ctx tokens
+// because the fall-through let it through silently.
+export const SLASH_COMMANDS: SlashCommandSpec[] = [
+  { name: "sessions", aliases: ["session"], description: "browse and resume conversations" },
+  { name: "new", aliases: ["new-session"], description: "start a fresh ZCode session" },
+  { name: "home", aliases: [], description: "return to the zcodetui front page" },
+  { name: "model", aliases: [], description: "choose from the safe model allowlist" },
+  { name: "themes", aliases: ["theme"], description: "OpenCode plus terminal colour arms" },
+  { name: "commands", aliases: ["help"], description: "open the command palette" },
+  { name: "mode", aliases: [], description: "cycle plan · build · edit · yolo · auto" },
+  { name: "effort", aliases: [], description: "cycle reasoning effort low · high · max" },
+  { name: "thinking", aliases: [], description: "toggle thinking" },
+  { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
+  { name: "compact", aliases: [], description: "compact the session context" },
+  { name: "quit", aliases: ["exit"], description: "exit zcode-tui" },
+];
+
+export function matchSlashCommands(prefix: string): SlashCommandSpec[] {
+  const needle = prefix.trim().toLowerCase();
+  if (!needle) return SLASH_COMMANDS;
+  return SLASH_COMMANDS.filter(
+    (c) => c.name.startsWith(needle) || c.aliases.some((a) => a.startsWith(needle)),
+  );
+}
+
+export type SlashCommand =
+  | "sessions" | "new" | "home" | "model" | "themes" | "commands"
+  | "mode" | "effort" | "thinking" | "fork" | "compact" | "quit"
+  | null;
 
 export function parseSlashCommand(input: string): SlashCommand {
-  const command = input.trim().split(/\s+/, 1)[0]?.toLowerCase();
-  if (command === "/sessions" || command === "/session") return "sessions";
-  if (command === "/new" || command === "/new-session") return "new";
-  if (command === "/home") return "home";
-  return null;
+  const token = input.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+  if (!token.startsWith("/")) return null;
+  const name = token.slice(1);
+  const spec = SLASH_COMMANDS.find((c) => c.name === name || c.aliases.includes(name));
+  return spec ? (spec.name as Exclude<SlashCommand, null>) : null;
 }
 
 export function shortCwd(cwd: string, home = process.env.HOME ?? ""): string {

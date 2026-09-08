@@ -12,10 +12,12 @@ import { recentInputs } from "../store/history";
 import { probe } from "./probes";
 import {
   formatDateHeading,
+  matchSlashCommands,
   parseSlashCommand,
   shortCwd,
   THEMES,
   THEME_NAMES,
+  type SlashCommandSpec,
   type ThemeName,
   type ThemeTokens,
 } from "./design";
@@ -168,6 +170,51 @@ function sortedThemes(): ThemeName[] {
   return [...THEME_NAMES].sort((a, b) => a.localeCompare(b));
 }
 
+// The composer autocomplete popup — the OpenCode convention this TUI mirrors:
+// typing "/" lists every command filtered as you type, directly above the
+// composer, with enter running the highlighted command.
+function SlashPopup({
+  matches,
+  idx,
+  C,
+  width,
+}: {
+  matches: SlashCommandSpec[];
+  idx: number;
+  C: ThemeTokens;
+  width?: number;
+}) {
+  const sel = Math.min(idx, matches.length - 1);
+  const win = Math.max(0, Math.min(sel - 2, Math.max(0, matches.length - 6)));
+  const visible = matches.slice(win, win + 6);
+  return (
+    <box
+      style={{
+        width: width ?? "100%",
+        flexDirection: "column",
+        flexShrink: 0,
+        borderStyle: "rounded",
+        borderColor: C.border,
+        backgroundColor: C.panel,
+        paddingLeft: 1,
+        paddingRight: 1,
+      }}
+    >
+      {visible.map((c) => {
+        const selected = matches.indexOf(c) === sel;
+        return (
+          <box key={c.name} style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: selected ? C.selected : undefined }}>
+            <text content={` ${c.name.padEnd(12)}${c.description}`} fg={selected ? C.brand : C.fg} />
+          </box>
+        );
+      })}
+      <box style={{ height: 1, flexShrink: 0 }}>
+        <text content="↑↓ select   tab complete   enter run   esc dismiss" fg={C.faint} />
+      </box>
+    </box>
+  );
+}
+
 export function App({
   client,
   onQuit,
@@ -204,6 +251,20 @@ export function App({
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
   const [typing, setTyping] = useState(true);
+  // Slash-command autocomplete (the OpenCode composer popup): the match list
+  // is derived from the draft; idx and dismissal are refs so the keyboard
+  // state machine reads immediate truth, exactly like draftRef.
+  const [sugIdx, setSugIdx] = useState(0);
+  const sugIdxRef = useRef(0);
+  const sugDismissed = useRef(false);
+  const moveSug = (n: number) => {
+    sugIdxRef.current = n;
+    setSugIdx(n);
+  };
+  // Prompts typed while a turn runs queue visibly instead of being dropped or
+  // mangled mid-burst; the pump effect sends them when the turn ends.
+  const [queue, setQueue] = useState<string[]>([]);
+  const queueRef = useRef<string[]>([]);
   const [models, setModels] = useState<ModelChoice[]>(ALLOWED_MODELS.map((m) => ({ ...m })));
   const [modelIdx, setModelIdx] = useState(0);
   const [pinned, setPinned] = useState<string[]>([]);
@@ -226,6 +287,9 @@ export function App({
   const activeModel = models[modelIdx] ?? models[0];
   const promptWidth = Math.max(44, Math.min(86, Math.floor(dims.width * 0.68)));
   const cwd = shortCwd(process.cwd());
+  const slashToken = typing && draft.startsWith("/") && !draft.includes(" ") ? draft.slice(1) : null;
+  const sugMatches = slashToken === null ? [] : matchSlashCommands(slashToken);
+  const sugOpen = sugMatches.length > 0 && !sugDismissed.current;
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -234,6 +298,17 @@ export function App({
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+
+  // Queue pump: when the live turn ends, send the oldest queued prompt. A
+  // prompt typed during a turn is therefore visible (queued row above the
+  // composer) and never races the streaming tail.
+  useEffect(() => {
+    if (running || queue.length === 0 || !activeId) return;
+    const [next, ...rest] = queue;
+    queueRef.current = rest;
+    setQueue(rest);
+    void send(next, activeId);
+  }, [running, queue, activeId]);
 
   const persistTheme = (next: ThemeName) => {
     try {
@@ -365,21 +440,31 @@ export function App({
   };
 
   const submitPrompt = async (content: string) => {
-    const command = parseSlashCommand(content);
     setDraft("");
-    setTyping(false);
-    if (command === "sessions") {
-      setDeleteId(null);
-      setDialog("sessions");
-      return;
-    }
-    if (command === "home") {
-      setView("home");
-      setTyping(true);
-      return;
-    }
-    if (command === "new") {
-      await newSession();
+    draftRef.current = "";
+    sugDismissed.current = false;
+    moveSug(0);
+    setTyping(true);
+    if (content.startsWith("/")) {
+      const command = parseSlashCommand(content);
+      if (command === null) {
+        // Refuse locally instead of feeding the model a typo (owner law:
+        // unknown slash commands must never become a billed chat turn).
+        setStatus(`unknown command ${content.split(/\s+/, 1)[0]} · type / for the command list`);
+        return;
+      }
+      if (command === "sessions") { setDeleteId(null); setDialog("sessions"); return; }
+      if (command === "home") { setView("home"); return; }
+      if (command === "new") { await newSession(); return; }
+      if (command === "model") { setDialog("model"); return; }
+      if (command === "themes") { setDialog("themes"); return; }
+      if (command === "commands") { setDialog("palette"); return; }
+      if (command === "mode") { await cycleMode(); return; }
+      if (command === "effort") { cycleEffort(); return; }
+      if (command === "thinking") { await toggleThinking(); return; }
+      if (command === "fork") { await forkActive(); return; }
+      if (command === "compact") { await compactActive(); return; }
+      if (command === "quit") { onQuit(); return; }
       return;
     }
     if (activeId) {
@@ -715,11 +800,37 @@ export function App({
     }
 
     if (typing) {
-      if (key.name === "escape") { setTyping(false); draftRef.current = ""; setDraft(""); return; }
-      if (key.name === "backspace") {
+      // Slash autocomplete reads the immediate draft ref: while the draft is a
+      // single "/token", up/down/tab/enter belong to the popup, not to
+      // history or submission.
+      const token = draftRef.current.startsWith("/") && !draftRef.current.includes(" ")
+        ? draftRef.current.slice(1)
+        : null;
+      const sugMatches = token === null ? [] : matchSlashCommands(token);
+      const sugOpenNow = sugMatches.length > 0 && !sugDismissed.current;
+      if (key.name === "escape") {
+        if (sugOpenNow) { sugDismissed.current = true; return; }
+        setTyping(false); draftRef.current = ""; setDraft(""); return;
+      }
+      if (key.name === "backspace" || key.sequence === "\x7f" || key.sequence === "\b") {
         const next = draftRef.current.slice(0, -1);
         draftRef.current = next;
         setDraft(next);
+        sugDismissed.current = false;
+        moveSug(0);
+        return;
+      }
+      if (sugOpenNow && (key.name === "up" || key.name === "down")) {
+        const delta = key.name === "up" ? -1 : 1;
+        moveSug(Math.max(0, Math.min(sugMatches.length - 1, sugIdxRef.current + delta)));
+        return;
+      }
+      if (sugOpenNow && key.name === "tab") {
+        const picked = `${sugMatches[sugIdxRef.current].name} `;
+        draftRef.current = `/${picked}`;
+        setDraft(`/${picked}`);
+        sugDismissed.current = false;
+        moveSug(0);
         return;
       }
       if (key.name === "up" || key.name === "down") {
@@ -738,14 +849,36 @@ export function App({
         // React has committed the previous setState. The ref is the immediate
         // keyboard truth; it keeps `/sessions\r` equivalent to two human
         // keystrokes while the rendered draft remains state-controlled.
+        if (sugOpenNow) {
+          const content = `/${sugMatches[Math.min(sugIdxRef.current, sugMatches.length - 1)].name}`;
+          draftRef.current = "";
+          setDraft("");
+          sugDismissed.current = false;
+          moveSug(0);
+          if (!running) void submitPrompt(content);
+          return;
+        }
         const content = draftRef.current.trim();
-        if (content && !running) void submitPrompt(content);
+        if (!content) return;
+        if (running) {
+          // Never drop or mangle a prompt typed mid-turn: queue it visibly.
+          const next = [...queueRef.current, content];
+          queueRef.current = next;
+          setQueue(next);
+          draftRef.current = "";
+          setDraft("");
+          setStatus("queued · sends when the turn finishes");
+          return;
+        }
+        void submitPrompt(content);
         return;
       }
       if (key.sequence && !key.ctrl && /^[\x20-\x7E]+$/.test(key.sequence)) {
         const next = draftRef.current + key.sequence;
         draftRef.current = next;
         setDraft(next);
+        sugDismissed.current = false;
+        moveSug(0);
       }
       return;
     }
@@ -941,6 +1074,7 @@ export function App({
           <box style={{ height: 1, flexShrink: 0 }} />
           <text content="/sessions  to browse conversations" fg={C.accent} />
           <box style={{ height: 1, flexShrink: 0 }} />
+          {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
           <box
             style={{
               width: promptWidth,
@@ -1000,6 +1134,12 @@ export function App({
       {ask ? (
         <box style={{ height: 1, flexDirection: "row", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
           <text content={`⚠ ${ask.toolName}${ask.riskLevel ? ` (${ask.riskLevel})` : ""}: ${ask.detail.slice(0, 52)} · y allow · a always · n deny`} fg={C.warning} />
+        </box>
+      ) : null}
+      {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} /> : null}
+      {queue.length > 0 ? (
+        <box style={{ height: 1, flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+          <text content={`⧗ ${queue.length} queued · next: ${queue[0].slice(0, 48)}`} fg={C.warning} />
         </box>
       ) : null}
       <box style={{ height: 5, flexDirection: "column", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
