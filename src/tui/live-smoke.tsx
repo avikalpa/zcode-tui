@@ -24,7 +24,7 @@ let last = "";
 for (let i = 0; i < 12; i += 1) {
   await new Promise((r) => setTimeout(r, 1000));
   last = setup.captureCharFrame();
-  if (last.includes("idle ·") || last.includes("running ·") || last.includes("error")) break;
+  if (/\d+ sessions/.test(last) && !last.includes("connecting")) break;
 }
 console.log(last);
 await client.close();

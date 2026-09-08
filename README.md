@@ -36,15 +36,19 @@ above the bridge work.
 
 ## Keys
 
-`a` new session · `i` focus composer · Enter open/send · `m` model dialog ·
-**Ctrl+K** command palette (all verbs, type-to-filter) · `f` fork · `b` fork at message… ·
-`c` compact · `o` cycle mode (plan/build/edit/yolo/auto) · `e` thinking
-on/off · `[`/`]` page conversation · `/` filter sidebar · `t` theme
-(zai-dark/zai-light) · `r` refresh (respawns the backend after a loss) ·
-`q` quit · permission asks: `y` allow · `a` always (project) · `n` deny
+Launch opens the centered `zcodetui` front page. Type a prompt and press Enter
+to create a session, or type `/sessions` to open the session browser.
 
-Dialogs follow opencode2's dialog-select pattern: type-to-filter, arrows,
-Enter, Esc — the same OpenTUI stack, so the feel matches.
+`a` new session · `i` focus composer · Enter open/send · `s` sessions · `m`
+model dialog · `t` themes · `e` reasoning effort · **Ctrl+K** command palette
+(all verbs, type-to-filter) · `f` fork · `b` fork at message… · `c` compact ·
+`o` cycle mode (plan/build/edit/yolo/auto) · `[`/`]` page conversation · `r`
+refresh/reconnect · `q` quit · permission asks: `y` allow · `a` always
+(project) · `n` deny
+
+Dialogs follow OpenCode's selection pattern: type-to-filter, date-grouped
+sessions, arrows, Enter, Esc, and compact footer hints. Themes include the
+OpenCode reference arm, Z.ai light/dark, and several popular terminal arms.
 
 ## Status
 

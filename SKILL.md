@@ -56,6 +56,34 @@ bun build --compile src/tui/main.tsx --outfile dist/zcode-tui
 - The backend's cold start reconnects all MCP servers — budget 8-25s for
   the first list; repeated spawns throttle (staged single-spawn passes).
 
+## UX polish loop
+
+The acceptance surface is the TUI, not a render mock alone. For every visual
+iteration, use a named yggterm shadow against a background proof row and keep
+captures under `$HOME/.yggterm/scratchpad/`. Compare the same PTY geometry and
+task path against OpenCode: launch/home, `/sessions`, selected session,
+composer, and theme picker.
+
+```sh
+# on the GUI host, with a named shadow already running
+yggterm-headless server snapshot
+yggterm-headless server app screenshot "$HOME/.yggterm/scratchpad/tui-ux/frame.png" \
+  --pid <shadow-pid>
+```
+
+Read `live_sessions[].terminal_lines`, `pty_cols`, and `pty_rows` from the
+snapshot as the daemon PTY witness. Read the screenshot response's
+`capture_faithful` and `paint_frame` before using its pixels as evidence.
+Drive a state-controlled composer with two writes (text, then a separate
+carriage return), and also test a fast text-plus-Enter burst when that timing
+is part of the interaction contract. `accepted:true` is only a byte-write
+receipt; the subsequent PTY frame and faithful screenshot prove consumption.
+
+Use `@opentui/react/test-utils` `captureCharFrame` for deterministic layout and
+keyboard regression tests. Use yggterm screenshots plus PTY frames for live
+acceptance. Do not call a raw `script` transcript a screenshot, and do not
+declare parity from a character frame without the live pixel pass.
+
 ## Ship checklist
 
 typecheck → bun test → probe:battery → build binary → PTY smoke the binary
