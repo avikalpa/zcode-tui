@@ -135,7 +135,8 @@ const TurnView = memo(function TurnView({
     const result = m.toolOk === undefined ? " …" : m.toolOk ? ` ✓${m.toolMs ? ` ${m.toolMs}ms` : ""}` : " ✗";
     return (
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, height: 1, flexShrink: 0, backgroundColor: C.surface }}>
-        <text content={`⚙ ${m.toolName ?? "tool"}  ${output}${result}`} fg={m.toolOk === false ? C.error : C.tool} />
+        <text content={`⚙ ${m.toolName ?? "tool"}  ${output}`} fg={C.subtle} />
+        <text content={result} fg={m.toolOk === false ? C.error : C.success} />
       </box>
     );
   }
@@ -286,7 +287,8 @@ export function App({
     : "";
   const activeModel = models[modelIdx] ?? models[0];
   const promptWidth = Math.max(44, Math.min(86, Math.floor(dims.width * 0.68)));
-  const cwd = shortCwd(process.cwd());
+  const cwdFull = shortCwd(process.cwd());
+  const cwd = cwdFull.length > 30 ? `…${cwdFull.slice(-29)}` : cwdFull;
   const slashToken = typing && draft.startsWith("/") && !draft.includes(" ") ? draft.slice(1) : null;
   const sugMatches = slashToken === null ? [] : matchSlashCommands(slashToken);
   const sugOpen = sugMatches.length > 0 && !sugDismissed.current;
@@ -1060,8 +1062,8 @@ export function App({
   const promptText = draft || promptPlaceholder;
   const modelLine = `${mode === "auto" ? "Build" : mode}  ${mode} · ${modelLabel(activeModel)} · ${effort}`;
   const footerHints = view === "home"
-    ? "esc shortcuts   /sessions history   ctrl+k commands"
-    : "i type   /sessions   m model   t themes   ctrl+k commands";
+    ? "esc shortcuts · ctrl+k commands"
+    : typing ? "enter send · ctrl+k commands" : "i type · ctrl+k commands";
   const statusLine = `${lost ? "backend lost" : running ? "working" : activeId ? "ready" : "idle"} · ${status}`;
 
   if (view === "home") {
@@ -1096,11 +1098,8 @@ export function App({
           <box style={{ flexGrow: 1 }} />
         </box>
         <box style={{ width: "100%", height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
-          <text content={cwd} fg={C.subtle} />
-          <text content={footerHints} fg={C.faint} />
-        </box>
-        <box style={{ height: 1, flexDirection: "row", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
-          <text content={`${statusLine} · ${sessions.length} sessions`} fg={C.faint} />
+          <text content={`${cwd} · ${statusLine}`} fg={C.subtle} />
+          <text content={footerHints} fg={C.subtle} />
         </box>
       </box>
     );
@@ -1144,19 +1143,15 @@ export function App({
           <text content={`⧗ ${queue.length} queued · next: ${queue[0].slice(0, 48)}`} fg={C.warning} />
         </box>
       ) : null}
-      <box style={{ height: 5, flexDirection: "column", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-        <box style={{ height: 3, flexDirection: "column", borderStyle: "rounded", borderColor: typing ? C.borderActive : C.border, backgroundColor: C.panel, paddingLeft: 1, paddingRight: 1 }}>
+      <box style={{ height: 3, flexDirection: "column", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+        <box style={{ flexGrow: 1, flexDirection: "column", borderStyle: "rounded", borderColor: typing ? C.borderActive : C.border, backgroundColor: C.panel, paddingLeft: 1, paddingRight: 1 }}>
           <text content={`› ${promptText}${typing ? "▏" : ""}`} fg={draft ? C.fg : C.faint} />
           <text content={`${mode} · ${modelLabel(activeModel)} · ${effort}${thoughtLevel === "disabled" ? " · thinking off" : ""}`} fg={C.subtle} />
-        </box>
-        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between" }}>
-          <text content={typing ? "esc cancel · enter send" : "i to type · enter sends"} fg={C.faint} />
-          <text content={footerHints} fg={C.faint} />
         </box>
       </box>
       <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
         <text content={`${cwd} · ${statusLine}`} fg={C.subtle} />
-        <text content={`${ctx ? `ctx ${(ctx.used / 1000).toFixed(0)}k/${(ctx.window / 1000).toFixed(0)}k · ` : ""}zcode-tui`} fg={C.faint} />
+        <text content={`${ctx ? `ctx ${(ctx.used / 1000).toFixed(0)}k/${(ctx.window / 1000).toFixed(0)}k · ` : ""}${footerHints}`} fg={C.subtle} />
       </box>
     </box>
   );
