@@ -66,5 +66,12 @@
     "@opentui/core",
     "@opentui/react",
     "react"
-  ]
+  ],
+  "ynpm": {
+    "build": "bun build --compile src/tui/main.tsx --outfile dist/zcode-tui",
+    "bins": {
+      "zcode-tui": "dist/zcode-tui"
+    },
+    "watch": "@avikalpa/zcode-tui"
+  }
 }
