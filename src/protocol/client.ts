@@ -149,7 +149,7 @@ export class AppServer {
     }
   }
 
-  request(method: string, params: unknown, timeoutMs = 8000): Promise<unknown> {
+  request(method: string, params: unknown, timeoutMs = 25000): Promise<unknown> {
     const id = this.nextId++;
     const frame = JSON.stringify({ method, params, id }) + "\n";
     return new Promise((resolve, reject) => {

@@ -16,9 +16,19 @@ const MD_STYLE = SyntaxStyle.create();
 // provider. Everything else the runtime catalog offers (glm-5.1, glm-4.7 —
 // the stale login-written list) is PAID and burned ~1B input tokens from
 // probe sessions before being banned here. The flash is the free tier.
+//
+// ⛔ WIRE IDS ARE THE CANONICAL CATALOG SPELLINGS (owner, 2026-09-08): the
+// desktop's builtin provider sends "GLM-5.3-Flash"/"GLM-5.3" and the usage
+// meter buckets BY EXACT STRING — the earlier lowercase pins here landed in
+// their own 39K "glm-5.3-flash" meter row, a separately-metered spelling of
+// the free flash. The zai models map in ~/.zcode/cli/config.json carries the
+// capitalized keys so the runtime's resolver (id match, verbatim send)
+// accepts them; a login rewrite of that map does NOT affect these pins —
+// only the resolver's acceptance, which is why the map extension rides the
+// fleet sync too.
 const ALLOWED_MODELS = [
-  { label: "GLM-5.3-Flash (free)", providerId: "zai", modelId: "glm-5.3-flash", isDefault: true },
-  { label: "GLM-5.3 (1M ctx)", providerId: "zai", modelId: "glm-5.3", isDefault: false },
+  { label: "GLM-5.3-Flash (free)", providerId: "zai", modelId: "GLM-5.3-Flash", isDefault: true },
+  { label: "GLM-5.3 (1M ctx)", providerId: "zai", modelId: "GLM-5.3", isDefault: false },
 ] as const;
 
 export interface SessionRow {
@@ -315,7 +325,7 @@ export function App({ client, onQuit, resumeId, modelId }: {
         persistence: "immediate",
         model: modelId
           ? { providerId: "zai", modelId }
-          : { providerId: "zai", modelId: "glm-5.3-flash" },
+          : { providerId: "zai", modelId: "GLM-5.3-Flash" },
       })) as { session?: SessionRow };
       const row = res.session;
       if (!row) throw new Error("create returned no session");
