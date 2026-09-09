@@ -35,6 +35,27 @@
   "bin": {
     "zcode-tui": "bin/zcode-tui"
   },
+  "yggterm": {
+    "app": {
+      "name": "zcode-tui",
+      "label": "ZCode TUI",
+      "icon": "",
+      "binary": "zcode-tui",
+      "verbs": [
+        {
+          "id": "open",
+          "label": "Open ZCode TUI",
+          "args": [],
+          "row_spawn": true
+        }
+      ],
+      "context_menu": {
+        "enabled": true,
+        "contexts": ["workspace", "session"],
+        "verbs": ["open"]
+      }
+    }
+  },
   "files": [
     "bin/",
     "src/",

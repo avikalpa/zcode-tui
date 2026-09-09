@@ -26,13 +26,17 @@ above the bridge work.
 - UX reference: the opencode2 TUI. Quality bar: beat ZCode's built-in
   default `tui` command (exists today; not polished).
 
-## Install / run
+## Quick start
 
-- **Binary** (linux x64): grab `zcode-tui` from
-  [releases](https://github.com/avikalpa/zcode-tui/releases), `chmod +x`,
-  run. Requires the ZCode desktop install (`/opt/ZCode`) — the binary
-  spawns its packaged runtime as the protocol server.
-- **From source**: `bun install && bun run tui` (bun ≥ 1.1).
+```sh
+curl -fsSL https://raw.githubusercontent.com/yggdrasilhq/yggterm/main/scripts/install.sh | sh
+ynpx @avikalpa/zcode-tui
+```
+
+The package is managed by ynpm, so a verified generation is reused locally and
+can be distributed to the rest of the yggterm fleet. For source development,
+run `bun install && bun run tui` (bun ≥ 1.1), then publish or distribute the
+dev build with `ynpm dev`.
 
 ## Keys
 
