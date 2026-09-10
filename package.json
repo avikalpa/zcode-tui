@@ -33,12 +33,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "ynpm": {
-    "build": "bun build --compile src/tui/main.tsx --outfile dist/zcode-tui",
-    "bins": { "zcode-tui": "dist/zcode-tui" },
-    "watch": "@avikalpa/zcode-tui"
-  },
-  "bin": {
+"bin": {
     "zcode-tui": "bin/zcode-tui"
   },
   "files": [
