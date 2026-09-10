@@ -1,20 +1,29 @@
 // zcode-tui — an OpenCode-shaped ZCode client.
 //
 // The runtime and protocol stay ZCode's. This file owns the presentation
-// layer: home, sessions picker, session transcript, composer, themes, and the
-// small keyboard state machines that make those surfaces feel like one TUI.
-import { memo, useEffect, useRef, useState } from "react";
+// layer: home, sessions picker, session transcript, composer, sidebar, themes,
+// and the small keyboard state machines that make those surfaces feel like one
+// TUI. The surfaces follow the OpenCode reference UI (surfaces, spacing and
+// status grammar measured against its published TUI components), not its code.
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { SyntaxStyle } from "@opentui/core";
+import { SyntaxStyle, TextAttributes } from "@opentui/core";
 import { SelectDialog, TextPromptDialog, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { probe } from "./probes";
 import {
   formatDateHeading,
+  formatContextLabel,
+  formatTokens,
+  formatTurnFooter,
   matchSlashCommands,
+  mdFor,
+  modeAccent,
+  modeLabel,
   parseSlashCommand,
   shortCwd,
+  SLASH_COMMANDS,
   THEMES,
   THEME_NAMES,
   type SlashCommandSpec,
@@ -23,7 +32,49 @@ import {
 } from "./design";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
-const MD_STYLE = SyntaxStyle.create();
+const VERSION = "0.6.0";
+
+// Markdown tinting per active theme: the assistant transcript renders through
+// these styles so headings, code and links colour exactly like the reference
+// TUI does under the same palette. Unknown style names are simply unused, so
+// both naming conventions are registered.
+const mdStyleCache = new Map<ThemeName, SyntaxStyle>();
+function mdStyleFor(theme: ThemeName): SyntaxStyle {
+  const cached = mdStyleCache.get(theme);
+  if (cached) return cached;
+  const md = mdFor(theme);
+  const style = SyntaxStyle.fromStyles({
+    text: { fg: md.mdText },
+    paragraph: { fg: md.mdText },
+    heading: { fg: md.mdHeading, bold: true },
+    h1: { fg: md.mdHeading, bold: true },
+    h2: { fg: md.mdHeading, bold: true },
+    h3: { fg: md.mdHeading, bold: true },
+    h4: { fg: md.mdHeading, bold: true },
+    link: { fg: md.mdLink },
+    linkText: { fg: md.mdLinkText },
+    code: { fg: md.mdCode },
+    inlineCode: { fg: md.mdCode },
+    codeBlock: { fg: md.mdText },
+    blockquote: { fg: md.mdQuote, italic: true },
+    emph: { fg: md.mdEmph, italic: true },
+    strong: { fg: md.mdStrong, bold: true },
+    listItem: { fg: md.mdListItem },
+    listEnumeration: { fg: md.mdListEnum },
+    // Syntax colour arms for fenced code blocks.
+    comment: { fg: md.synComment },
+    keyword: { fg: md.synKeyword },
+    function: { fg: md.synFunction },
+    variable: { fg: md.synVariable },
+    string: { fg: md.synString },
+    number: { fg: md.synNumber },
+    type: { fg: md.synType },
+    operator: { fg: md.synOperator },
+    punctuation: { fg: md.synPunct },
+  });
+  mdStyleCache.set(theme, style);
+  return style;
+}
 
 // ⛔ MODEL ALLOWLIST (owner ruling 2026-09-08): exactly these two on the zai
 // provider. The runtime catalog must never re-introduce the paid login models.
@@ -59,10 +110,20 @@ export interface TurnMessage {
   toolMs?: number;
   toolOut?: string;
   messageId?: string;
+  // Turn metrics for the per-message footer (OpenCode's
+  // `Build · model · 4.2s · 19.8 tok/s` line).
+  turnStart?: number;
+  durationMs?: number;
+  outputTokens?: number;
+  // Reasoning is collapsed once the turn completes; the streaming tail shows
+  // it live until then.
+  thinking?: string;
+  thinkingMs?: number;
 }
 
 // A compact block mark that keeps the same proportions as OpenCode's logo.
 // ZCode's mark is split into a quiet wordmark and a brighter TUI suffix.
+// (The mark itself is Astra's lane — hands off in visual waves.)
 const LOGO_LINES: [string, string][] = [
   ["█▀▀▀ █▀▀▀ █▀▀█ █▀▀▄ █▀▀▀", "▀█▀ █  █ ▀█▀"],
   ["  ▄  █    █  █ █  █ █▀▀ ", " █  █  █  █ "],
@@ -117,42 +178,86 @@ function normalizeSession(value: Record<string, unknown>): SessionRow {
   };
 }
 
-const TurnView = memo(function TurnView({
+// Braille spinner for the running state — OpenCode mounts a block spinner on
+// the composer underline while a turn runs; this is the same slot.
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+function useSpinner(active: boolean): string {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
+    return () => clearInterval(timer);
+  }, [active]);
+  return SPINNER_FRAMES[frame];
+}
+
+// The message transcript voice, measured off the OpenCode reference: the user
+// block is a filled panel with a bright left edge, the assistant speaks as
+// plain markdown with a metrics footer, tools are single dim lines.
+const MessageView = memo(function MessageView({
   m,
   running,
   thinking,
   C,
+  mdStyle,
   isTail,
 }: {
   m: TurnMessage;
   running: boolean;
   thinking: string;
   C: ThemeTokens;
+  mdStyle: SyntaxStyle;
   isTail: boolean;
 }) {
   if (m.role === "tool") {
     const output = (m.toolOut ?? m.text).replace(/\s+/g, " ").slice(0, 110);
     const result = m.toolOk === undefined ? " …" : m.toolOk ? ` ✓${m.toolMs ? ` ${m.toolMs}ms` : ""}` : " ✗";
     return (
-      <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, height: 1, flexShrink: 0, backgroundColor: C.surface }}>
-        <text content={`⚙ ${m.toolName ?? "tool"}  ${output}`} fg={C.subtle} />
+      <box style={{ flexDirection: "row", paddingLeft: 3, paddingRight: 3, height: 1, flexShrink: 0 }}>
+        <text content={`● ${m.toolName ?? "tool"} `} fg={C.tool} />
+        <text content={output} fg={C.subtle} />
         <text content={result} fg={m.toolOk === false ? C.error : C.success} />
       </box>
     );
   }
 
   const isUser = m.role === "user";
-  return (
-    <box style={{ flexDirection: "column", paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
-      <text content={`${isUser ? "› you" : "◆ assistant"}${m.model ? ` · ${m.model}` : ""}`} fg={isUser ? C.user : C.assistant} />
-      <box style={{ paddingLeft: 2, paddingRight: 1 }}>
-        {!isUser && !running ? (
-          <markdown content={m.text || "∅"} syntaxStyle={MD_STYLE} />
-        ) : (
-          <text content={m.text || (running ? "…" : "∅")} fg={C.fg} />
-        )}
-        {running && isTail && thinking ? <text content={thinking.slice(-220)} fg={C.faint} /> : null}
+  if (isUser) {
+    return (
+      <box style={{ flexDirection: "column", paddingLeft: 2, paddingRight: 2, paddingTop: 1, flexShrink: 0 }}>
+        <box style={{ flexDirection: "row", flexShrink: 0 }}>
+          <box style={{ width: 1, flexShrink: 0, backgroundColor: C.user }} />
+          <box style={{ flexGrow: 1, flexShrink: 0, backgroundColor: C.panel, paddingLeft: 2, paddingRight: 2 }}>
+            <text content={m.text} fg={C.fg} />
+          </box>
+        </box>
       </box>
+    );
+  }
+
+  const streaming = running && isTail;
+  const footer = m.durationMs !== undefined && !streaming
+    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens)
+    : null;
+  return (
+    <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+      {m.thinkingMs && m.thinking ? (
+        <text content={`+ Thought · ${(m.thinkingMs / 1000).toFixed(1)}s`} fg={C.faint} />
+      ) : null}
+      {streaming && thinking ? (
+        <text content={thinking.slice(-160)} fg={C.faint} />
+      ) : null}
+      {!streaming ? (
+        <markdown content={m.text || "∅"} syntaxStyle={mdStyle} />
+      ) : (
+        <text content={m.text || "…"} fg={C.fg} />
+      )}
+      {footer ? (
+        <box style={{ flexDirection: "row", paddingTop: 0, flexShrink: 0 }}>
+          <text content={footer.head} fg={C.user} />
+          <text content={footer.rest ? ` · ${footer.rest}` : ""} fg={C.subtle} />
+        </box>
+      ) : null}
     </box>
   );
 });
@@ -173,7 +278,8 @@ function sortedThemes(): ThemeName[] {
 
 // The composer autocomplete popup — the OpenCode convention this TUI mirrors:
 // typing "/" lists every command filtered as you type, directly above the
-// composer, with enter running the highlighted command.
+// composer, with enter running the highlighted command. Borderless block,
+// selected row carries the primary highlight with background-coloured text.
 function SlashPopup({
   matches,
   idx,
@@ -194,8 +300,6 @@ function SlashPopup({
         width: width ?? "100%",
         flexDirection: "column",
         flexShrink: 0,
-        borderStyle: "rounded",
-        borderColor: C.border,
         backgroundColor: C.panel,
         paddingLeft: 1,
         paddingRight: 1,
@@ -205,12 +309,109 @@ function SlashPopup({
         const selected = matches.indexOf(c) === sel;
         return (
           <box key={c.name} style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: selected ? C.selected : undefined }}>
-            <text content={` /${c.name.padEnd(11)}${c.description}`} fg={selected ? C.brand : C.fg} />
+            <text content={` /${c.name.padEnd(11)}`} fg={selected ? C.accentText : C.fg} />
+            <text content={c.description} fg={selected ? C.accentText : C.subtle} />
           </box>
         );
       })}
-      <box style={{ height: 1, flexShrink: 0 }}>
-        <text content="↑↓ select   tab complete   enter run   esc dismiss" fg={C.faint} />
+    </box>
+  );
+}
+
+// The OpenCode composer: a left accent edge tinted by the active mode, the
+// input row, and the status grammar `Build auto · model provider · Low` inside
+// the box; a thin detached underline row; then the hint line below on the
+// background. No full border — the reference keeps the box open-faced.
+function Composer({
+  C,
+  width,
+  underlineWidth,
+  promptText,
+  isPlaceholder,
+  typing,
+  mode,
+  model,
+  provider,
+  effort,
+  thinkingOff,
+  leaderActive,
+}: {
+  C: ThemeTokens;
+  width: number | "100%";
+  underlineWidth: number;
+  promptText: string;
+  isPlaceholder: boolean;
+  typing: boolean;
+  mode: string;
+  model: string;
+  provider: string;
+  effort: string;
+  thinkingOff: boolean;
+  leaderActive: boolean;
+}) {
+  const label = modeLabel(mode);
+  const accent = leaderActive ? C.border : modeAccent(mode, C);
+  const underline = Math.max(0, underlineWidth);
+  return (
+    <box style={{ width, flexDirection: "column", flexShrink: 0 }}>
+      <box style={{ flexDirection: "row", flexShrink: 0 }}>
+        <box style={{ width: 1, flexShrink: 0, flexDirection: "column", backgroundColor: accent }}>
+          <box style={{ flexGrow: 1 }} />
+          <text content="╹" fg={accent} />
+        </box>
+        <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
+          <text content={`${promptText}${typing ? "▏" : ""}`} fg={isPlaceholder ? C.subtle : C.fg} />
+          <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
+            <text content={`${label.label} `} fg={accent} />
+            {label.auto ? <text content="auto " fg={C.subtle} /> : null}
+            <text content={`· ${model} `} fg={leaderActive ? C.subtle : C.fg} />
+            <text content={`${provider} · `} fg={C.subtle} />
+            <text content={effort.charAt(0).toUpperCase() + effort.slice(1)} fg={C.warning} />
+            {thinkingOff ? <text content=" · thinking off" fg={C.faint} /> : null}
+          </box>
+        </box>
+      </box>
+      <box style={{ flexDirection: "row", flexShrink: 0 }}>
+        <box style={{ width: 1, flexShrink: 0 }}>
+          <text content="╹" fg={accent} />
+        </box>
+        <text content={"▀".repeat(underline)} fg={C.surface} />
+      </box>
+    </box>
+  );
+}
+
+// The optional session sidebar (leader b): title block, the context usage
+// block, and the client footer — the OpenCode sidebar arrangement.
+function SessionSidebar({
+  C,
+  title,
+  sessionId,
+  ctx,
+}: {
+  C: ThemeTokens;
+  title: string;
+  sessionId: string;
+  ctx: { used: number; window: number } | null;
+}) {
+  const pct = ctx && ctx.window > 0 ? Math.round((ctx.used / ctx.window) * 100) : 0;
+  return (
+    <box style={{ width: 42, flexShrink: 0, flexDirection: "column", backgroundColor: C.panel, paddingLeft: 2, paddingRight: 2, paddingTop: 1, paddingBottom: 1 }}>
+      <box style={{ flexGrow: 1, flexDirection: "column", flexShrink: 0 }}>
+        <box style={{ flexDirection: "column", flexShrink: 0 }}>
+          <text content={title} fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content={sessionId.length > 34 ? `${sessionId.slice(0, 34)}…` : sessionId} fg={C.subtle} />
+        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <box style={{ flexDirection: "column", flexShrink: 0 }}>
+          <text content="Context" fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content={ctx ? `${formatTokens(ctx.used)} tokens` : "— tokens"} fg={C.subtle} />
+          <text content={`${pct}% used`} fg={C.subtle} />
+        </box>
+      </box>
+      <box style={{ flexDirection: "row", flexShrink: 0 }}>
+        <text content="● " fg={C.success} />
+        <text content={`zcode-tui ${VERSION}`} fg={C.subtle} />
       </box>
     </box>
   );
@@ -235,6 +436,10 @@ export function App({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [thinking, setThinking] = useState("");
+  const thinkingRef = useRef("");
+  useEffect(() => {
+    thinkingRef.current = thinking;
+  }, [thinking]);
   const [dialog, setDialog] = useState<DialogName>(null);
   const [forkOptions, setForkOptions] = useState<DialogOption<string>[]>([]);
   const [theme, setTheme] = useState<ThemeName>("opencode");
@@ -252,6 +457,16 @@ export function App({
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
   const [typing, setTyping] = useState(true);
+  // Transient status toast — OpenCode surfaces these as toasts, never as a
+  // permanent bar. The message rides the composer hint slot for a few seconds.
+  const [flash, setFlash] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashStatus = (message: string) => {
+    setStatus(message);
+    setFlash(message);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(null), 4000);
+  };
   // Slash-command autocomplete (the OpenCode composer popup): the match list
   // is derived from the draft; idx and dismissal are refs so the keyboard
   // state machine reads immediate truth, exactly like draftRef.
@@ -271,11 +486,27 @@ export function App({
   const [pinned, setPinned] = useState<string[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<SessionRow | null>(null);
+  // Optional sidebar (leader b), armed leader chord, and the session paging.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const leaderArmed = useRef(false);
+  const leaderAt = useRef(0);
+  const [leaderActive, setLeaderActive] = useState(false);
+  const armLeader = () => {
+    leaderArmed.current = true;
+    leaderAt.current = Date.now();
+    setLeaderActive(true);
+  };
+  const disarmLeader = () => {
+    leaderArmed.current = false;
+    setLeaderActive(false);
+  };
   const scrollRef = useRef<{ scrollTop?: number } | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const resumed = useRef(false);
   const dims = useTerminalDimensions();
   const C = THEMES[theme];
+  const mdStyle = useMemo(() => mdStyleFor(theme), [theme]);
+  const spinner = useSpinner(running && view === "session");
 
   const orderedSessions = [...sessions].sort((a, b) => {
     const ap = pinned.includes(a.sessionId) ? 1 : 0;
@@ -286,9 +517,9 @@ export function App({
     ? displayTitle(sessions.find((s) => s.sessionId === activeId) ?? { sessionId: activeId, title: "", status: "", updatedAt: Date.now() })
     : "";
   const activeModel = models[modelIdx] ?? models[0];
-  const promptWidth = Math.max(44, Math.min(86, Math.floor(dims.width * 0.68)));
+  const promptWidth = Math.max(56, Math.min(86, Math.floor(dims.width * 0.62)));
   const cwdFull = shortCwd(process.cwd());
-  const cwd = cwdFull.length > 30 ? `…${cwdFull.slice(-29)}` : cwdFull;
+  const cwd = cwdFull.length > 42 ? `…${cwdFull.slice(-41)}` : cwdFull;
   const slashToken = typing && draft.startsWith("/") && !draft.includes(" ") ? draft.slice(1) : null;
   const sugMatches = slashToken === null ? [] : matchSlashCommands(slashToken);
   const sugOpen = sugMatches.length > 0 && !sugDismissed.current;
@@ -431,7 +662,7 @@ export function App({
     setPage(0);
     setHistory((h) => [content, ...h.filter((x) => x !== content)]);
     historyIdx.current = -1;
-    setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "" }]);
+    setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "", turnStart: Date.now() }]);
     setStatus("working…");
     try {
       await client.request("session/send", { sessionId: targetId, content });
@@ -447,7 +678,7 @@ export function App({
       // unknown slash commands must never become a billed chat turn).
       // Astra correction (2026-09-08): keep the rejected draft on screen so
       // the user edits rather than retypes.
-      setStatus(`unknown command ${content.split(/\s+/, 1)[0]} · type / for the command list`);
+      flashStatus(`unknown command ${content.split(/\s+/, 1)[0]} · type / for the command list`);
       return;
     }
     setDraft("");
@@ -495,37 +726,37 @@ export function App({
     const next = MODES[(MODES.indexOf(cur) + 1) % MODES.length];
     if (!activeId) {
       setMode(next);
-      setStatus(`mode → ${next}`);
+      flashStatus(`mode → ${next}`);
       return;
     }
     try {
       await client.request("session/setMode", { sessionId: activeId, mode: next });
       setMode(next);
-      setStatus(`mode → ${next}`);
+      flashStatus(`mode → ${next}`);
     } catch (e) {
-      setStatus(`setMode failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`setMode failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
   const cycleEffort = () => {
     const next = EFFORTS[(EFFORTS.indexOf(effort) + 1) % EFFORTS.length];
     setEffort(next);
-    setStatus(`effort → ${next}`);
+    flashStatus(`effort → ${next}`);
   };
 
   const toggleThinking = async () => {
     const next = thoughtLevel === "disabled" ? "enabled" : "disabled";
     if (!activeId) {
       setThoughtLevel(next);
-      setStatus(`thinking → ${next}`);
+      flashStatus(`thinking → ${next}`);
       return;
     }
     try {
       await client.request("session/setThoughtLevel", { sessionId: activeId, thoughtLevel: next });
       setThoughtLevel(next);
-      setStatus(`thinking → ${next}`);
+      flashStatus(`thinking → ${next}`);
     } catch (e) {
-      setStatus(`setThoughtLevel failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`setThoughtLevel failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -535,7 +766,7 @@ export function App({
       .map((m) => ({ id: m.messageId ?? "", value: m.messageId ?? "", label: `${m.role}: ${m.text.replace(/\s+/g, " ").slice(0, 70)}` }))
       .filter((o) => o.id.length > 0);
     if (opts.length === 0) {
-      setStatus("no message ids available for fork target");
+      flashStatus("no message ids available for fork target");
       return;
     }
     setForkOptions(opts);
@@ -552,10 +783,10 @@ export function App({
       setMsgs([]);
       setActiveId(fid);
       await subscribe(fid);
-      setStatus(`fork ${fid.slice(0, 13)} · ready`);
+      flashStatus(`fork ${fid.slice(0, 13)} · ready`);
       void refresh();
     } catch (e) {
-      setStatus(`fork failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`fork failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -564,17 +795,17 @@ export function App({
     setStatus("compacting…");
     try {
       const res = (await client.request("session/compact", { sessionId: activeId })) as { compact?: { state?: string } };
-      setStatus(`compact: ${res.compact?.state ?? "done"}`);
+      flashStatus(`compact: ${res.compact?.state ?? "done"}`);
       void open({ sessionId: activeId, title: activeTitle, status: "", updatedAt: Date.now(), mode });
     } catch (e) {
-      setStatus(`compact failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`compact failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
   const closeSession = async (row: SessionRow) => {
     if (deleteId !== row.sessionId) {
       setDeleteId(row.sessionId);
-      setStatus(`press ctrl+d again to delete ${displayTitle(row)}`);
+      flashStatus(`press ctrl+d again to delete ${displayTitle(row)}`);
       return;
     }
     try {
@@ -589,9 +820,9 @@ export function App({
         setView("home");
         setTyping(true);
       }
-      setStatus(`deleted ${displayTitle(row)}`);
+      flashStatus(`deleted ${displayTitle(row)}`);
     } catch (e) {
-      setStatus(`delete failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`delete failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -600,14 +831,14 @@ export function App({
       ? current.filter((id) => id !== row.sessionId)
       : [row.sessionId, ...current]);
     setDeleteId(null);
-    setStatus(`${pinned.includes(row.sessionId) ? "unpinned" : "pinned"} ${displayTitle(row)}`);
+    flashStatus(`${pinned.includes(row.sessionId) ? "unpinned" : "pinned"} ${displayTitle(row)}`);
   };
 
   // Live turn updates: subscribe once, mutate the streaming assistant tail.
   useEffect(() => {
     client.onBackendLost(() => {
       setLost(true);
-      setStatus("backend lost · r to reconnect");
+      flashStatus("backend lost · r to reconnect");
     });
     client.onAsk((msg) => {
       const method = String(msg.method);
@@ -669,17 +900,25 @@ export function App({
           if (typeof payload.contextWindow === "number" && typeof usage?.inputTokens === "number") {
             setCtx({ used: usage.inputTokens, window: payload.contextWindow });
           }
+          const outputTokens = Number(usage?.outputTokens ?? usage?.totalTokens ?? 0) || undefined;
           setMsgs((current) => {
             if (current.length === 0) return current;
             const last = current[current.length - 1];
             if (last.role !== "assistant") return current;
-            return [...current.slice(0, -1), { ...last, text: payload.content as string }];
+            return [...current.slice(0, -1), {
+              ...last,
+              text: payload.content as string,
+              durationMs: last.turnStart ? Date.now() - last.turnStart : undefined,
+              outputTokens,
+              thinking: thinkingRef.current || undefined,
+              thinkingMs: thinkingRef.current && last.turnStart ? Date.now() - last.turnStart : undefined,
+            }];
           });
           setThinking("");
           setRunning(false);
           if (usage && typeof usage.totalTokens === "number") {
             probe("turn-end", `tokens=${usage.totalTokens}`);
-            setStatus(`turn done · ${usage.totalTokens} tokens`);
+            flashStatus(`turn done · ${usage.totalTokens} tokens`);
           }
         } else if (typeof payload.response === "string" && !payload.usage) {
           setMsgs((current) => {
@@ -766,27 +1005,51 @@ export function App({
         setAsk(null);
         resolve({ decision: "allow" });
         probe("permission-answered", "allow");
-        setStatus("permission allowed");
+        flashStatus("permission allowed");
       } else if (key.name === "a") {
         askRef.current = null;
         setAsk(null);
         const always = askOptionsRef.current.find((x) => /always|project|allow/i.test(x.id));
         resolve(always?.response ?? { decision: "allow" });
         probe("permission-answered", "always");
-        setStatus("permission allowed · always");
+        flashStatus("permission allowed · always");
       } else if (key.name === "n" || key.name === "escape") {
         askRef.current = null;
         setAsk(null);
         resolve({ decision: "deny" });
         probe("permission-answered", "deny");
-        setStatus("permission denied");
+        flashStatus("permission denied");
       }
       return;
     }
 
-    if (key.ctrl && key.name === "k") {
+    // Leader chord (ctrl+x then a key), the OpenCode navigation grammar:
+    // b sidebar · t themes · l sessions · n new · c compact · q quit.
+    if (leaderArmed.current) {
+      const expired = Date.now() - leaderAt.current > 1500;
+      disarmLeader();
+      if (!expired) {
+        if (key.name === "b") { if (view === "session") setSidebarOpen((s) => !s); return; }
+        if (key.name === "t") { setDialog("themes"); return; }
+        if (key.name === "l") { openSessions(); return; }
+        if (key.name === "n") { void newSession(); return; }
+        if (key.name === "c") { void compactActive(); return; }
+        if (key.name === "q") { onQuit(); return; }
+        return;
+      }
+    }
+    if (key.ctrl && key.name === "x") {
+      armLeader();
+      return;
+    }
+    if (key.ctrl && key.name === "k" || key.ctrl && key.name === "p") {
       setTyping(false);
       setDialog("palette");
+      return;
+    }
+    // shift+tab cycles the mode — the OpenCode agent-cycle slot.
+    if ((key.name === "tab" && (key as { shift?: boolean }).shift) || key.sequence === "\x1b[Z") {
+      void cycleMode();
       return;
     }
     if (key.ctrl && key.name === "s") {
@@ -871,13 +1134,17 @@ export function App({
           setQueue(next);
           draftRef.current = "";
           setDraft("");
-          setStatus("queued · sends when the turn finishes");
+          flashStatus("queued · sends when the turn finishes");
           return;
         }
         void submitPrompt(content);
         return;
       }
-      if (key.sequence && !key.ctrl && /^[\x20-\x7E]+$/.test(key.sequence)) {
+      // Any printable non-control sequence composes the draft — unicode
+      // included. The old ASCII-only filter silently dropped non-Latin input
+      // (the "mid-turn truncation" suspect), which is a correctness bug for
+      // every language that is not English.
+      if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
         const next = draftRef.current + key.sequence;
         draftRef.current = next;
         setDraft(next);
@@ -899,7 +1166,9 @@ export function App({
     else if (key.name === "o") void cycleMode();
     else if (key.name === "e") cycleEffort();
     else if (key.name === "f") void forkActive();
-    else if (key.name === "b") openForkDialog();
+    else if (key.name === "b") {
+      if (view === "session") setSidebarOpen((s) => !s);
+    }
     else if (key.name === "c") void compactActive();
     else if (key.name === "r") {
       if (lost) {
@@ -938,7 +1207,7 @@ export function App({
           if (!option) return;
           if (action === "pin") togglePin(option.value);
           else if (action === "delete") void closeSession(option.value);
-          else if (action === "all") setStatus("all projects · showing every available session");
+          else if (action === "all") flashStatus("all projects · showing every available session");
           else if (action === "rename") {
             setRenameTarget(option.value);
             setDialog("rename");
@@ -961,10 +1230,10 @@ export function App({
           const index = models.findIndex((m) => m.modelId === choice.modelId);
           setModelIdx(Math.max(0, index));
           setDialog(null);
-          if (!activeId) { setStatus(`model → ${modelLabel(choice)}`); return; }
+          if (!activeId) { flashStatus(`model → ${modelLabel(choice)}`); return; }
           void client.request("session/setModel", { sessionId: activeId, model: { providerId: choice.providerId, modelId: choice.modelId } })
-            .then(() => setStatus(`model → ${modelLabel(choice)}`))
-            .catch((e) => setStatus(`setModel failed: ${e instanceof Error ? e.message : e}`));
+            .then(() => flashStatus(`model → ${modelLabel(choice)}`))
+            .catch((e) => flashStatus(`setModel failed: ${e instanceof Error ? e.message : e}`));
         }}
         onClose={closeDialog}
       />
@@ -974,11 +1243,11 @@ export function App({
     return (
       <SelectDialog
         title="Themes"
-        options={sortedThemes().map((name) => ({ id: name, label: name, description: name === "opencode" ? "OpenCode reference palette" : "terminal colour arm", value: name }))}
+        options={sortedThemes().map((name) => ({ id: name, label: name, description: name === "opencode" ? "OpenCode reference palette" : name === "zai-dark" || name === "zai-light" ? "ZCode brand arm" : "OpenCode palette", value: name }))}
         currentId={theme}
         theme={C}
         countLabel="theme"
-        onSelect={(name) => { persistTheme(name); setDialog(null); setStatus(`theme → ${name}`); }}
+        onSelect={(name) => { persistTheme(name); setDialog(null); flashStatus(`theme → ${name}`); }}
         onClose={closeDialog}
       />
     );
@@ -1001,10 +1270,10 @@ export function App({
               setMsgs([]);
               setActiveId(fid);
               await subscribe(fid);
-              setStatus(`fork ${fid.slice(0, 13)} · ready`);
+              flashStatus(`fork ${fid.slice(0, 13)} · ready`);
               void refresh();
             })
-            .catch((e) => setStatus(`fork failed: ${e instanceof Error ? e.message : e}`));
+            .catch((e) => flashStatus(`fork failed: ${e instanceof Error ? e.message : e}`));
         }}
         onClose={closeDialog}
       />
@@ -1021,7 +1290,7 @@ export function App({
           // The standalone protocol has no rename method yet. Keep this
           // honest instead of pretending a local title survived a refresh.
           setDialog(null);
-          setStatus(`rename pending host support · ${value}`);
+          flashStatus(`rename pending host support · ${value}`);
         }}
         onClose={closeDialog}
       />
@@ -1038,7 +1307,8 @@ export function App({
       { id: "fork", label: "fork session", description: "latest checkpoint", value: () => void forkActive() },
       { id: "fork-message", label: "fork at message…", value: openForkDialog },
       { id: "compact", label: "compact session", value: () => void compactActive() },
-      { id: "themes", label: "themes…", description: "OpenCode plus terminal colour arms", value: () => setDialog("themes") },
+      { id: "themes", label: "themes…", description: "the full OpenCode palette set", value: () => setDialog("themes") },
+      { id: "sidebar", label: "toggle sidebar", description: "leader b", value: () => { if (view === "session") setSidebarOpen((s) => !s); } },
       { id: "refresh", label: "refresh sessions", value: () => void refresh() },
       { id: "home", label: "home", description: "return to the zcodetui front page", value: () => { setView("home"); setTyping(true); } },
       { id: "quit", label: "quit", value: onQuit },
@@ -1060,11 +1330,19 @@ export function App({
     ? 'Ask anything…  "What is the tech stack of this project?"'
     : activeId ? "Ask anything…" : "a new session · type a prompt";
   const promptText = draft || promptPlaceholder;
-  const modelLine = `${mode === "auto" ? "Build" : mode}  ${mode} · ${modelLabel(activeModel)} · ${effort}`;
-  const footerHints = view === "home"
-    ? "esc shortcuts · ctrl+k commands"
-    : typing ? "enter send · ctrl+k commands" : "i type · ctrl+k commands";
-  const statusLine = `${lost ? "backend lost" : running ? "working" : activeId ? "ready" : "idle"} · ${status}`;
+  const providerLabel = activeModel?.providerId ?? "zai";
+  const composerProps = {
+    C,
+    typing,
+    mode,
+    model: modelLabel(activeModel),
+    provider: providerLabel,
+    effort,
+    thinkingOff: thoughtLevel === "disabled",
+    leaderActive,
+  };
+  const hintBits = "shift+tab mode   ctrl+p commands";
+  const ctxLabel = ctx && ctx.window > 0 ? `${formatContextLabel(ctx.used, ctx.window)}  ` : "";
 
   if (view === "home") {
     return (
@@ -1078,28 +1356,15 @@ export function App({
           <box style={{ height: 1, flexShrink: 0 }} />
           <text content="/sessions  to browse conversations" fg={C.accent} />
           <box style={{ height: 1, flexShrink: 0 }} />
-          {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
-          <box
-            style={{
-              width: promptWidth,
-              height: 4,
-              flexDirection: "column",
-              flexShrink: 0,
-              borderStyle: "rounded",
-              borderColor: typing ? C.borderActive : C.border,
-              backgroundColor: C.panel,
-              paddingLeft: 2,
-              paddingRight: 2,
-            }}
-          >
-            <text content={`› ${promptText}${typing ? "▏" : ""}`} fg={draft ? C.fg : C.faint} />
-            <text content={modelLine} fg={C.subtle} />
+          <box style={{ width: promptWidth, flexShrink: 0 }}>
+            {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
+            <Composer width={promptWidth} underlineWidth={promptWidth - 1} promptText={promptText} isPlaceholder={!draft} {...composerProps} />
+          </box>
+          <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
+            <text content={cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd} fg={C.subtle} />
+            <text content={flash ?? hintBits} fg={C.subtle} />
           </box>
           <box style={{ flexGrow: 1 }} />
-        </box>
-        <box style={{ width: "100%", height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
-          <text content={`${cwd} · ${statusLine}`} fg={C.subtle} />
-          <text content={footerHints} fg={C.subtle} />
         </box>
       </box>
     );
@@ -1109,49 +1374,52 @@ export function App({
   const start = Math.max(0, end - 30);
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
-      <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
-        <text content={activeTitle || "zcode-tui"} fg={C.brand} />
-        <text content={`${page > 0 ? `page ${page + 1} · ` : ""}${msgs.length} messages`} fg={C.faint} />
+      <box style={{ flexDirection: "row", flexGrow: 1, minHeight: 0 }}>
+        {msgs.length === 0 ? (
+          <box style={{ flexGrow: 1, flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 2 }}>
+            <text content="No messages yet." fg={C.subtle} />
+            <text content="i to type · Enter sends · /sessions opens the session browser" fg={C.faint} />
+          </box>
+        ) : (
+          <scrollbox ref={scrollRef as never} style={{ flexGrow: 1, flexDirection: "column", paddingTop: 1 }}>
+            {msgs.slice(start, end).map((m, index) => (
+              <MessageView
+                key={`${m.messageId ?? index}-${m.role}`}
+                m={m}
+                running={running}
+                thinking={thinking}
+                C={C}
+                mdStyle={mdStyle}
+                isTail={page === 0 && start + index === msgs.length - 1}
+              />
+            ))}
+          </scrollbox>
+        )}
+        {sidebarOpen && view === "session" && activeId ? (
+          <SessionSidebar C={C} title={activeTitle || "zcode-tui"} sessionId={activeId} ctx={ctx} />
+        ) : null}
       </box>
-      {msgs.length === 0 ? (
-        <box style={{ flexGrow: 1, flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 2 }}>
-          <text content="No messages yet." fg={C.subtle} />
-          <text content="i to type · Enter sends · /sessions opens the session browser" fg={C.faint} />
-        </box>
-      ) : (
-        <scrollbox ref={scrollRef as never} style={{ flexGrow: 1, flexDirection: "column", paddingTop: 1 }}>
-          {msgs.slice(start, end).map((m, index) => (
-            <TurnView
-              key={`${m.messageId ?? index}-${m.role}`}
-              m={m}
-              running={running}
-              thinking={thinking}
-              C={C}
-              isTail={page === 0 && start + index === msgs.length - 1}
-            />
-          ))}
-        </scrollbox>
-      )}
       {ask ? (
-        <box style={{ height: 1, flexDirection: "row", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
-          <text content={`⚠ ${ask.toolName}${ask.riskLevel ? ` (${ask.riskLevel})` : ""}: ${ask.detail.slice(0, 52)} · y allow · a always · n deny`} fg={C.warning} />
+        <box style={{ height: 1, flexDirection: "row", paddingLeft: 3, paddingRight: 3, flexShrink: 0 }}>
+          <text content={`△ ${ask.toolName}${ask.riskLevel ? ` (${ask.riskLevel})` : ""}: ${ask.detail.slice(0, 52)} · y allow · a always · n deny`} fg={C.warning} />
         </box>
       ) : null}
-      {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} /> : null}
       {queue.length > 0 ? (
-        <box style={{ height: 1, flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+        <box style={{ height: 1, flexDirection: "row", paddingLeft: 3, paddingRight: 3, flexShrink: 0 }}>
           <text content={`⧗ ${queue.length} queued · next: ${queue[0].slice(0, 48)}`} fg={C.warning} />
         </box>
       ) : null}
-      <box style={{ height: 3, flexDirection: "column", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-        <box style={{ flexGrow: 1, flexDirection: "column", borderStyle: "rounded", borderColor: typing ? C.borderActive : C.border, backgroundColor: C.panel, paddingLeft: 1, paddingRight: 1 }}>
-          <text content={`› ${promptText}${typing ? "▏" : ""}`} fg={draft ? C.fg : C.faint} />
-          <text content={`${mode} · ${modelLabel(activeModel)} · ${effort}${thoughtLevel === "disabled" ? " · thinking off" : ""}`} fg={C.subtle} />
-        </box>
+      {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} /> : null}
+      <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+        <Composer width="100%" underlineWidth={Math.max(10, dims.width - 5)} promptText={promptText} isPlaceholder={!draft} {...composerProps} />
       </box>
-      <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 2, paddingRight: 2, backgroundColor: C.panel, flexShrink: 0 }}>
-        <text content={`${cwd} · ${statusLine}`} fg={C.subtle} />
-        <text content={`${ctx ? `ctx ${(ctx.used / 1000).toFixed(0)}k/${(ctx.window / 1000).toFixed(0)}k · ` : ""}${footerHints}`} fg={C.subtle} />
+      <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
+        {running ? (
+          <text content={`${spinner} Working…`} fg={modeAccent(mode, C)} />
+        ) : (
+          <text content={lost ? "backend lost · r to reconnect" : cwd} fg={C.subtle} />
+        )}
+        <text content={running ? `${ctxLabel} ` : `${ctxLabel}${flash ?? hintBits}`} fg={C.subtle} />
       </box>
     </box>
   );

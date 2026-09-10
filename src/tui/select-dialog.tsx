@@ -92,7 +92,7 @@ export function SelectDialog<T>({
       return;
     }
     if (key.name === "backspace") { setFilter((f) => f.slice(0, -1)); setIdx(0); return; }
-    if (key.sequence && !key.ctrl && /^[\x20-\x7E]+$/.test(key.sequence)) {
+    if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
       setFilter((f) => f + key.sequence);
       setIdx(0);
     }
@@ -134,7 +134,7 @@ export function SelectDialog<T>({
             const labelWidth = Math.max(16, cardWidth - 8);
             return (
               <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
-                {group ? <text content={` ${group}`} fg={C.accent} /> : null}
+                {group ? <text content={` ${group}`} fg={C.subtle} /> : null}
                 <box
                   style={{
                     height: 1,
@@ -147,7 +147,7 @@ export function SelectDialog<T>({
                 >
                   <text
                     content={`${selected ? "›" : " "} ${truncate(o.label, labelWidth)}${o.id === currentId ? "  ●" : ""}${o.meta ? `  ${o.meta}` : ""}`}
-                    fg={selected ? C.brand : C.fg}
+                    fg={selected ? C.accentText : C.fg}
                   />
                 </box>
               </box>
@@ -194,7 +194,7 @@ export function TextPromptDialog({
       return;
     }
     if (key.name === "backspace") { setValue((v) => v.slice(0, -1)); return; }
-    if (key.sequence && !key.ctrl && /^[\x20-\x7E]+$/.test(key.sequence)) {
+    if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
       setValue((v) => v + key.sequence);
     }
   });
