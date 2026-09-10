@@ -3,6 +3,7 @@
 // entries). Prefers the repo's compiled binary, then bun, then fails honestly.
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,13 +30,13 @@ if (existsSync(bin)) {
   const p = spawn(bin, args, { stdio: "inherit" });
   p.on("exit", (c) => process.exit(c ?? 0));
 } else {
-  const bun = ["bun", process.env.HOME + "/.bun/bin/bun", "/usr/local/bin/bun"].find((b) => {
-    try {
-      return existsSync(b);
-    } catch {
-      return false;
-    }
-  });
+  const bunCandidates = [
+    process.env.BUN_INSTALL && join(process.env.BUN_INSTALL, "bin", process.platform === "win32" ? "bun.exe" : "bun"),
+    join(homedir(), ".bun", "bin", process.platform === "win32" ? "bun.exe" : "bun"),
+    process.platform === "win32" ? join(homedir(), "AppData", "Local", "bun", "bin", "bun.exe") : "/usr/local/bin/bun",
+    "bun",
+  ].filter(Boolean);
+  const bun = bunCandidates.find((candidate) => candidate === "bun" || existsSync(candidate));
   if (!bun) {
     console.error("zcode-tui needs bun (https://bun.sh) or a compiled dist/zcode-tui binary.");
     process.exit(1);
