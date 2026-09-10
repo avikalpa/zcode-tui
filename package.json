@@ -1,6 +1,6 @@
 {
   "name": "@avikalpa/zcode-tui",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "private": false,
   "type": "module",
   "scripts": {
@@ -35,7 +35,9 @@
   },
   "ynpm": {
     "build": "bun build --compile src/tui/main.tsx --outfile dist/zcode-tui",
-    "bins": { "zcode-tui": "dist/zcode-tui" },
+    "bins": {
+      "zcode-tui": "dist/zcode-tui"
+    },
     "watch": "@avikalpa/zcode-tui"
   },
   "bin": {
