@@ -163,13 +163,14 @@ export interface SlashCommandSpec {
 // parity wave measured a garbage "//sessions" turn costing ~51k ctx tokens
 // because the fall-through let it through silently.
 export const SLASH_COMMANDS: SlashCommandSpec[] = [
+  { name: "agents", aliases: ["agent", "mode"], description: "switch agent mode" },
   { name: "sessions", aliases: ["session"], description: "browse and resume conversations" },
   { name: "new", aliases: ["new-session"], description: "start a fresh ZCode session" },
   { name: "home", aliases: [], description: "return to the zcodetui front page" },
   { name: "model", aliases: [], description: "choose from the safe model allowlist" },
   { name: "themes", aliases: ["theme"], description: "OpenCode plus terminal colour arms" },
   { name: "commands", aliases: ["help"], description: "open the command palette" },
-  { name: "mode", aliases: [], description: "cycle plan · build · edit · yolo · auto" },
+  { name: "status", aliases: [], description: "session and backend status" },
   { name: "effort", aliases: [], description: "cycle reasoning effort low · high · max" },
   { name: "thinking", aliases: [], description: "toggle thinking" },
   { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
@@ -186,8 +187,8 @@ export function matchSlashCommands(prefix: string): SlashCommandSpec[] {
 }
 
 export type SlashCommand =
-  | "sessions" | "new" | "home" | "model" | "themes" | "commands"
-  | "mode" | "effort" | "thinking" | "fork" | "compact" | "quit"
+  | "agents" | "sessions" | "new" | "home" | "model" | "themes" | "commands"
+  | "status" | "effort" | "thinking" | "fork" | "compact" | "quit"
   | null;
 
 export function parseSlashCommand(input: string): SlashCommand {

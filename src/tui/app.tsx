@@ -89,7 +89,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session";
-type DialogName = "sessions" | "model" | "palette" | "fork" | "themes" | "rename" | null;
+type DialogName = "sessions" | "model" | "mode" | "palette" | "fork" | "themes" | "rename" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -692,7 +692,8 @@ export function App({
       if (command === "model") { setDialog("model"); return; }
       if (command === "themes") { setDialog("themes"); return; }
       if (command === "commands") { setDialog("palette"); return; }
-      if (command === "mode") { await cycleMode(); return; }
+      if (command === "agents") { setDialog("mode"); return; }
+      if (command === "status") { flashStatus(statusSummary()); return; }
       if (command === "effort") { cycleEffort(); return; }
       if (command === "thinking") { await toggleThinking(); return; }
       if (command === "fork") { await forkActive(); return; }
@@ -717,6 +718,21 @@ export function App({
   const closeDialog = () => {
     setDialog(null);
     if (view === "home") setTyping(true);
+  };
+
+  const statusSummary = () => {
+    const backend = lost ? "backend LOST" : running ? "working" : "idle";
+    const ctxBit = ctx ? ` · ctx ${formatContextLabel(ctx.used, ctx.window)}` : "";
+    return `${backend} · ${mode} · ${modelLabel(activeModel)} · effort ${effort}${ctxBit} · ${sessions.length} sessions`;
+  };
+
+  // OpenCode's agent quick slots: leader 1..9 jumps straight into the Nth
+  // session of the recency list.
+  const quickSwitch = (slot: number) => {
+    const row = orderedSessions[slot - 1];
+    if (!row) { flashStatus(`no session in quick slot ${slot}`); return; }
+    if (row.sessionId === activeId) { setDialog(null); setView("session"); return; }
+    void open(row);
   };
 
   const cycleMode = async () => {
@@ -1031,9 +1047,11 @@ export function App({
       if (key.name === "t") { setDialog("themes"); return; }
       if (key.name === "l") { openSessions(); return; }
       if (key.name === "n") { void newSession(); return; }
-      if (key.name === "c") { void compactActive(); return; }
-      if (key.name === "q") { onQuit(); return; }
-      return;
+        if (key.name === "c") { void compactActive(); return; }
+        if (key.name === "s") { flashStatus(statusSummary()); return; }
+        if (/^[1-9]$/.test(key.name ?? "")) { quickSwitch(Number(key.name)); return; }
+        if (key.name === "q") { onQuit(); return; }
+        return;
     }
     if (key.ctrl && key.name === "x") {
       armLeader();
@@ -1053,7 +1071,7 @@ export function App({
       openSessions();
       return;
     }
-    if (key.ctrl && key.name === "q") {
+    if (key.ctrl && key.name === "q" || key.ctrl && key.name === "d") {
       onQuit();
       return;
     }
@@ -1236,6 +1254,25 @@ export function App({
       />
     );
   }
+  if (dialog === "mode") {
+    return (
+      <SelectDialog
+        title="Agent mode"
+        options={MODES.map((m) => ({ id: m, label: m.charAt(0).toUpperCase() + m.slice(1), description: m === "auto" ? "ride the default agent (Build)" : m === "yolo" ? "no permission prompts" : "agent mode", value: m }))}
+        currentId={mode}
+        theme={C}
+        countLabel="mode"
+        onSelect={(m) => {
+          setDialog(null);
+          if (!activeId) { setMode(m); flashStatus(`mode → ${m}`); return; }
+          void client.request("session/setMode", { sessionId: activeId, mode: m })
+            .then(() => { setMode(m); flashStatus(`mode → ${m}`); })
+            .catch((e) => flashStatus(`setMode failed: ${e instanceof Error ? e.message : e}`));
+        }}
+        onClose={closeDialog}
+      />
+    );
+  }
   if (dialog === "themes") {
     return (
       <SelectDialog
@@ -1299,7 +1336,7 @@ export function App({
       { id: "new", label: "new session", description: "start a fresh ZCode session", value: () => void newSession() },
       { id: "model", label: "switch model…", description: "choose from the safe model allowlist", value: () => setDialog("model") },
       { id: "effort", label: "cycle reasoning effort", description: "low · high · max", value: cycleEffort },
-      { id: "mode", label: "cycle mode", description: "plan · build · edit · yolo · auto", value: () => void cycleMode() },
+      { id: "mode", label: "switch mode…", description: "plan · build · edit · yolo · auto", value: () => setDialog("mode") },
       { id: "thinking", label: "toggle thinking", value: () => void toggleThinking() },
       { id: "fork", label: "fork session", description: "latest checkpoint", value: () => void forkActive() },
       { id: "fork-message", label: "fork at message…", value: openForkDialog },
