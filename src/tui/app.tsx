@@ -10,6 +10,7 @@ import { SelectDialog, TextPromptDialog, type DialogOption } from "./select-dial
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { probe } from "./probes";
+import { Announcer, type AnnouncePhase } from "./announce";
 import {
   formatDateHeading,
   parseSlashCommand,
@@ -230,6 +231,27 @@ export function App({
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  // NativeAnnounce (spec §2 cap-2/§3): the phase is DERIVED in one place from
+  // the TUI's own state, never scattered through the handlers. Identity (the
+  // active session id) rides every frame; the Announcer emits on change and
+  // heartbeats the unchanged state. Precedence: backend loss outranks a stale
+  // pending ask (a lost TUI must never hold a gate open), then the permission
+  // question, then the running turn; no active session yet = StartupGate.
+  const announcerRef = useRef<Announcer | null>(null);
+  if (announcerRef.current === null) announcerRef.current = new Announcer();
+  const phase: AnnouncePhase = lost
+    ? "Idle"
+    : ask
+      ? "QuestionPrompt"
+      : running
+        ? "Working"
+        : activeId
+          ? "Idle"
+          : "StartupGate";
+  useEffect(() => {
+    announcerRef.current?.announce(activeId, phase, lost ? "backend-lost" : undefined);
+  }, [activeId, phase, lost]);
 
   useEffect(() => {
     draftRef.current = draft;
