@@ -489,11 +489,9 @@ export function App({
   // Optional sidebar (leader b), armed leader chord, and the session paging.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const leaderArmed = useRef(false);
-  const leaderAt = useRef(0);
   const [leaderActive, setLeaderActive] = useState(false);
   const armLeader = () => {
     leaderArmed.current = true;
-    leaderAt.current = Date.now();
     setLeaderActive(true);
   };
   const disarmLeader = () => {
@@ -662,7 +660,7 @@ export function App({
     setPage(0);
     setHistory((h) => [content, ...h.filter((x) => x !== content)]);
     historyIdx.current = -1;
-    setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "", turnStart: Date.now() }]);
+    setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
     setStatus("working…");
     try {
       await client.request("session/send", { sessionId: targetId, content });
@@ -1025,18 +1023,17 @@ export function App({
 
     // Leader chord (ctrl+x then a key), the OpenCode navigation grammar:
     // b sidebar · t themes · l sessions · n new · c compact · q quit.
+    // The armed leader consumes the next key unconditionally — no timeout —
+    // so a slow chord can never leak its second key into the composer draft.
     if (leaderArmed.current) {
-      const expired = Date.now() - leaderAt.current > 1500;
       disarmLeader();
-      if (!expired) {
-        if (key.name === "b") { if (view === "session") setSidebarOpen((s) => !s); return; }
-        if (key.name === "t") { setDialog("themes"); return; }
-        if (key.name === "l") { openSessions(); return; }
-        if (key.name === "n") { void newSession(); return; }
-        if (key.name === "c") { void compactActive(); return; }
-        if (key.name === "q") { onQuit(); return; }
-        return;
-      }
+      if (key.name === "b") { if (view === "session") setSidebarOpen((s) => !s); return; }
+      if (key.name === "t") { setDialog("themes"); return; }
+      if (key.name === "l") { openSessions(); return; }
+      if (key.name === "n") { void newSession(); return; }
+      if (key.name === "c") { void compactActive(); return; }
+      if (key.name === "q") { onQuit(); return; }
+      return;
     }
     if (key.ctrl && key.name === "x") {
       armLeader();
