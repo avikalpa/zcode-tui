@@ -1,6 +1,6 @@
 {
   "name": "@avikalpa/zcode-tui",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": false,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "probe:battery": "bun run src/bin/battery.ts",
     "tui": "bun run src/tui/main.tsx",
     "tui:drive": "bun run src/tui/headless-drive.tsx",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun build --compile src/tui/main.tsx --outfile dist/zcode-tui"
   },
   "devDependencies": {
     "@types/bun": "^1.1.0",
@@ -32,32 +33,17 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
+  "ynpm": {
+    "build": "bun build --compile src/tui/main.tsx --outfile dist/zcode-tui",
+    "bins": { "zcode-tui": "dist/zcode-tui" },
+    "watch": "@avikalpa/zcode-tui"
+  },
   "bin": {
     "zcode-tui": "bin/zcode-tui"
   },
-  "yggterm": {
-    "app": {
-      "name": "zcode-tui",
-      "label": "ZCode TUI",
-      "icon": "",
-      "binary": "zcode-tui",
-      "verbs": [
-        {
-          "id": "open",
-          "label": "Open ZCode TUI",
-          "args": [],
-          "row_spawn": true
-        }
-      ],
-      "context_menu": {
-        "enabled": true,
-        "contexts": ["workspace", "session"],
-        "verbs": ["open"]
-      }
-    }
-  },
   "files": [
     "bin/",
+    "dist/",
     "src/",
     "docs/protocol.md",
     "docs/verification.md",
