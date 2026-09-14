@@ -116,3 +116,46 @@ export const OFFICIAL_MD: Record<string, MdTokens> = {
   "vesper": { mdText: "#ffffff", mdHeading: "#ffc799", mdLink: "#ffc799", mdLinkText: "#a0a0a0", mdCode: "#a0a0a0", mdQuote: "#ffffff", mdEmph: "#ffffff", mdStrong: "#ffffff", mdListItem: "#ffffff", mdListEnum: "#ffffff", synComment: "#8b8b8b", synKeyword: "#a0a0a0", synFunction: "#ffc799", synVariable: "#ffffff", synString: "#99ffe4", synNumber: "#ffc799", synType: "#ffc799", synOperator: "#a0a0a0", synPunct: "#ffffff" },
   "zenburn": { mdText: "#dcdccc", mdHeading: "#f0dfaf", mdLink: "#8cd0d3", mdLinkText: "#93e0e3", mdCode: "#7f9f7f", mdQuote: "#9f9f9f", mdEmph: "#e0cf9f", mdStrong: "#dfaf8f", mdListItem: "#8cd0d3", mdListEnum: "#93e0e3", synComment: "#7f9f7f", synKeyword: "#f0dfaf", synFunction: "#8cd0d3", synVariable: "#dcdccc", synString: "#cc9393", synNumber: "#8fb28f", synType: "#93e0e3", synOperator: "#f0dfaf", synPunct: "#dcdccc" },
 } as const;
+
+export const OFFICIAL_DIFF: Record<string, {
+  diffAdded: string;
+  diffRemoved: string;
+  diffContext: string;
+  diffAddedBg: string;
+  diffRemovedBg: string;
+  diffContextBg: string;
+}> = {
+  "aura": { diffAdded: "#61ffca", diffRemoved: "#ff6767", diffContext: "#6d6d6d", diffAddedBg: "#354933", diffRemovedBg: "#3f191a", diffContextBg: "#15141b" },
+  "ayu": { diffAdded: "#7fd962", diffRemoved: "#f26d78", diffContext: "#acb6bf", diffAddedBg: "#20303b", diffRemovedBg: "#37222c", diffContextBg: "#0f131a" },
+  "carbonfox": { diffAdded: "#50fa7b", diffRemoved: "#ff6b6b", diffContext: "#7d848f", diffAddedBg: "#0f2418", diffRemovedBg: "#2a1216", diffContextBg: "#161616" },
+  "catppuccin": { diffAdded: "#a6e3a1", diffRemoved: "#f38ba8", diffContext: "#9399b2", diffAddedBg: "#24312b", diffRemovedBg: "#3c2a32", diffContextBg: "#181825" },
+  "catppuccin-frappe": { diffAdded: "#a6d189", diffRemoved: "#e78284", diffContext: "#949cb8", diffAddedBg: "#29342b", diffRemovedBg: "#3a2a31", diffContextBg: "#292c3c" },
+  "catppuccin-macchiato": { diffAdded: "#a6da95", diffRemoved: "#ed8796", diffContext: "#939ab7", diffAddedBg: "#29342b", diffRemovedBg: "#3a2a31", diffContextBg: "#1e2030" },
+  "cobalt2": { diffAdded: "#9eff80", diffRemoved: "#ff0088", diffContext: "#adb7c9", diffAddedBg: "#1a3a2a", diffRemovedBg: "#3a1a2a", diffContextBg: "#122738" },
+  "cursor": { diffAdded: "#3fa266", diffRemoved: "#e34671", diffContext: "#e4e4e45e", diffAddedBg: "#3fa26633", diffRemovedBg: "#b8004933", diffContextBg: "#141414" },
+  "dracula": { diffAdded: "#50fa7b", diffRemoved: "#ff5555", diffContext: "#6272a4", diffAddedBg: "#1a3a1a", diffRemovedBg: "#3a1a1a", diffContextBg: "#21222c" },
+  "everforest": { diffAdded: "#4fd6be", diffRemoved: "#c53b53", diffContext: "#828bb8", diffAddedBg: "#20303b", diffRemovedBg: "#37222c", diffContextBg: "#333c43" },
+  "flexoki": { diffAdded: "#879a39", diffRemoved: "#d14d41", diffContext: "#6f6e69", diffAddedBg: "#1a2d1a", diffRemovedBg: "#2d1a1a", diffContextBg: "#1c1b1a" },
+  "github": { diffAdded: "#3fb950", diffRemoved: "#f85149", diffContext: "#8b949e", diffAddedBg: "#033a16", diffRemovedBg: "#67060c", diffContextBg: "#010409" },
+  "gruvbox": { diffAdded: "#98971a", diffRemoved: "#cc241d", diffContext: "#928374", diffAddedBg: "#32302f", diffRemovedBg: "#322929", diffContextBg: "#3c3836" },
+  "kanagawa": { diffAdded: "#98bb6c", diffRemoved: "#e82424", diffContext: "#727169", diffAddedBg: "#252e25", diffRemovedBg: "#362020", diffContextBg: "#2a2a37" },
+  "lucent-orng": { diffAdded: "#6ba1e6", diffRemoved: "#c53b53", diffContext: "#828bb8", diffAddedBg: "#00000000", diffRemovedBg: "#00000000", diffContextBg: "#00000000" },
+  "material": { diffAdded: "#c3e88d", diffRemoved: "#f07178", diffContext: "#546e7a", diffAddedBg: "#2e3c2b", diffRemovedBg: "#3c2b2b", diffContextBg: "#1e272c" },
+  "matrix": { diffAdded: "#1cc24b", diffRemoved: "#ff4b4b", diffContext: "#8ca391", diffAddedBg: "#132616", diffRemovedBg: "#261212", diffContextBg: "#0e130d" },
+  "mercury": { diffAdded: "#77c599", diffRemoved: "#fc92b4", diffContext: "#9d9da8", diffAddedBg: "#77c59933", diffRemovedBg: "#fc92b433", diffContextBg: "#1e1e2a" },
+  "monokai": { diffAdded: "#a6e22e", diffRemoved: "#f92672", diffContext: "#75715e", diffAddedBg: "#1a3a1a", diffRemovedBg: "#3a1a1a", diffContextBg: "#1e1f1c" },
+  "nightowl": { diffAdded: "#c5e478", diffRemoved: "#ef5350", diffContext: "#5f7e97", diffAddedBg: "#0a2e1a", diffRemovedBg: "#2d1b1b", diffContextBg: "#0b253a" },
+  "nord": { diffAdded: "#a3be8c", diffRemoved: "#bf616a", diffContext: "#8b95a7", diffAddedBg: "#3b4252", diffRemovedBg: "#3b4252", diffContextBg: "#3b4252" },
+  "one-dark": { diffAdded: "#98c379", diffRemoved: "#e06c75", diffContext: "#5c6370", diffAddedBg: "#2c382b", diffRemovedBg: "#3a2d2f", diffContextBg: "#21252b" },
+  "opencode": { diffAdded: "#4fd6be", diffRemoved: "#c53b53", diffContext: "#828bb8", diffAddedBg: "#20303b", diffRemovedBg: "#37222c", diffContextBg: "#141414" },
+  "orng": { diffAdded: "#6ba1e6", diffRemoved: "#c53b53", diffContext: "#828bb8", diffAddedBg: "#1a2a3d", diffRemovedBg: "#37222c", diffContextBg: "#141414" },
+  "osaka-jade": { diffAdded: "#549e6a", diffRemoved: "#ff5345", diffContext: "#53685b", diffAddedBg: "#15241c", diffRemovedBg: "#241515", diffContextBg: "#1a2520" },
+  "palenight": { diffAdded: "#c3e88d", diffRemoved: "#f07178", diffContext: "#676e95", diffAddedBg: "#2e3c2b", diffRemovedBg: "#3c2b2b", diffContextBg: "#1e2132" },
+  "rosepine": { diffAdded: "#31748f", diffRemoved: "#eb6f92", diffContext: "#6e6a86", diffAddedBg: "#1f2d3a", diffRemovedBg: "#3a1f2d", diffContextBg: "#1f1d2e" },
+  "solarized": { diffAdded: "#859900", diffRemoved: "#dc322f", diffContext: "#586e75", diffAddedBg: "#073642", diffRemovedBg: "#073642", diffContextBg: "#073642" },
+  "synthwave84": { diffAdded: "#72f1b8", diffRemoved: "#fe4450", diffContext: "#848bbd", diffAddedBg: "#1a3a2a", diffRemovedBg: "#3a1a2a", diffContextBg: "#1e1a29" },
+  "tokyonight": { diffAdded: "#4fd6be", diffRemoved: "#c53b53", diffContext: "#828bb8", diffAddedBg: "#20303b", diffRemovedBg: "#37222c", diffContextBg: "#1e2030" },
+  "vercel": { diffAdded: "#63c46d", diffRemoved: "#ff6166", diffContext: "#878787", diffAddedBg: "#0b1d0f", diffRemovedBg: "#2a1314", diffContextBg: "#000000" },
+  "vesper": { diffAdded: "#99ffe4", diffRemoved: "#ff8080", diffContext: "#a0a0a0", diffAddedBg: "#0d2818", diffRemovedBg: "#281a1a", diffContextBg: "#101010" },
+  "zenburn": { diffAdded: "#7f9f7f", diffRemoved: "#cc9393", diffContext: "#9f9f9f", diffAddedBg: "#4f5f4f", diffRemovedBg: "#5f4f4f", diffContextBg: "#4f4f4f" },
+} as const;

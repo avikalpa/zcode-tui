@@ -37,6 +37,15 @@ TOKEN_MAP = [
     ("selected", "primary", []),
 ]
 
+DIFF_MAP = [
+    ("diffAdded", "diffAdded", ["success"]),
+    ("diffRemoved", "diffRemoved", ["error"]),
+    ("diffContext", "diffContext", ["subtle"]),
+    ("diffAddedBg", "diffAddedBg", []),
+    ("diffRemovedBg", "diffRemovedBg", []),
+    ("diffContextBg", "diffContextBg", []),
+]
+
 MD_MAP = [
     ("mdText", "markdownText", ["text"]),
     ("mdHeading", "markdownHeading", ["accent"]),
@@ -122,6 +131,7 @@ def main():
         *[f"  {name}: string;" for name, _, _fb in TOKEN_MAP],
         "}> = {",
     ]
+    diff_lines = ["", "export const OFFICIAL_DIFF: Record<string, {", *[f"  {name}: string;" for name, _, _fb in DIFF_MAP], "}> = {"]
     md_lines = ["", "export const OFFICIAL_MD: Record<string, MdTokens> = {"]
     problems = []
     for name in names:
@@ -146,8 +156,19 @@ def main():
         lines.append(f"  \"{name}\": {{ {body} }},")
         mdbody = ", ".join(f"{k}: \"{v}\"" for k, v in md.items())
         md_lines.append(f"  \"{name}\": {{ {mdbody} }},")
+        dv = {}
+        for token, key, fallbacks in DIFF_MAP:
+            v = pick(theme, key, fallbacks, defs)
+            if v is None:
+                v = {"diffAdded": "#4fd6be", "diffRemoved": "#c53b53", "diffContext": "#828bb8",
+                     "diffAddedBg": "#20303b", "diffRemovedBg": "#37222c", "diffContextBg": "#1e1e1e"}[token]
+            dv[token] = normalize(v).lower()
+        dbody = ", ".join(f"{k}: \"{v}\"" for k, v in dv.items())
+        diff_lines.append(f"  \"{name}\": {{ {dbody} }},")
     lines.append("} as const;")
     lines.extend(md_lines)
+    lines.append("} as const;")
+    lines.extend(diff_lines)
     lines.append("} as const;")
     OUT.write_text("\n".join(lines) + "\n")
     print(f"wrote {OUT} with {len(names)} themes")

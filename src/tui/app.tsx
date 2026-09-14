@@ -31,49 +31,102 @@ import {
   type ThemeName,
   type ThemeTokens,
 } from "./design";
+import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import pkgJson from "../../package.json";
 
 const VERSION = pkgJson.version;
 
 // Markdown tinting per active theme: the assistant transcript renders through
-// these styles so headings, code and links colour exactly like the reference
-// TUI does under the same palette. Unknown style names are simply unused, so
-// both naming conventions are registered.
+// a SyntaxStyle built from the SAME tree-sitter scope rules OpenCode feeds its
+// markdown element (ported verbatim from their theme module), with colours from
+// the active theme's markdown/syntax/diff arms. This is what turns fenced code
+// blocks into highlighted, numbered panels and gives headings/lists/diffs
+// their structure colours.
 const mdStyleCache = new Map<ThemeName, SyntaxStyle>();
+type ThemeRule = { scope: string[]; style: { foreground?: string; background?: string; bold?: boolean; italic?: boolean; underline?: boolean } };
 function mdStyleFor(theme: ThemeName): SyntaxStyle {
   const cached = mdStyleCache.get(theme);
   if (cached) return cached;
+  const C = THEMES[theme];
   const md = mdFor(theme);
-  const style = SyntaxStyle.fromStyles({
-    text: { fg: md.mdText },
-    paragraph: { fg: md.mdText },
-    heading: { fg: md.mdHeading, bold: true },
-    h1: { fg: md.mdHeading, bold: true },
-    h2: { fg: md.mdHeading, bold: true },
-    h3: { fg: md.mdHeading, bold: true },
-    h4: { fg: md.mdHeading, bold: true },
-    link: { fg: md.mdLink },
-    linkText: { fg: md.mdLinkText },
-    code: { fg: md.mdCode },
-    inlineCode: { fg: md.mdCode },
-    codeBlock: { fg: md.mdText },
-    blockquote: { fg: md.mdQuote, italic: true },
-    emph: { fg: md.mdEmph, italic: true },
-    strong: { fg: md.mdStrong, bold: true },
-    listItem: { fg: md.mdListItem },
-    listEnumeration: { fg: md.mdListEnum },
-    // Syntax colour arms for fenced code blocks.
-    comment: { fg: md.synComment },
-    keyword: { fg: md.synKeyword },
-    function: { fg: md.synFunction },
-    variable: { fg: md.synVariable },
-    string: { fg: md.synString },
-    number: { fg: md.synNumber },
-    type: { fg: md.synType },
-    operator: { fg: md.synOperator },
-    punctuation: { fg: md.synPunct },
-  });
+  const diff = OFFICIAL_DIFF[theme] ?? OFFICIAL_DIFF.opencode;
+  const rules: ThemeRule[] = [
+    { scope: ["default"], style: { foreground: C.fg } },
+    { scope: ["comment", "comment.documentation"], style: { foreground: md.synComment, italic: true } },
+    { scope: ["string", "symbol"], style: { foreground: md.synString } },
+    { scope: ["number", "boolean"], style: { foreground: md.synNumber } },
+    { scope: ["character.special"], style: { foreground: md.synString } },
+    { scope: ["keyword.return", "keyword.conditional", "keyword.repeat", "keyword.coroutine"], style: { foreground: md.synKeyword, italic: true } },
+    { scope: ["keyword.type"], style: { foreground: md.synType, bold: true, italic: true } },
+    { scope: ["keyword.function", "function.method"], style: { foreground: md.synFunction } },
+    { scope: ["keyword"], style: { foreground: md.synKeyword, italic: true } },
+    { scope: ["keyword.import"], style: { foreground: md.synKeyword } },
+    { scope: ["operator", "keyword.operator", "punctuation.delimiter"], style: { foreground: md.synOperator } },
+    { scope: ["keyword.conditional.ternary"], style: { foreground: md.synOperator } },
+    { scope: ["variable", "variable.parameter", "function.method.call", "function.call"], style: { foreground: md.synVariable } },
+    { scope: ["variable.member", "function", "constructor"], style: { foreground: md.synFunction } },
+    { scope: ["type", "module"], style: { foreground: md.synType } },
+    { scope: ["constant"], style: { foreground: md.synNumber } },
+    { scope: ["property"], style: { foreground: md.synVariable } },
+    { scope: ["class"], style: { foreground: md.synType } },
+    { scope: ["parameter"], style: { foreground: md.synVariable } },
+    { scope: ["punctuation", "punctuation.bracket"], style: { foreground: md.synPunct } },
+    { scope: ["variable.builtin", "type.builtin", "function.builtin", "module.builtin", "constant.builtin"], style: { foreground: C.error } },
+    { scope: ["variable.super"], style: { foreground: C.error } },
+    { scope: ["string.escape", "string.regexp"], style: { foreground: md.synKeyword } },
+    { scope: ["keyword.directive"], style: { foreground: md.synKeyword, italic: true } },
+    { scope: ["punctuation.special"], style: { foreground: md.synOperator } },
+    { scope: ["keyword.modifier"], style: { foreground: md.synKeyword, italic: true } },
+    { scope: ["keyword.exception"], style: { foreground: md.synKeyword, italic: true } },
+    // Markdown structure scopes.
+    { scope: ["markup.heading"], style: { foreground: md.mdHeading, bold: true } },
+    { scope: ["markup.heading.1"], style: { foreground: md.mdHeading, bold: true, underline: true } },
+    { scope: ["markup.heading.2"], style: { foreground: md.mdHeading, bold: true } },
+    { scope: ["markup.heading.3"], style: { foreground: md.mdHeading, bold: true } },
+    { scope: ["markup.heading.4"], style: { foreground: md.mdHeading, bold: true } },
+    { scope: ["markup.heading.5"], style: { foreground: md.mdHeading, bold: true } },
+    { scope: ["markup.heading.6"], style: { foreground: md.mdHeading, bold: true } },
+    { scope: ["markup.bold", "markup.strong"], style: { foreground: md.mdStrong, bold: true } },
+    { scope: ["markup.italic"], style: { foreground: md.mdEmph, italic: true } },
+    { scope: ["markup.list"], style: { foreground: md.mdListItem } },
+    { scope: ["markup.quote"], style: { foreground: md.mdQuote, italic: true } },
+    { scope: ["markup.raw", "markup.raw.block"], style: { foreground: md.mdCode } },
+    { scope: ["markup.raw.inline"], style: { foreground: md.mdCode, background: C.bg } },
+    { scope: ["markup.link"], style: { foreground: md.mdLink, underline: true } },
+    { scope: ["markup.link.label"], style: { foreground: md.mdLinkText, underline: true } },
+    { scope: ["markup.link.url"], style: { foreground: md.mdLink, underline: true } },
+    { scope: ["label"], style: { foreground: md.mdLinkText } },
+    { scope: ["spell", "nospell"], style: { foreground: C.fg } },
+    { scope: ["conceal"], style: { foreground: C.subtle } },
+    { scope: ["string.special", "string.special.url"], style: { foreground: md.mdLink, underline: true } },
+    { scope: ["character"], style: { foreground: md.synString } },
+    { scope: ["float"], style: { foreground: md.synNumber } },
+    { scope: ["comment.error"], style: { foreground: C.error, italic: true, bold: true } },
+    { scope: ["comment.warning"], style: { foreground: C.warning, italic: true, bold: true } },
+    { scope: ["comment.todo", "comment.note"], style: { foreground: C.assistant, italic: true, bold: true } },
+    { scope: ["namespace"], style: { foreground: md.synType } },
+    { scope: ["field"], style: { foreground: md.synVariable } },
+    { scope: ["type.definition"], style: { foreground: md.synType, bold: true } },
+    { scope: ["keyword.export"], style: { foreground: md.synKeyword } },
+    { scope: ["attribute", "annotation"], style: { foreground: C.warning } },
+    { scope: ["diff.minus"], style: { foreground: diff.diffRemoved, background: diff.diffRemovedBg } },
+    { scope: ["diff.delta"], style: { foreground: diff.diffContext, background: diff.diffContextBg } },
+    { scope: ["error"], style: { foreground: C.error, bold: true } },
+    { scope: ["warning"], style: { foreground: C.warning, bold: true } },
+    { scope: ["info"], style: { foreground: C.assistant } },
+    { scope: ["debug"], style: { foreground: C.subtle } },
+  ];
+  const style = SyntaxStyle.fromTheme(rules.map((r) => ({
+    scope: r.scope,
+    style: {
+      foreground: r.style.foreground,
+      background: r.style.background,
+      bold: r.style.bold,
+      italic: r.style.italic,
+      underline: r.style.underline,
+    },
+  })));
   mdStyleCache.set(theme, style);
   return style;
 }
@@ -325,7 +378,16 @@ const MessageView = memo(function MessageView({
         <text content={thinking.slice(-160)} fg={C.faint} />
       ) : null}
       {!streaming ? (
-        <markdown content={m.text || "∅"} syntaxStyle={mdStyle} />
+        m.text.trim() ? (
+          <markdown
+            content={m.text}
+            syntaxStyle={mdStyle}
+            streaming={true}
+            internalBlockMode="top-level"
+            tableOptions={{ style: "grid" }}
+            conceal={true}
+          />
+        ) : null
       ) : (
         <text content={m.text || "…"} fg={C.fg} />
       )}
