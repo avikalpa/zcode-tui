@@ -32,8 +32,9 @@ import {
   type ThemeTokens,
 } from "./design";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
+import pkgJson from "../../package.json";
 
-const VERSION = "0.6.0";
+const VERSION = pkgJson.version;
 
 // Markdown tinting per active theme: the assistant transcript renders through
 // these styles so headings, code and links colour exactly like the reference
@@ -81,14 +82,14 @@ function mdStyleFor(theme: ThemeName): SyntaxStyle {
 // provider. The runtime catalog must never re-introduce the paid login models.
 // The wire ids intentionally preserve the desktop's canonical capitalization.
 const ALLOWED_MODELS = [
-  { label: "GLM-5.3-Flash", providerId: "zai", modelId: "GLM-5.3-Flash", isDefault: true },
-  { label: "GLM-5.3", providerId: "zai", modelId: "GLM-5.3", isDefault: false },
+  { label: "GLM-5.3-Flash", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "GLM-5.3-Flash", isDefault: true },
+  { label: "GLM-5.3", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "GLM-5.3", isDefault: false },
 ] as const;
 
 const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
 const EFFORTS = ["low", "high", "max"] as const;
 
-type ModelChoice = { label: string; providerId: string; modelId: string; isDefault?: boolean };
+type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session";
 type DialogName = "sessions" | "model" | "mode" | "palette" | "fork" | "themes" | "rename" | null;
 
@@ -122,23 +123,40 @@ export interface TurnMessage {
   thinkingMs?: number;
 }
 
-// A compact block mark that keeps the same proportions as OpenCode's logo.
-// ZCode's mark is split into a quiet wordmark and a brighter TUI suffix.
-// (The mark itself is Astra's lane — hands off in visual waves.)
+// The wordmark — designed by Astra (2026-09-14 consult) in the OpenCode
+// block-letter style. Mark vocabulary: `_` space on faint bg, `^` upper-half
+// block letter-on-faint, `~` upper-half block faint, `,` lower-half faint;
+// anything else renders literally. left = quiet colour, right = bright.
 const LOGO_LINES: [string, string][] = [
-  ["█▀▀▀ █▀▀▀ █▀▀█ █▀▀▄ █▀▀▀", "▀█▀ █  █ ▀█▀"],
-  ["  ▄  █    █  █ █  █ █▀▀ ", " █  █  █  █ "],
-  [" █   █    █  █ █  █ █   ", " █  █  █  █ "],
-  ["▀▀▀  ▀▀▀▀ ▀▀▀  ▀▀▀▀ ▀▀▀ ", "▀▀▀ ▀▀▀  ▀▀▀"],
+  ["                        ", "              "],
+  ["▀▀▀█ █▀▀▀ █▀▀█ █▀▀█ █▀▀█", "▀█▀▀ █  █  ▀  "],
+  ["▄█▀_ █___ █__█ █__█ █^^^", "_█__ █__█  █  "],
+  ["▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀", "_▀▀▀ ▀▀▀▀  ▀▀▀"],
 ];
+
+function LogoChar({ ch, fg, C }: { ch: string; fg: string; C: ThemeTokens }) {
+  if (ch === "_") return <text content=" " fg={fg} bg={C.faint} />;
+  if (ch === "^") return <text content="▀" fg={fg} bg={C.faint} />;
+  if (ch === "~") return <text content="▀" fg={C.faint} />;
+  if (ch === ",") return <text content="▄" fg={C.faint} />;
+  return <text content={ch} fg={fg} />;
+}
 
 function ZCodeLogo({ C }: { C: ThemeTokens }) {
   return (
     <box style={{ flexDirection: "column", flexShrink: 0 }}>
       {LOGO_LINES.map(([left, right], index) => (
         <box key={index} style={{ flexDirection: "row" }}>
-          <text content={left} fg={C.subtle} />
-          <text content={` ${right}`} fg={C.brand} />
+          <box style={{ flexDirection: "row" }}>
+            {[...left].map((ch, i) => (
+              <LogoChar key={i} ch={ch} fg={C.subtle} C={C} />
+            ))}
+          </box>
+          <box style={{ flexDirection: "row" }}>
+            {[...` ${right}`].map((ch, i) => (
+              <LogoChar key={i} ch={ch} fg={C.brand} C={C} />
+            ))}
+          </box>
         </box>
       ))}
     </box>
@@ -403,8 +421,10 @@ function Composer({
   C,
   width,
   underlineWidth,
-  promptText,
-  isPlaceholder,
+  draft,
+  placeholder,
+  cursor,
+  cursorBlink,
   typing,
   mode,
   model,
@@ -416,8 +436,10 @@ function Composer({
   C: ThemeTokens;
   width: number | "100%";
   underlineWidth: number;
-  promptText: string;
-  isPlaceholder: boolean;
+  draft: string;
+  placeholder: string;
+  cursor: number | null;
+  cursorBlink: boolean;
   typing: boolean;
   mode: string;
   model: string;
@@ -429,16 +451,38 @@ function Composer({
   const label = modeLabel(mode);
   const accent = leaderActive ? C.border : modeAccent(mode, C);
   const underline = Math.max(0, underlineWidth);
+  const wrapWidth = Math.max(12, underline - 4);
+  // The cursor is a solid block that blinks while typing. With a draft it
+  // splits the text at the cursor index (wrapped independently on either
+  // side); an empty draft shows the block over the first placeholder cell.
+  const glyph = cursorBlink ? "█" : " ";
+  let inputRows: { before: string; glyph: string; after: string }[];
+  if (!draft) {
+    inputRows = [{ before: "", glyph: typing ? glyph : " ", after: placeholder }];
+  } else {
+    const cur = cursor ?? draft.length;
+    const beforeL = wrapText(draft.slice(0, cur), wrapWidth);
+    const afterL = wrapText(draft.slice(cur), wrapWidth);
+    const beforeTail = beforeL.pop() ?? "";
+    inputRows = [
+      ...beforeL.map((l) => ({ before: l, glyph: "", after: "" })),
+      { before: beforeTail, glyph: typing ? glyph : "", after: afterL[0] ?? "" },
+      ...afterL.slice(1).map((l) => ({ before: "", glyph: "", after: l })),
+    ];
+  }
   return (
     <box style={{ width, flexDirection: "column", flexShrink: 0 }}>
       <box style={{ flexDirection: "row", flexShrink: 0 }}>
         <box style={{ width: 1, flexShrink: 0, flexDirection: "column", backgroundColor: accent }}>
           <box style={{ flexGrow: 1 }} />
-          <text content="╹" fg={accent} />
         </box>
         <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
-          {wrapText(promptText, Math.max(12, underlineWidth - 4)).map((line: string, lineIndex: number, all: string[]) => (
-            <text key={lineIndex} content={`${line}${typing && lineIndex === all.length - 1 ? "▏" : ""}`} fg={isPlaceholder ? C.subtle : C.fg} />
+          {inputRows.map((row, lineIndex) => (
+            <box key={lineIndex} style={{ flexDirection: "row", flexShrink: 0 }}>
+              {row.before ? <text content={row.before} fg={draft ? C.fg : C.subtle} /> : null}
+              {row.glyph ? <text content={row.glyph} fg={draft ? C.fg : C.subtle} /> : null}
+              {row.after ? <text content={row.after} fg={draft ? C.fg : C.subtle} /> : null}
+            </box>
           ))}
           <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
             <text content={`${label.label} `} fg={accent} />
@@ -536,7 +580,21 @@ export function App({
   const [ctx, setCtx] = useState<{ used: number; window: number } | null>(null);
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
+  // The composer cursor: an index into the draft (default = end). Arrows move
+  // it, printable input inserts at it, backspace deletes before it.
+  const [cursor, setCursor] = useState<number | null>(null); // null = end
+  const [cursorBlink, setCursorBlink] = useState(true);
+  const moveCursor = (delta: number) => {
+    const cur = cursor ?? draftRef.current.length;
+    setCursor(Math.max(0, Math.min(draftRef.current.length, cur + delta)));
+  };
   const [typing, setTyping] = useState(true);
+  useEffect(() => {
+    if (!typing) return;
+    const timer = setInterval(() => setCursorBlink((b) => !b), 530);
+    return () => clearInterval(timer);
+  }, [typing]);
+
   // Transient status toast — the OpenCode toast overlay (top right, split
   // variant-tinted borders, single slot, 5s / 7s for errors).
   const [toast, setToast] = useState<{ message: string; variant: "info" | "success" | "warning" | "error" } | null>(null);
@@ -809,6 +867,7 @@ export function App({
     }
     setDraft("");
     draftRef.current = "";
+    setCursor(null);
     sugDismissed.current = false;
     moveSug(0);
     setTyping(true);
@@ -1228,7 +1287,7 @@ export function App({
       return;
     }
     if (key.ctrl && key.name === "c") {
-      if (typing) { draftRef.current = ""; setDraft(""); return; }
+      if (typing) { draftRef.current = ""; setDraft(""); setCursor(null); return; }
       onQuit();
       return;
     }
@@ -1244,12 +1303,15 @@ export function App({
       const sugOpenNow = sugMatches.length > 0 && !sugDismissed.current;
       if (key.name === "escape") {
         if (sugOpenNow) { sugDismissed.current = true; return; }
-        setTyping(false); draftRef.current = ""; setDraft(""); return;
+        setTyping(false); draftRef.current = ""; setDraft(""); setCursor(null); return;
       }
       if (key.name === "backspace" || key.sequence === "\x7f" || key.sequence === "\b") {
-        const next = draftRef.current.slice(0, -1);
+        const cur = cursor ?? draftRef.current.length;
+        if (cur === 0) return;
+        const next = draftRef.current.slice(0, cur - 1) + draftRef.current.slice(cur);
         draftRef.current = next;
         setDraft(next);
+        setCursor(cur - 1);
         sugDismissed.current = false;
         moveSug(0);
         return;
@@ -1287,12 +1349,32 @@ export function App({
       if ((key.name === "return" && (key as { shift?: boolean }).shift)
         || (key.name === "return" && (key as { meta?: boolean }).meta)
         || (key.ctrl && key.name === "j")) {
-        const next = `${draftRef.current}\n`;
+        const cur = cursor ?? draftRef.current.length;
+        const next = `${draftRef.current.slice(0, cur)}\n${draftRef.current.slice(cur)}`;
         draftRef.current = next;
         setDraft(next);
+        setCursor(cur + 1);
         return;
       }
+      const multilineNow = draftRef.current.includes("\n");
+      if (key.name === "left") { moveCursor(-1); return; }
+      if (key.name === "right") { moveCursor(1); return; }
+      if (key.name === "home") { setCursor(0); return; }
+      if (key.name === "end") { setCursor(draftRef.current.length); return; }
       if (key.name === "up" || key.name === "down") {
+        // Multiline drafts move the cursor across lines; single-line drafts
+        // walk the prompt history.
+        if (multilineNow) {
+          const cur = cursor ?? draftRef.current.length;
+          const starts = [0, ...[...draftRef.current].reduce<number[]>((acc, ch, i) => ch === "\n" ? [...acc, i + 1] : acc, [])];
+          const lineIdx = starts.reduce((acc, start, i) => cur >= start ? i : acc, 0);
+          const col = cur - starts[lineIdx];
+          const target = key.name === "up" ? lineIdx - 1 : lineIdx + 1;
+          if (target < 0 || target >= starts.length) return;
+          const lineEnd = target + 1 < starts.length ? starts[target + 1] - 1 : draftRef.current.length;
+          setCursor(Math.min(starts[target] + col, lineEnd));
+          return;
+        }
         if (history.length === 0) return;
         const next = key.name === "up"
           ? Math.min(historyIdx.current + 1, history.length - 1)
@@ -1301,6 +1383,7 @@ export function App({
         const restored = next >= 0 ? history[next] : "";
         draftRef.current = restored;
         setDraft(restored);
+        setCursor(null);
         return;
       }
       if (key.name === "return") {
@@ -1345,9 +1428,11 @@ export function App({
       // (the "mid-turn truncation" suspect), which is a correctness bug for
       // every language that is not English.
       if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
-        const next = draftRef.current + key.sequence;
+        const cur = cursor ?? draftRef.current.length;
+        const next = draftRef.current.slice(0, cur) + key.sequence + draftRef.current.slice(cur);
         draftRef.current = next;
         setDraft(next);
+        setCursor(cur + key.sequence.length);
         sugDismissed.current = false;
         moveSug(0);
       }
@@ -1563,12 +1648,12 @@ export function App({
     typing,
     mode,
     model: modelLabel(activeModel),
-    provider: providerLabel,
+    provider: (activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel,
     effort,
     thinkingOff: thoughtLevel === "disabled",
     leaderActive,
   };
-  const hintBits = "shift+tab mode   ctrl+p commands";
+  const hintBits = "shift+tab agents   ctrl+p commands";
   const ctxLabel = ctx && ctx.window > 0 ? `${formatContextLabel(ctx.used, ctx.window)}  ` : "";
 
   if (view === "home") {
@@ -1581,11 +1666,14 @@ export function App({
           <box style={{ height: 1, flexShrink: 0 }} />
           <box style={{ width: promptWidth, flexShrink: 0 }}>
             {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
-            <Composer width={promptWidth} underlineWidth={promptWidth - 1} promptText={promptText} isPlaceholder={!draft} {...composerProps} />
+            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
           </box>
           <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
             <text content={`${cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
-            <HintBits text={hintBits} C={C} />
+            <box style={{ flexDirection: "row", flexShrink: 0 }}>
+              <HintBits text={hintBits} C={C} />
+              <text content={`   ${VERSION}`} fg={C.faint} />
+            </box>
           </box>
           <box style={{ flexGrow: 1 }} />
         </box>
@@ -1681,7 +1769,7 @@ export function App({
       ) : null}
       {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} /> : null}
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-        <Composer width="100%" underlineWidth={Math.max(10, dims.width - 5)} promptText={promptText} isPlaceholder={!draft} {...composerProps} />
+        <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
       </box>
       <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
         {running ? (
