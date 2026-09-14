@@ -1,8 +1,12 @@
 // OpenCode-shaped selection primitives.
 //
-// Dialogs deliberately use the global keyboard hook instead of a focused
-// InputRenderable. OpenTUI can retain focus on a component that has already
-// been reconciled away; keeping filter and draft state here makes every modal
+// The dialog container follows the reference modal recipe (consult
+// 2026-09-13, item 1): a flat, borderless panel on a dimmed backdrop — no
+// rounded borders, no recessed search box, no footer hint row. Selection is a
+// full-width primary bar with background-coloured text; the current item wears
+// a filled dot. Dialogs deliberately use the global keyboard hook instead of a
+// focused InputRenderable: OpenTUI can retain focus on a component that has
+// already been reconciled away, so keeping filter state here makes every modal
 // deterministic under fast PTY typing.
 import { useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
@@ -22,6 +26,12 @@ type DialogAction<T> = (
   option: DialogOption<T> | undefined,
 ) => void;
 
+// Width tiers from the reference modal: medium 60, large 88, xlarge 116.
+function tierWidth(size: "medium" | "large" | "xlarge" | undefined, width: number): number {
+  const base = size === "xlarge" ? 116 : size === "large" ? 88 : 60;
+  return Math.min(base, Math.max(20, width - 2));
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -32,6 +42,37 @@ function truncate(value: string, width: number): string {
   return `${value.slice(0, width - 1)}…`;
 }
 
+function ModalBackdrop({
+  C,
+  width,
+  height,
+  children,
+}: {
+  C: ThemeTokens;
+  width: number;
+  height: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width,
+        height,
+        zIndex: 3000,
+        backgroundColor: "#00000096",
+        flexDirection: "column",
+        alignItems: "center",
+      }}
+    >
+      <box style={{ flexGrow: 0, width: "100%", height: Math.floor(height / 4), flexShrink: 0 }} />
+      {children}
+    </box>
+  );
+}
+
 export function SelectDialog<T>({
   title,
   options,
@@ -39,7 +80,7 @@ export function SelectDialog<T>({
   onSelect,
   onClose,
   onAction,
-  footer,
+  size,
   countLabel,
   theme,
 }: {
@@ -49,7 +90,7 @@ export function SelectDialog<T>({
   onSelect: (value: T, id: string) => void;
   onClose: () => void;
   onAction?: DialogAction<T>;
-  footer?: string;
+  size?: "medium" | "large" | "xlarge";
   countLabel?: string;
   theme?: ThemeTokens;
 }) {
@@ -57,8 +98,7 @@ export function SelectDialog<T>({
   const [idx, setIdx] = useState(0);
   const dims = useTerminalDimensions();
   const C = theme ?? THEMES.opencode;
-  const cardWidth = Math.max(56, Math.min(88, dims.width - 8));
-  const cardHeight = Math.max(14, Math.min(36, dims.height - 8));
+  const cardWidth = tierWidth(size, dims.width);
 
   const shown = options.filter((o) =>
     `${o.label} ${o.description ?? ""} ${o.meta ?? ""} ${o.group ?? ""}`
@@ -66,7 +106,9 @@ export function SelectDialog<T>({
       .includes(filter.toLowerCase()),
   );
   const sel = clamp(idx, 0, Math.max(0, shown.length - 1));
-  const visibleCount = Math.max(5, Math.min(22, cardHeight - 7));
+  // One row per option plus group headings; the modal grows to content, capped
+  // by the viewport so long lists scroll the window rather than the screen.
+  const visibleCount = Math.max(5, Math.min(22, dims.height - Math.floor(dims.height / 4) - 6));
   const winStart = Math.max(
     0,
     Math.min(sel - Math.floor(visibleCount / 2), Math.max(0, shown.length - visibleCount)),
@@ -80,7 +122,7 @@ export function SelectDialog<T>({
   };
 
   useKeyboard((key) => {
-    if (key.name === "escape") { onClose(); return; }
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
     if (key.ctrl && key.name === "f") { onAction?.("pin", shown[sel]); return; }
     if (key.ctrl && key.name === "d") { onAction?.("delete", shown[sel]); return; }
     if (key.ctrl && key.name === "r") { onAction?.("rename", shown[sel]); return; }
@@ -99,70 +141,69 @@ export function SelectDialog<T>({
   });
 
   return (
-    <box style={{ flexDirection: "column", flexGrow: 1, backgroundColor: C.bg }}>
-      <box style={{ flexGrow: 1 }} />
-      <box style={{ height: cardHeight, flexDirection: "row", flexShrink: 0 }}>
-        <box style={{ flexGrow: 1 }} />
-        <box
-          style={{
-            width: cardWidth,
-            height: cardHeight,
-            flexDirection: "column",
-            flexShrink: 0,
-            backgroundColor: C.bg,
-            borderStyle: "rounded",
-            borderColor: C.border,
-            paddingLeft: 1,
-            paddingRight: 1,
-          }}
-        >
-          <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
-            <text content={title} fg={C.brand} />
-            <text content="esc" fg={C.faint} />
-          </box>
-          <box style={{ height: 1, flexDirection: "row", backgroundColor: C.panel, flexShrink: 0 }}>
-            <text content={`${filter ? "▌ " : "⌕ "}${filter || "Search"}${filter ? "▏" : ""}`} fg={filter ? C.fg : C.faint} />
-          </box>
-          <box style={{ height: 1, flexShrink: 0 }}>
-            <text content={`${shown.length} ${countLabel ?? "session"}${shown.length === 1 ? "" : "s"}`} fg={C.faint} />
-          </box>
-          {visible.map((o, visibleIndex) => {
-            const abs = shown.indexOf(o);
-            const selected = abs === sel;
-            const previous = visible[visibleIndex - 1];
-            const group = o.group && o.group !== previous?.group ? o.group : undefined;
-            const labelWidth = Math.max(16, cardWidth - 8);
-            return (
-              <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
-                {group ? <text content={` ${group}`} fg={C.subtle} /> : null}
-                <box
-                  style={{
-                    height: 1,
-                    flexDirection: "row",
-                    flexShrink: 0,
-                    paddingLeft: 1,
-                    paddingRight: 1,
-                    backgroundColor: selected ? C.selected : undefined,
-                  }}
-                >
-                  <text
-                    content={`${selected ? "›" : " "} ${truncate(o.label, labelWidth)}${o.id === currentId ? "  ●" : ""}${o.meta ? `  ${o.meta}` : ""}`}
-                    fg={selected ? C.accentText : C.fg}
-                  />
-                </box>
-              </box>
-            );
-          })}
-          {visible.length === 0 ? <text content="  no matches" fg={C.faint} /> : null}
-          <box style={{ flexGrow: 1 }} />
-          <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
-            <text content={footer ?? "↑↓ navigate   enter select   esc close"} fg={C.faint} />
-          </box>
+    <ModalBackdrop C={C} width={dims.width} height={dims.height}>
+      <box
+        style={{
+          width: cardWidth,
+          maxHeight: dims.height - Math.floor(dims.height / 4) - 2,
+          flexDirection: "column",
+          flexShrink: 0,
+          backgroundColor: C.panel,
+          paddingTop: 1,
+          paddingBottom: 1,
+          paddingLeft: 2,
+          paddingRight: 2,
+        }}
+      >
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content={title} fg={C.fg} />
+          <text content="esc" fg={C.faint} />
         </box>
-        <box style={{ flexGrow: 1 }} />
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+          <text content={filter ? `${filter}` : "search"} fg={filter ? C.fg : C.faint} />
+          <text content={filter ? "█" : ""} fg={C.accent} />
+        </box>
+        {visible.map((o) => {
+          const abs = shown.indexOf(o);
+          const selected = abs === sel;
+          const previous = visible[visible.indexOf(o) - 1];
+          const group = o.group && o.group !== previous?.group ? o.group : undefined;
+          const labelWidth = Math.max(16, cardWidth - 10);
+          return (
+            <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
+              {group ? <text content={` ${group}`} fg={C.subtle} /> : null}
+              <box
+                style={{
+                  height: 1,
+                  flexDirection: "row",
+                  flexShrink: 0,
+                  paddingLeft: 1,
+                  paddingRight: 1,
+                  backgroundColor: selected ? C.accent : undefined,
+                }}
+              >
+                <text
+                  content={`${truncate(o.label, labelWidth)}${o.id === currentId ? "  ●" : ""}${o.meta ? `  ${o.meta}` : ""}`}
+                  fg={selected ? C.accentText : C.fg}
+                />
+                {o.description ? (
+                  <text
+                    content={`  ${truncate(o.description, Math.max(8, cardWidth - labelWidth - 8))}`}
+                    fg={selected ? C.accentText : C.subtle}
+                  />
+                ) : null}
+              </box>
+            </box>
+          );
+        })}
+        {visible.length === 0 ? <text content=" No matching items" fg={C.faint} /> : null}
+        {shown.length > visible.length ? (
+          <box style={{ height: 1, flexShrink: 0 }}>
+            <text content={` ${winStart + 1}-${winStart + visible.length} / ${shown.length} ${countLabel ?? ""}`} fg={C.faint} />
+          </box>
+        ) : null}
       </box>
-      <box style={{ flexGrow: 1 }} />
-    </box>
+    </ModalBackdrop>
   );
 }
 
@@ -184,10 +225,10 @@ export function TextPromptDialog({
   const [value, setValue] = useState(initialValue ?? "");
   const dims = useTerminalDimensions();
   const C = theme ?? THEMES.opencode;
-  const cardWidth = Math.max(48, Math.min(72, dims.width - 8));
+  const cardWidth = Math.min(60, Math.max(20, dims.width - 2));
 
   useKeyboard((key) => {
-    if (key.name === "escape") { onClose(); return; }
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
     if (key.name === "return") {
       const next = value.trim();
       if (next) onSubmit(next);
@@ -200,25 +241,28 @@ export function TextPromptDialog({
   });
 
   return (
-    <box style={{ flexDirection: "column", flexGrow: 1, backgroundColor: C.bg }}>
-      <box style={{ flexGrow: 1 }} />
-      <box style={{ height: 9, flexDirection: "row", flexShrink: 0 }}>
-        <box style={{ flexGrow: 1 }} />
-        <box style={{ width: cardWidth, height: 9, flexDirection: "column", backgroundColor: C.bg, borderStyle: "rounded", borderColor: C.border, paddingLeft: 2, paddingRight: 2 }}>
-          <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between" }}>
-            <text content={title} fg={C.brand} />
-            <text content="esc" fg={C.faint} />
-          </box>
-          <box style={{ height: 1, flexShrink: 0 }} />
-          <box style={{ height: 3, flexDirection: "column", borderStyle: "rounded", borderColor: C.borderActive, backgroundColor: C.panel, paddingLeft: 1, paddingRight: 1 }}>
-            <text content={`› ${value || placeholder || "type a value"}▏`} fg={value ? C.fg : C.faint} />
-          </box>
-          <box style={{ flexGrow: 1 }} />
-          <text content="enter save   esc cancel" fg={C.faint} />
+    <ModalBackdrop C={C} width={dims.width} height={dims.height}>
+      <box
+        style={{
+          width: cardWidth,
+          flexDirection: "column",
+          flexShrink: 0,
+          backgroundColor: C.panel,
+          paddingTop: 1,
+          paddingBottom: 1,
+          paddingLeft: 2,
+          paddingRight: 2,
+        }}
+      >
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content={title} fg={C.fg} />
+          <text content="esc" fg={C.faint} />
         </box>
-        <box style={{ flexGrow: 1 }} />
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+          <text content={value || placeholder || ""} fg={value ? C.fg : C.faint} />
+          <text content="█" fg={C.accent} />
+        </box>
       </box>
-      <box style={{ flexGrow: 1 }} />
-    </box>
+    </ModalBackdrop>
   );
 }

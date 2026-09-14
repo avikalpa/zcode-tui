@@ -145,6 +145,28 @@ export function formatTurnFooter(
   return { head: modeLabel(mode).label, rest: tail };
 }
 
+// Greedy word-wrap for the multiline composer: break at the last space that
+// fits, hard-break words longer than the width, preserve explicit newlines.
+export function wrapText(text: string, width: number): string[] {
+  const width_ = Math.max(10, width);
+  const out: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    if (paragraph === "") { out.push(""); continue; }
+    let line = "";
+    for (const word of paragraph.split(" ")) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (candidate.length <= width_) { line = candidate; continue; }
+      if (line) { out.push(line); line = ""; }
+      if (word.length <= width_) { line = word; continue; }
+      let rest = word;
+      while (rest.length > width_) { out.push(rest.slice(0, width_)); rest = rest.slice(width_); }
+      line = rest;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
 export function formatDateHeading(epochMs: number): string {
   // Date#toDateString is the compact grouping voice used by the reference
   // picker: "Fri Sep 04 2026" rather than a locale-dependent long date.

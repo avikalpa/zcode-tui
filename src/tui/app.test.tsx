@@ -29,22 +29,21 @@ describe("zcode-tui OpenCode-shaped shell", () => {
       { width: 100, height: 30 },
     );
 
+    // The reference home has no subtitle block: logo, composer, hints.
     const home = await setup.waitForFrame(
-      (frame) => frame.includes("zcodetui") && frame.includes("Ask anything"),
+      (frame) => frame.includes("Ask anything") && frame.includes("shift+tab"),
       { maxPasses: 20 },
     );
-    expect(home).toContain("/sessions");
 
     // Send the complete keystroke burst without a render turn between the
     // printable bytes and Enter. This is the timing that exposed stale React
     // state in the first implementation.
     await setup.mockInput.pressKeys([..."/sessions", "\r"]);
     const picker = await setup.waitForFrame(
-      (frame) => frame.includes("Sessions for zcode-tui") && frame.includes("Checking sessions list"),
+      (frame) => frame.includes("Sessions") && frame.includes("Checking sessions list"),
       { maxPasses: 20 },
     );
     expect(picker).toContain("Fri Sep 04 2026");
-    expect(picker).toContain("pin/unpin ctrl+f");
     setup.renderer.destroy();
   });
 });

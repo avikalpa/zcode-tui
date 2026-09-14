@@ -18,6 +18,7 @@ import {
   formatTokens,
   formatTurnFooter,
   matchSlashCommands,
+  wrapText,
   mdFor,
   modeAccent,
   modeLabel,
@@ -30,7 +31,7 @@ import {
   type ThemeName,
   type ThemeTokens,
 } from "./design";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 
 const VERSION = "0.6.0";
 
@@ -191,6 +192,64 @@ function useSpinner(active: boolean): string {
   return SPINNER_FRAMES[frame];
 }
 
+// The OpenCode toast overlay (consult item 3): top right, panel fill, split
+// left+right borders tinted by variant, single slot — an arriving toast
+// replaces the active one.
+function Toast({
+  C,
+  message,
+  variant,
+  width,
+}: {
+  C: ThemeTokens;
+  message: string;
+  variant: "info" | "success" | "warning" | "error";
+  width: number;
+}) {
+  const border = variant === "success" ? C.success : variant === "warning" ? C.warning : variant === "error" ? C.error : C.user;
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top: 2,
+        right: 2,
+        zIndex: 2000,
+        width: Math.min(60, Math.max(20, width - 6)),
+        backgroundColor: C.panel,
+        paddingLeft: 2,
+        paddingRight: 2,
+        paddingTop: 1,
+        paddingBottom: 1,
+        borderStyle: "single",
+        border: ["left", "right"],
+        borderColor: border,
+      }}
+    >
+      <text content={message} fg={C.fg} wrapMode="word" />
+    </box>
+  );
+}
+
+// The keybind hint grammar: the chord reads bright, the action muted, pairs
+// separated by three spaces — the reference underline line.
+function HintBits({ text, C }: { text: string; C: ThemeTokens }) {
+  const parts = text.split("   ").filter(Boolean);
+  return (
+    <box style={{ flexDirection: "row", flexShrink: 0 }}>
+      {parts.map((part, index) => {
+        const [key, action] = part.split(" ");
+        return (
+          <box key={index} style={{ flexDirection: "row", flexShrink: 0 }}>
+            {index > 0 ? <text content={"   "} fg={C.subtle} /> : null}
+            <text content={`${key} `} fg={C.fg} />
+            <text content={action ?? ""} fg={C.subtle} />
+          </box>
+        );
+      })}
+    </box>
+  );
+}
+
 // The message transcript voice, measured off the OpenCode reference: the user
 // block is a filled panel with a bright left edge, the assistant speaks as
 // plain markdown with a metrics footer, tools are single dim lines.
@@ -281,19 +340,35 @@ function sortedThemes(): ThemeName[] {
 // composer, with enter running the highlighted command. Borderless block,
 // selected row carries the primary highlight with background-coloured text.
 function SlashPopup({
-  matches,
+  commands,
+  files,
   idx,
   C,
   width,
 }: {
-  matches: SlashCommandSpec[];
+  commands: SlashCommandSpec[];
+  files: string[];
   idx: number;
   C: ThemeTokens;
   width?: number;
 }) {
-  const sel = Math.min(idx, matches.length - 1);
-  const win = Math.max(0, Math.min(sel - 2, Math.max(0, matches.length - 6)));
-  const visible = matches.slice(win, win + 6);
+  // One flat list across both triggers; <=10 rows visible, windowed around the
+  // selection, no scrollbar (consult item 2).
+  const items: { key: string; name: string; description?: string }[] = [
+    ...commands.map((c) => ({ key: `/${c.name}`, name: `/${c.name}`, description: c.description })),
+    ...files.map((f) => ({ key: `@${f}`, name: `@${f}` })),
+  ];
+  if (items.length === 0) {
+    return (
+      <box style={{ width: width ?? "100%", flexDirection: "column", flexShrink: 0, backgroundColor: C.panel, paddingLeft: 1, paddingRight: 1 }}>
+        <text content="No matching items" fg={C.faint} />
+      </box>
+    );
+  }
+  const sel = Math.min(idx, items.length - 1);
+  const visibleCount = Math.min(10, items.length);
+  const win = Math.max(0, Math.min(sel - Math.floor(visibleCount / 2), Math.max(0, items.length - visibleCount)));
+  const visible = items.slice(win, win + visibleCount);
   return (
     <box
       style={{
@@ -305,12 +380,14 @@ function SlashPopup({
         paddingRight: 1,
       }}
     >
-      {visible.map((c) => {
-        const selected = matches.indexOf(c) === sel;
+      {visible.map((item) => {
+        const selected = items.indexOf(item) === sel;
         return (
-          <box key={c.name} style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: selected ? C.selected : undefined }}>
-            <text content={` /${c.name.padEnd(11)}`} fg={selected ? C.accentText : C.fg} />
-            <text content={c.description} fg={selected ? C.accentText : C.subtle} />
+          <box key={item.key} style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: selected ? C.accent : undefined }}>
+            <text content={`${item.name.padEnd(12)}`} fg={selected ? C.accentText : C.fg} />
+            {item.description ? (
+              <text content={item.description} fg={selected ? C.accentText : C.subtle} />
+            ) : null}
           </box>
         );
       })}
@@ -360,7 +437,9 @@ function Composer({
           <text content="╹" fg={accent} />
         </box>
         <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
-          <text content={`${promptText}${typing ? "▏" : ""}`} fg={isPlaceholder ? C.subtle : C.fg} />
+          {wrapText(promptText, Math.max(12, underlineWidth - 4)).map((line: string, lineIndex: number, all: string[]) => (
+            <text key={lineIndex} content={`${line}${typing && lineIndex === all.length - 1 ? "▏" : ""}`} fg={isPlaceholder ? C.subtle : C.fg} />
+          ))}
           <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
             <text content={`${label.label} `} fg={accent} />
             {label.auto ? <text content="auto " fg={C.subtle} /> : null}
@@ -444,6 +523,7 @@ export function App({
   const [forkOptions, setForkOptions] = useState<DialogOption<string>[]>([]);
   const [theme, setTheme] = useState<ThemeName>("opencode");
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
+  const [askSel, setAskSel] = useState(0);
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
@@ -457,15 +537,15 @@ export function App({
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
   const [typing, setTyping] = useState(true);
-  // Transient status toast — OpenCode surfaces these as toasts, never as a
-  // permanent bar. The message rides the composer hint slot for a few seconds.
-  const [flash, setFlash] = useState<string | null>(null);
-  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flashStatus = (message: string) => {
+  // Transient status toast — the OpenCode toast overlay (top right, split
+  // variant-tinted borders, single slot, 5s / 7s for errors).
+  const [toast, setToast] = useState<{ message: string; variant: "info" | "success" | "warning" | "error" } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashStatus = (message: string, variant: "info" | "success" | "warning" | "error" = "info") => {
     setStatus(message);
-    setFlash(message);
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    flashTimer.current = setTimeout(() => setFlash(null), 4000);
+    setToast({ message, variant });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), variant === "error" ? 7000 : 5000);
   };
   // Slash-command autocomplete (the OpenCode composer popup): the match list
   // is derived from the draft; idx and dismissal are refs so the keyboard
@@ -518,10 +598,58 @@ export function App({
   const promptWidth = Math.max(56, Math.min(86, Math.floor(dims.width * 0.62)));
   const cwdFull = shortCwd(process.cwd());
   const cwd = cwdFull.length > 42 ? `…${cwdFull.slice(-41)}` : cwdFull;
-  const slashToken = typing && draft.startsWith("/") && !draft.includes(" ") ? draft.slice(1) : null;
-  const sugMatches = slashToken === null ? [] : matchSlashCommands(slashToken);
-  const sugOpen = sugMatches.length > 0 && !sugDismissed.current;
+  const cwdFiles = useRef<string[] | null>(null);
+  const cwdFileMatches = (token: string): string[] => {
+    try {
+      if (cwdFiles.current === null) {
+        cwdFiles.current = readdirSync(process.cwd()).slice(0, 500);
+      }
+      const needle = token.toLowerCase();
+      return cwdFiles.current.filter((f) => f.toLowerCase().includes(needle)).slice(0, 10);
+    } catch {
+      return [];
+    }
+  };
 
+  // Slash `/token` and workspace `@token` triggers; whitespace after the
+  // token dismisses the popup, backspace into the token reopens it.
+  const lastToken = (prefix: string): string | null => {
+    if (!typing) return null;
+    const idx = draft.lastIndexOf(prefix);
+    if (idx === -1) return null;
+    const token = draft.slice(idx + 1);
+    return /\S*$/.test(token) && !token.includes(" ") ? token : null;
+  };
+  const slashToken = lastToken("/");
+  const atToken = lastToken("@");
+  const sugMatches: SlashCommandSpec[] = slashToken !== null
+    ? matchSlashCommands(slashToken)
+    : [];
+  const fileMatches: string[] = atToken !== null
+    ? cwdFileMatches(atToken)
+    : [];
+  const sugOpen = (sugMatches.length > 0 || fileMatches.length > 0) && !sugDismissed.current;
+
+  // Placeholder cycles through the reference example set every 4s while the
+  // composer is empty and focused.
+  const [placeholderTick, setPlaceholderTick] = useState(0);
+  useEffect(() => {
+    if (!typing || draft) return;
+    const timer = setInterval(() => setPlaceholderTick((t) => t + 1), 4000);
+    return () => clearInterval(timer);
+  }, [typing, draft]);
+  const [gitBranch, setGitBranch] = useState<string>("");
+  useEffect(() => {
+    const read = () => {
+      try {
+        const head = readFileSync(`${process.cwd()}/.git/HEAD`, "utf8").trim();
+        setGitBranch(head.startsWith("ref:") ? head.slice(16) : head.slice(0, 7));
+      } catch { setGitBranch(""); }
+    };
+    read();
+    const timer = setInterval(read, 60000);
+    return () => clearInterval(timer);
+  }, []);
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
@@ -1037,6 +1165,30 @@ export function App({
       return;
     }
 
+    // The permission card's selection cursor: arrows move, enter executes,
+    // y/a/n/escape answer directly (handled in the askRef block above).
+    if (ask) {
+      if (key.name === "up") { setAskSel((v) => Math.max(0, v - 1)); return; }
+      if (key.name === "down") { setAskSel((v) => Math.min(2, v + 1)); return; }
+      if (key.name === "return") {
+        // TS flow-narrows askRef.current to null through the y/a/n block
+        // above; the ref is the runtime truth, so read it past the narrow.
+        const resolve = askRef.current as ((v: unknown) => void) | null;
+        if (!resolve) return;
+        askRef.current = null;
+        setAsk(null);
+        if (askSel === 0) { resolve({ decision: "allow" }); probe("permission-answered", "allow"); flashStatus("permission allowed"); }
+        else if (askSel === 1) {
+          const always = askOptionsRef.current.find((x) => /always|project|allow/i.test(x.id));
+          resolve(always?.response ?? { decision: "allow" });
+          probe("permission-answered", "always");
+          flashStatus("permission allowed · always");
+        } else { resolve({ decision: "deny" }); probe("permission-answered", "deny"); flashStatus("permission denied"); }
+        return;
+      }
+      return;
+    }
+
     // Leader chord (ctrl+x then a key), the OpenCode navigation grammar:
     // b sidebar · t themes · l sessions · n new · c compact · q quit.
     // The armed leader consumes the next key unconditionally — no timeout —
@@ -1102,17 +1254,42 @@ export function App({
         moveSug(0);
         return;
       }
+      // @ trigger reads the immediate draft ref, same burst-safety rule as
+      // the slash token above.
+      const atIdx = draftRef.current.lastIndexOf("@");
+      const atTokenNow = atIdx !== -1 && !draftRef.current.slice(atIdx + 1).includes(" ")
+        ? draftRef.current.slice(atIdx + 1)
+        : null;
+      const fileMatchesNow = atTokenNow !== null ? cwdFileMatches(atTokenNow) : [];
+      const atOpenNow = atTokenNow !== null && fileMatchesNow.length > 0 && !sugDismissed.current;
       if (sugOpenNow && (key.name === "up" || key.name === "down")) {
         const delta = key.name === "up" ? -1 : 1;
-        moveSug(Math.max(0, Math.min(sugMatches.length - 1, sugIdxRef.current + delta)));
+        const total = sugMatches.length || fileMatchesNow.length;
+        moveSug(Math.max(0, Math.min(total - 1, sugIdxRef.current + delta)));
         return;
       }
       if (sugOpenNow && key.name === "tab") {
-        const picked = `${sugMatches[sugIdxRef.current].name} `;
-        draftRef.current = `/${picked}`;
-        setDraft(`/${picked}`);
+        if (sugMatches.length > 0) {
+          const picked = `${sugMatches[sugIdxRef.current].name} `;
+          const idx = draftRef.current.lastIndexOf("/");
+          draftRef.current = `${draftRef.current.slice(0, idx + 1)}${picked}`;
+        } else {
+          const picked = `${fileMatchesNow[Math.min(sugIdxRef.current, fileMatchesNow.length - 1)]} `;
+          draftRef.current = `${draftRef.current.slice(0, atIdx + 1)}${picked}`;
+        }
+        setDraft(draftRef.current);
         sugDismissed.current = false;
         moveSug(0);
+        return;
+      }
+      // Newline insertion: shift+enter, alt+enter, ctrl+j — the reference
+      // grammar. Plain enter still submits.
+      if ((key.name === "return" && (key as { shift?: boolean }).shift)
+        || (key.name === "return" && (key as { meta?: boolean }).meta)
+        || (key.ctrl && key.name === "j")) {
+        const next = `${draftRef.current}\n`;
+        draftRef.current = next;
+        setDraft(next);
         return;
       }
       if (key.name === "up" || key.name === "down") {
@@ -1131,13 +1308,21 @@ export function App({
         // React has committed the previous setState. The ref is the immediate
         // keyboard truth; it keeps `/sessions\r` equivalent to two human
         // keystrokes while the rendered draft remains state-controlled.
-        if (sugOpenNow) {
+        if (sugOpenNow && sugMatches.length > 0) {
           const content = `/${sugMatches[Math.min(sugIdxRef.current, sugMatches.length - 1)].name}`;
           draftRef.current = "";
           setDraft("");
           sugDismissed.current = false;
           moveSug(0);
           if (!running) void submitPrompt(content);
+          return;
+        }
+        if (sugOpenNow && fileMatchesNow.length > 0) {
+          const picked = fileMatchesNow[Math.min(sugIdxRef.current, fileMatchesNow.length - 1)];
+          const base = draftRef.current.slice(0, draftRef.current.lastIndexOf("@") + 1);
+          draftRef.current = `${base}${picked} `;
+          setDraft(draftRef.current);
+          sugDismissed.current = true;
           return;
         }
         const content = draftRef.current.trim();
@@ -1213,11 +1398,11 @@ export function App({
   if (dialog === "sessions") {
     return (
       <SelectDialog
-        title="Sessions for zcode-tui"
+        title="Sessions"
+        size="large"
         options={sessionOptions}
         currentId={activeId ?? undefined}
         theme={C}
-        footer="pin/unpin ctrl+f   delete ctrl+d   rename ctrl+r   all projects ctrl+a"
         onAction={(action, option) => {
           if (!option) return;
           if (action === "pin") togglePin(option.value);
@@ -1277,6 +1462,7 @@ export function App({
     return (
       <SelectDialog
         title="Themes"
+        size="large"
         options={sortedThemes().map((name) => ({ id: name, label: name, description: name === "opencode" ? "OpenCode reference palette" : name === "zai-dark" || name === "zai-light" ? "ZCode brand arm" : "OpenCode palette", value: name }))}
         currentId={theme}
         theme={C}
@@ -1350,18 +1536,25 @@ export function App({
     return (
       <SelectDialog
         title="Commands"
+        size="large"
         options={commands}
         theme={C}
         countLabel="command"
-        footer="↑↓ navigate   enter run   esc close"
         onSelect={(fn) => { setDialog(null); setTimeout(fn, 30); }}
         onClose={closeDialog}
       />
     );
   }
 
+  const PLACEHOLDERS = [
+    'Ask anything…  "What is the tech stack of this project?"',
+    'Ask anything…  "How do I run the test suite?"',
+    'Ask anything…  "Find where authentication is configured"',
+    'Ask anything…  "Explain this repository layout"',
+    'Ask anything…  "Fix the failing build"',
+  ];
   const promptPlaceholder = view === "home"
-    ? 'Ask anything…  "What is the tech stack of this project?"'
+    ? PLACEHOLDERS[placeholderTick % PLACEHOLDERS.length]
     : activeId ? "Ask anything…" : "a new session · type a prompt";
   const promptText = draft || promptPlaceholder;
   const providerLabel = activeModel?.providerId ?? "zai";
@@ -1386,20 +1579,17 @@ export function App({
           <box style={{ height: 3, flexShrink: 0 }} />
           <ZCodeLogo C={C} />
           <box style={{ height: 1, flexShrink: 0 }} />
-          <text content="zcodetui" fg={C.faint} />
-          <box style={{ height: 1, flexShrink: 0 }} />
-          <text content="/sessions  to browse conversations" fg={C.accent} />
-          <box style={{ height: 1, flexShrink: 0 }} />
           <box style={{ width: promptWidth, flexShrink: 0 }}>
-            {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
+            {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
             <Composer width={promptWidth} underlineWidth={promptWidth - 1} promptText={promptText} isPlaceholder={!draft} {...composerProps} />
           </box>
           <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
-            <text content={cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd} fg={C.subtle} />
-            <text content={flash ?? hintBits} fg={C.subtle} />
+            <text content={`${cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
+            <HintBits text={hintBits} C={C} />
           </box>
           <box style={{ flexGrow: 1 }} />
         </box>
+        {toast ? <Toast C={C} message={toast.message} variant={toast.variant} width={dims.width} /> : null}
       </box>
     );
   }
@@ -1434,8 +1624,54 @@ export function App({
         ) : null}
       </box>
       {ask ? (
-        <box style={{ height: 1, flexDirection: "row", paddingLeft: 3, paddingRight: 3, flexShrink: 0 }}>
-          <text content={`△ ${ask.toolName}${ask.riskLevel ? ` (${ask.riskLevel})` : ""}: ${ask.detail.slice(0, 52)} · y allow · a always · n deny`} fg={C.warning} />
+        <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+          <box
+            style={{
+              flexGrow: 1,
+              flexShrink: 0,
+              flexDirection: "column",
+              backgroundColor: C.panel,
+              paddingLeft: 2,
+              paddingRight: 2,
+              paddingTop: 1,
+              paddingBottom: 1,
+              borderStyle: "single",
+              border: ["left"],
+              borderColor: ask.riskLevel === "high" ? C.error : C.warning,
+            }}
+          >
+            <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+              <text content="△ Permission Request" fg={C.warning} attributes={TextAttributes.BOLD} />
+              <text content={`tool: ${ask.toolName}${ask.riskLevel ? ` · ${ask.riskLevel}` : ""}`} fg={C.faint} />
+            </box>
+            <box style={{ flexDirection: "row", flexShrink: 0, paddingRight: 2 }}>
+              <box style={{ flexGrow: 1, backgroundColor: C.surface, paddingLeft: 1, paddingRight: 1 }}>
+                <text content={ask.detail} fg={C.fg} wrapMode="word" />
+              </box>
+            </box>
+            {[
+              { key: "y", label: "Allow once" },
+              { key: "a", label: "Always allow for this session" },
+              { key: "n", label: "Deny" },
+            ].map((opt, index) => {
+              const selected = askSel === index;
+              return (
+                <box
+                  key={opt.key}
+                  style={{
+                    height: 1,
+                    flexDirection: "row",
+                    flexShrink: 0,
+                    paddingLeft: 1,
+                    backgroundColor: selected ? C.accent : undefined,
+                  }}
+                >
+                  <text content={`[${opt.key}] `} fg={selected ? C.accentText : C.subtle} />
+                  <text content={opt.label} fg={selected ? C.accentText : C.fg} />
+                </box>
+              );
+            })}
+          </box>
         </box>
       ) : null}
       {queue.length > 0 ? (
@@ -1443,7 +1679,7 @@ export function App({
           <text content={`⧗ ${queue.length} queued · next: ${queue[0].slice(0, 48)}`} fg={C.warning} />
         </box>
       ) : null}
-      {sugOpen ? <SlashPopup matches={sugMatches} idx={sugIdx} C={C} /> : null}
+      {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} /> : null}
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
         <Composer width="100%" underlineWidth={Math.max(10, dims.width - 5)} promptText={promptText} isPlaceholder={!draft} {...composerProps} />
       </box>
@@ -1451,10 +1687,18 @@ export function App({
         {running ? (
           <text content={`${spinner} Working…`} fg={modeAccent(mode, C)} />
         ) : (
-          <text content={lost ? "backend lost · r to reconnect" : cwd} fg={C.subtle} />
+          <text content={lost ? "backend lost · r to reconnect" : `${cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
         )}
-        <text content={running ? `${ctxLabel} ` : `${ctxLabel}${flash ?? hintBits}`} fg={C.subtle} />
+        {running ? (
+          <text content={ctxLabel} fg={C.subtle} />
+        ) : (
+          <box style={{ flexDirection: "row", flexShrink: 0 }}>
+            {ctxLabel ? <text content={ctxLabel} fg={C.subtle} /> : null}
+            <HintBits text={hintBits} C={C} />
+          </box>
+        )}
       </box>
+      {toast ? <Toast C={C} message={toast.message} variant={toast.variant} width={dims.width} /> : null}
     </box>
   );
 }
