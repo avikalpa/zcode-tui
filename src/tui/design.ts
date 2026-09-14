@@ -106,9 +106,10 @@ export function modeAccent(mode: string, C: ThemeTokens): string {
   }
 }
 
-// OpenCode's composer status grammar: `Build auto · GPT-6 Astra OpenAI · Low`.
+// OpenCode's composer status grammar: `Build auto · GPT-6 Astra OpenAI · high`.
 // The agent word is the mode (Build when riding on auto), auto follows only in
-// auto mode, provider rides muted after the model, effort is the variant slot.
+// auto mode, provider rides muted after the model, effort is the variant slot
+// (lowercase, as the reference draws it).
 export function modeLabel(mode: string): { label: string; auto: boolean } {
   if (mode === "auto") return { label: "Build", auto: true };
   return { label: mode.charAt(0).toUpperCase() + mode.slice(1), auto: false };
@@ -193,7 +194,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "themes", aliases: ["theme"], description: "OpenCode plus terminal colour arms" },
   { name: "commands", aliases: ["help"], description: "open the command palette" },
   { name: "status", aliases: [], description: "session and backend status" },
-  { name: "effort", aliases: [], description: "cycle reasoning effort low · high · max" },
+  { name: "effort", aliases: [], description: "choose reasoning effort · low high max" },
   { name: "thinking", aliases: [], description: "toggle thinking" },
   { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
   { name: "compact", aliases: [], description: "compact the session context" },

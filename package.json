@@ -1,6 +1,6 @@
 {
   "name": "@avikalpa/zcode-tui",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "private": false,
   "type": "module",
   "scripts": {
@@ -33,7 +33,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-"bin": {
+  "bin": {
     "zcode-tui": "bin/zcode-tui"
   },
   "files": [

@@ -144,7 +144,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session";
-type DialogName = "sessions" | "model" | "mode" | "palette" | "fork" | "themes" | "rename" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -475,10 +475,11 @@ function SlashPopup({
   );
 }
 
-// The OpenCode composer: a left accent edge tinted by the active mode, the
-// input row, and the status grammar `Build auto · model provider · Low` inside
-// the box; a thin detached underline row; then the hint line below on the
-// background. No full border — the reference keeps the box open-faced.
+// The OpenCode composer: a thin left accent edge tinted by the active mode
+// (one half-block glyph per row, ending with the box), the input row, and the
+// status grammar `Build auto · model provider · low` inside the box; a thin
+// detached underline row; then the hint line below on the background. No full
+// border — the reference keeps the box open-faced.
 function Composer({
   C,
   width,
@@ -535,8 +536,13 @@ function Composer({
   return (
     <box style={{ width, flexDirection: "column", flexShrink: 0 }}>
       <box style={{ flexDirection: "row", flexShrink: 0 }}>
-        <box style={{ width: 1, flexShrink: 0, flexDirection: "column", backgroundColor: accent }}>
-          <box style={{ flexGrow: 1 }} />
+        <box style={{ width: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface }}>
+          {/* The reference edge is a thin uniform bar, not a painted cell:
+              one left-half-block glyph per composer row (top pad, input rows,
+              status pad, status row), ending with the box — nothing below. */}
+          {Array.from({ length: inputRows.length + 3 }, (_, accentRow) => (
+            <text key={accentRow} content="▌" fg={accent} />
+          ))}
         </box>
         <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
           {inputRows.map((row, lineIndex) => (
@@ -551,15 +557,13 @@ function Composer({
             {label.auto ? <text content="auto " fg={C.subtle} /> : null}
             <text content={`· ${model} `} fg={leaderActive ? C.subtle : C.fg} />
             <text content={`${provider} · `} fg={C.subtle} />
-            <text content={effort.charAt(0).toUpperCase() + effort.slice(1)} fg={C.warning} />
+            <text content={effort} fg={C.warning} />
             {thinkingOff ? <text content=" · thinking off" fg={C.faint} /> : null}
           </box>
         </box>
       </box>
       <box style={{ flexDirection: "row", flexShrink: 0 }}>
-        <box style={{ width: 1, flexShrink: 0 }}>
-          <text content="╹" fg={accent} />
-        </box>
+        <box style={{ width: 1, flexShrink: 0 }} />
         <text content={"▀".repeat(underline)} fg={C.surface} />
       </box>
     </box>
@@ -943,7 +947,7 @@ export function App({
       if (command === "commands") { setDialog("palette"); return; }
       if (command === "agents") { setDialog("mode"); return; }
       if (command === "status") { flashStatus(statusSummary()); return; }
-      if (command === "effort") { cycleEffort(); return; }
+      if (command === "effort") { setDialog("effort"); return; }
       if (command === "thinking") { await toggleThinking(); return; }
       if (command === "fork") { await forkActive(); return; }
       if (command === "compact") { await compactActive(); return; }
@@ -999,12 +1003,6 @@ export function App({
     } catch (e) {
       flashStatus(`setMode failed: ${e instanceof Error ? e.message : e}`);
     }
-  };
-
-  const cycleEffort = () => {
-    const next = EFFORTS[(EFFORTS.indexOf(effort) + 1) % EFFORTS.length];
-    setEffort(next);
-    flashStatus(`effort → ${next}`);
   };
 
   const toggleThinking = async () => {
@@ -1511,7 +1509,7 @@ export function App({
     else if (key.name === "m") setDialog("model");
     else if (key.name === "t") setDialog("themes");
     else if (key.name === "o") void cycleMode();
-    else if (key.name === "e") cycleEffort();
+    else if (key.name === "e") setDialog("effort");
     else if (key.name === "f") void forkActive();
     else if (key.name === "b") {
       if (view === "session") setSidebarOpen((s) => !s);
@@ -1605,6 +1603,24 @@ export function App({
       />
     );
   }
+  if (dialog === "effort") {
+    return (
+      <SelectDialog
+        title="Reasoning effort"
+        options={EFFORTS.map((e) => ({
+          id: e,
+          label: e.charAt(0).toUpperCase() + e.slice(1),
+          description: e === "low" ? "fastest · minimal reasoning" : e === "high" ? "balanced depth" : "deepest reasoning · slowest",
+          value: e,
+        }))}
+        currentId={effort}
+        theme={C}
+        countLabel="effort"
+        onSelect={(e) => { setEffort(e); setDialog(null); flashStatus(`effort → ${e}`); }}
+        onClose={closeDialog}
+      />
+    );
+  }
   if (dialog === "themes") {
     return (
       <SelectDialog
@@ -1668,7 +1684,7 @@ export function App({
       { id: "sessions", label: "sessions", description: "browse and resume conversations", value: openSessions },
       { id: "new", label: "new session", description: "start a fresh ZCode session", value: () => void newSession() },
       { id: "model", label: "switch model…", description: "choose from the safe model allowlist", value: () => setDialog("model") },
-      { id: "effort", label: "cycle reasoning effort", description: "low · high · max", value: cycleEffort },
+      { id: "effort", label: "reasoning effort…", description: "low · high · max", value: () => setDialog("effort") },
       { id: "mode", label: "switch mode…", description: "plan · build · edit · yolo · auto", value: () => setDialog("mode") },
       { id: "thinking", label: "toggle thinking", value: () => void toggleThinking() },
       { id: "fork", label: "fork session", description: "latest checkpoint", value: () => void forkActive() },
