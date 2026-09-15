@@ -6,8 +6,8 @@
 // TUI. The surfaces follow the OpenCode reference UI (surfaces, spacing and
 // status grammar measured against its published TUI components), not its code.
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { SyntaxStyle, TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions, usePaste } from "@opentui/react";
+import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
 import { SelectDialog, TextPromptDialog, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
@@ -649,10 +649,18 @@ export function App({
   // The composer cursor: an index into the draft (default = end). Arrows move
   // it, printable input inserts at it, backspace deletes before it.
   const [cursor, setCursor] = useState<number | null>(null); // null = end
+  // Immediate-truth mirror of the cursor (the draftRef discipline): a PTY
+  // burst reaches the next key before React commits setCursor, so cursor
+  // math must never read the state.
+  const cursorRef = useRef<number | null>(null);
+  const setCursorBoth = (v: number | null) => {
+    cursorRef.current = v;
+    setCursor(v);
+  };
   const [cursorBlink, setCursorBlink] = useState(true);
   const moveCursor = (delta: number) => {
-    const cur = cursor ?? draftRef.current.length;
-    setCursor(Math.max(0, Math.min(draftRef.current.length, cur + delta)));
+    const cur = cursorRef.current ?? draftRef.current.length;
+    setCursorBoth(Math.max(0, Math.min(draftRef.current.length, cur + delta)));
   };
   const [typing, setTyping] = useState(true);
   useEffect(() => {
@@ -933,7 +941,8 @@ export function App({
     }
     setDraft("");
     draftRef.current = "";
-    setCursor(null);
+    setCursorBoth(null);
+    discardPending();
     sugDismissed.current = false;
     moveSug(0);
     setTyping(true);
@@ -1256,6 +1265,50 @@ export function App({
     } catch { /* best effort */ }
   }, [pinned]);
 
+  // Paste pipeline — the OpenCode input logic. The renderer arms bracketed
+  // paste (?2004h), so a bracketing terminal delivers the whole paste as one
+  // PasteEvent; a terminal that does not bracket sends the same bytes as a
+  // keystroke burst, which the printable branch coalesces. Both paths land in
+  // ONE atomic insert at the immediate cursor with CRLF normalized at the
+  // boundary — and the popups never see pasted content, because they are
+  // driven only by the typed-key state machine.
+  const insertAtCursor = (text: string) => {
+    const cur = cursorRef.current ?? draftRef.current.length;
+    const next = draftRef.current.slice(0, cur) + text + draftRef.current.slice(cur);
+    draftRef.current = next;
+    setDraft(next);
+    setCursorBoth(cur + text.length);
+  };
+  const pendingBuf = useRef("");
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discardPending = () => {
+    if (pendingTimer.current !== null) {
+      clearTimeout(pendingTimer.current);
+      pendingTimer.current = null;
+    }
+    pendingBuf.current = "";
+  };
+  const flushPending = () => {
+    const chunk = pendingBuf.current;
+    discardPending();
+    if (chunk) insertAtCursor(chunk);
+  };
+  usePaste((event) => {
+    const text = decodePasteBytes(event.bytes).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    if (!text) return;
+    if (!typing) {
+      // Pasting from a nav surface starts composing — and keeps pasted bytes
+      // out of the nav verbs (a pasted "q" must not quit the TUI).
+      draftRef.current = "";
+      setDraft("");
+      setCursorBoth(null);
+      setTyping(true);
+    }
+    sugDismissed.current = false;
+    moveSug(0);
+    insertAtCursor(text);
+  });
+
   useKeyboard((key) => {
     if (dialog !== null) return;
 
@@ -1347,31 +1400,36 @@ export function App({
       return;
     }
     if (key.ctrl && key.name === "c") {
-      if (typing) { draftRef.current = ""; setDraft(""); setCursor(null); return; }
+      if (typing) { draftRef.current = ""; setDraft(""); setCursorBoth(null); discardPending(); return; }
       onQuit();
       return;
     }
 
     if (typing) {
+      const printable = !!key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence);
+      // A burst mid-flight settles before any structural key touches the draft.
+      if (!printable && pendingBuf.current) flushPending();
       // Slash autocomplete reads the immediate draft ref: while the draft is a
       // single "/token", up/down/tab/enter belong to the popup, not to
-      // history or submission.
-      const token = draftRef.current.startsWith("/") && !draftRef.current.includes(" ")
+      // history or submission. A paste riding the raw burst path never opens
+      // it — the token is withheld while a chunk is pending, and a flushed
+      // pasted path does not command-match.
+      const token = draftRef.current.startsWith("/") && !draftRef.current.includes(" ") && !pendingBuf.current
         ? draftRef.current.slice(1)
         : null;
       const sugMatches = token === null ? [] : matchSlashCommands(token);
       const sugOpenNow = sugMatches.length > 0 && !sugDismissed.current;
       if (key.name === "escape") {
         if (sugOpenNow) { sugDismissed.current = true; return; }
-        setTyping(false); draftRef.current = ""; setDraft(""); setCursor(null); return;
+        setTyping(false); draftRef.current = ""; setDraft(""); setCursorBoth(null); discardPending(); return;
       }
       if (key.name === "backspace" || key.sequence === "\x7f" || key.sequence === "\b") {
-        const cur = cursor ?? draftRef.current.length;
+        const cur = cursorRef.current ?? draftRef.current.length;
         if (cur === 0) return;
         const next = draftRef.current.slice(0, cur - 1) + draftRef.current.slice(cur);
         draftRef.current = next;
         setDraft(next);
-        setCursor(cur - 1);
+        setCursorBoth(cur - 1);
         sugDismissed.current = false;
         moveSug(0);
         return;
@@ -1409,30 +1467,30 @@ export function App({
       if ((key.name === "return" && (key as { shift?: boolean }).shift)
         || (key.name === "return" && (key as { meta?: boolean }).meta)
         || (key.ctrl && key.name === "j")) {
-        const cur = cursor ?? draftRef.current.length;
+        const cur = cursorRef.current ?? draftRef.current.length;
         const next = `${draftRef.current.slice(0, cur)}\n${draftRef.current.slice(cur)}`;
         draftRef.current = next;
         setDraft(next);
-        setCursor(cur + 1);
+        setCursorBoth(cur + 1);
         return;
       }
       const multilineNow = draftRef.current.includes("\n");
       if (key.name === "left") { moveCursor(-1); return; }
       if (key.name === "right") { moveCursor(1); return; }
-      if (key.name === "home") { setCursor(0); return; }
-      if (key.name === "end") { setCursor(draftRef.current.length); return; }
+      if (key.name === "home") { setCursorBoth(0); return; }
+      if (key.name === "end") { setCursorBoth(draftRef.current.length); return; }
       if (key.name === "up" || key.name === "down") {
         // Multiline drafts move the cursor across lines; single-line drafts
         // walk the prompt history.
         if (multilineNow) {
-          const cur = cursor ?? draftRef.current.length;
+          const cur = cursorRef.current ?? draftRef.current.length;
           const starts = [0, ...[...draftRef.current].reduce<number[]>((acc, ch, i) => ch === "\n" ? [...acc, i + 1] : acc, [])];
           const lineIdx = starts.reduce((acc, start, i) => cur >= start ? i : acc, 0);
           const col = cur - starts[lineIdx];
           const target = key.name === "up" ? lineIdx - 1 : lineIdx + 1;
           if (target < 0 || target >= starts.length) return;
           const lineEnd = target + 1 < starts.length ? starts[target + 1] - 1 : draftRef.current.length;
-          setCursor(Math.min(starts[target] + col, lineEnd));
+          setCursorBoth(Math.min(starts[target] + col, lineEnd));
           return;
         }
         if (history.length === 0) return;
@@ -1443,7 +1501,8 @@ export function App({
         const restored = next >= 0 ? history[next] : "";
         draftRef.current = restored;
         setDraft(restored);
-        setCursor(null);
+        setCursorBoth(null);
+        discardPending();
         return;
       }
       if (key.name === "return") {
@@ -1487,12 +1546,15 @@ export function App({
       // included. The old ASCII-only filter silently dropped non-Latin input
       // (the "mid-turn truncation" suspect), which is a correctness bug for
       // every language that is not English.
-      if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
-        const cur = cursor ?? draftRef.current.length;
-        const next = draftRef.current.slice(0, cur) + key.sequence + draftRef.current.slice(cur);
-        draftRef.current = next;
-        setDraft(next);
-        setCursor(cur + key.sequence.length);
+      //
+      // Bursts (a non-bracketing terminal's paste, key repeat) coalesce into
+      // ONE atomic insert on the next tick: order and offsets live in the
+      // refs, so React commit timing can no longer scramble the draft.
+      if (printable) {
+        pendingBuf.current += key.sequence;
+        if (pendingTimer.current === null) {
+          pendingTimer.current = setTimeout(flushPending, 8);
+        }
         sugDismissed.current = false;
         moveSug(0);
       }
