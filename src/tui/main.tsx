@@ -43,7 +43,11 @@ async function main() {
     import("@opentui/react"),
     import("./app"),
   ]);
-  const renderer = await createCliRenderer();
+  // The renderer must not eat ctrl+c: OpenCode disables the default
+  // exit-on-ctrl-c so ctrl+c reaches the key machine (clear the draft while
+  // typing, quit from a nav surface) instead of killing the TUI and
+  // dropping a composed prompt on the floor.
+  const renderer = await createCliRenderer({ exitOnCtrlC: false });
   renderer.setBackgroundColor(THEMES.opencode.bg);
   createRoot(renderer).render(
     <App client={client} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
