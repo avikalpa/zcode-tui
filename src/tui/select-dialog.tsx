@@ -115,9 +115,16 @@ export function SelectDialog<T>({
       .includes(filter.toLowerCase()),
   );
   const sel = clamp(idx, 0, Math.max(0, shown.length - 1));
-  // One row per option plus group headings; the modal grows to content, capped
-  // by the viewport so long lists scroll the window rather than the screen.
-  const visibleCount = Math.max(5, Math.min(22, dims.height - Math.floor(dims.height / 4) - 6));
+  // The card must FIT its own maxHeight: pad(2) + title + search + hints row
+  // + every group header (with its spacer) is chrome the list cannot eat, or
+  // the footer hints get clipped off the bottom (measured 2026-09-16,
+  // 30-row renderer). The option window shrinks to leave that room.
+  const backdropRows = Math.floor(dims.height / 4);
+  const maxHeight = Math.max(8, dims.height - backdropRows - 2);
+  const chromeRows = 5 + (footerHints && footerHints.length > 0 ? 1 : 0);
+  const groupCount = new Set(shown.filter((o) => o.group).map((o) => o.group)).size;
+  const headerRows = groupCount > 0 ? groupCount * 2 - 1 : 0;
+  const visibleCount = Math.max(3, Math.min(22, maxHeight - chromeRows - headerRows));
   const winStart = Math.max(
     0,
     Math.min(sel - Math.floor(visibleCount / 2), Math.max(0, shown.length - visibleCount)),
