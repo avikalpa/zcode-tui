@@ -26,6 +26,7 @@ export type Milestone =
   | "turn-end" // the turn's final content arrived
   | "permission-ask" // a permission banner went up
   | "permission-answered" // the banner was resolved
+  | "turn-stop" // escape interrupted the running turn
   | "renderer-live" // OpenTUI committed the first frame
   | "quit";
 

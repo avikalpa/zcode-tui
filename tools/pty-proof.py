@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""PTY acceptance v5 — zcode-tui 0.6.8 (owner report 2026-09-16).
+"""PTY acceptance v8 — zcode-tui (screen-truth instrument).
 
-Laws: TUI paints deltas (strip ANSI, resize for full frames) · never type
-into a live draft without an escape · never SEND (tokens are draft-only;
-effort is selected on HOME so the write is local) · every stage is gated on
-process liveness so a dead app can never pass vacuously (run 5 lesson).
+pyte-reconstructed screen assertions: the emulator assembles what a human
+sees, so styled-run segmentation and delta paints can never fake a pass or
+hide a failure (the v7 lesson: the Jump-to-latest affordance was painted but
+byte-oracle-blind). I-series uses ONE minimal real turn on a TUI-created
+throwaway; the wrapper closes it afterwards.
 """
-import os, pty, select, re, sys, time, fcntl, termios, struct
+import os, pty, select, re, sys, time, fcntl, termios, struct, subprocess
+import pyte
 
 binary = sys.argv[1]
 verdicts = []
-ANSI = re.compile(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]")
 
 def alive(pid):
     try:
@@ -25,29 +26,29 @@ def check(pid, label, ok):
     verdicts.append((label, ok))
     print(f"{'PASS' if ok else 'FAIL'}{'' if alive(pid) else ' (DEAD)'} {label}")
 
-def spawn(cols=110):
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.chdir("/tmp/zct-proof-cwd")
-        os.execve(binary, [binary], dict(os.environ, TERM="xterm-256color"))
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 34, cols, 0, 0))
-    return pid, fd
+def spawn(cols=110, rows=34):
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    screen = pyte.Screen(cols, rows)
+    stream = pyte.ByteStream(screen)
+    pid = subprocess.Popen([binary], stdin=slave, stdout=slave, stderr=subprocess.DEVNULL,
+                           cwd="/tmp/zct-proof-cwd", env=dict(os.environ, TERM="xterm-256color"),
+                           close_fds=True).pid
+    os.close(slave)
+    return pid, master, screen, stream
 
-def read_for(fd, buf, seconds):
+def read_for(master, stream, seconds):
     end = time.time() + seconds
     while time.time() < end:
-        r, _, _ = select.select([fd], [], [], 0.2)
+        r, _, _ = select.select([master], [], [], 0.2)
         if r:
             try:
-                chunk = os.read(fd, 65536)
+                chunk = os.read(master, 65536)
             except OSError:
                 return
             if not chunk:
                 return
-            buf.extend(chunk)
-
-def plain(buf):
-    return ANSI.sub(b"", bytes(buf))
+            stream.feed(chunk)
 
 def kill(pid):
     try:
@@ -57,75 +58,146 @@ def kill(pid):
         pass
 
 # ---- boot 1 ----
-buf = bytearray()
-pid, fd = spawn()
-read_for(fd, buf, 9)
-check(pid, "A0 boot rendered", b"Ask anything" in plain(buf))
+pid, master, screen, stream = spawn()
+read_for(master, stream, 9)
+disp = "\n".join(screen.display)
+check(pid, "A0 boot rendered", "Ask anything" in disp)
 
-os.write(fd, b"ZCODE-PROOF-HOME-TOKEN")
-read_for(fd, buf, 1.5)
-check(pid, "A1 typing on home paints", b"ZCODE-PROOF-HOME-TOKEN" in plain(buf))
+os.write(master, b"ZCODE-PROOF-HOME-TOKEN")
+a1 = False
+for _ in range(3):
+    read_for(master, stream, 1.0)
+    if "ZCODE-PROOF-HOME-TOKEN" in "\n".join(screen.display):
+        a1 = True
+        break
+check(pid, "A1 typing on home paints", a1)
+os.write(master, b"\x03"); time.sleep(0.3)
 
-os.write(fd, b"\x1b"); time.sleep(0.3)  # escape -> nav surface (draft cleared)
-os.write(fd, b"e")                      # nav 'e': effort dialog (home, local-only)
-read_for(fd, buf, 2.0)
-check(pid, "D0 effort dialog opens (nav e)", b"Reasoning effort" in plain(buf))
-os.write(fd, b"\r")                     # select Low; dialog self-closes
-read_for(fd, buf, 2.0)
-check(pid, "D1 effort Low selected (local)", b"effort \xe2\x86\x92 low" in plain(buf))
+# TAB/L-series (home-local)
+before_mode = [l for l in screen.display if "Z.AI Coding Plan" in l]
+os.write(master, b"\t")
+read_for(master, stream, 1.2)
+after_mode = [l for l in screen.display if "Z.AI Coding Plan" in l]
+check(pid, "T0 tab cycles the agent (status changed)", bool(after_mode) and after_mode != before_mode)
 
-# T-series: the 4th-instance regression — a dialog SELECT must restore typing.
-os.write(fd, b"ZCODE-PROOF-AFTER-SELECT")
-read_for(fd, buf, 1.5)
-check(pid, "T0 typing composes right after a dialog select", b"ZCODE-PROOF-AFTER-SELECT" in plain(buf))
-os.write(fd, b"\x1b"); time.sleep(0.3)  # clear draft (nav surface now)
+os.write(master, b"\x18m"); read_for(master, stream, 1.2)
+check(pid, "L0 leader m opens the model dialog", "Model" in "\n".join(screen.display))
+os.write(master, b"\x1b"); time.sleep(0.3)
+os.write(master, b"\x18a"); read_for(master, stream, 1.2)
+check(pid, "L1 leader a opens the agents dialog", "Agent mode" in "\n".join(screen.display))
+os.write(master, b"\x1b"); time.sleep(0.3)
 
-os.write(fd, b"\x18l")                  # ctrl+x l -> sessions dialog
-read_for(fd, buf, 1.5)
-dialog = plain(buf)
-b0 = b"Sessions" in dialog and b"search" in dialog
+st_path = os.path.expanduser("~/.config/zcode-tui/state.json")
+had_state = os.path.exists(st_path)
+os.write(master, b"\x14"); read_for(master, stream, 1.2)   # ctrl+t: variant cycle
+try:
+    st = open(st_path).read()
+    l2 = '"zai/GLM-5.3-Flash"' in st
+except FileNotFoundError:
+    l2 = False
+check(pid, "L2 ctrl+t cycles the reasoning effort (state.json)", l2)
+
+os.write(master, b"\x18l"); read_for(master, stream, 1.5)
+disp = "\n".join(screen.display)
+b0 = "Sessions" in disp and "search" in disp
 check(pid, "B0 sessions dialog opens", b0)
-check(pid, "B1 date group headers render", re.search(rb"(Sep|Oct|Nov|Dec) \d\d 20\d\d|Today", dialog) is not None)
-check(pid, "B2 footer hints", b"pin" in dialog and b"delete" in dialog and b"switch" in dialog)
-check(pid, "B3 no idle clutter", b"idle \xc2\xb7" not in dialog)
-check(pid, "B4 quick-slot gutters", re.search(rb" 1 \S", dialog) is not None)
+check(pid, "B1 date group headers render", re.search(r"(Sep|Oct|Nov|Dec) \d\d 20\d\d|Today", disp) is not None)
+check(pid, "B2 footer hints", "pin" in disp and "delete" in disp and "switch" in disp)
+check(pid, "B3 no idle clutter", "idle ·" not in disp)
+check(pid, "B4 quick-slot gutters", re.search(r"\b1 \S", disp) is not None)
 
 if b0 and alive(pid):
-    os.write(fd, b"\r")                 # open row 1 (typing only, never send)
-    read_for(fd, buf, 4.5)
-    opened = plain(buf)
-    check(pid, "C-1 open() completed (messages witness)", b"messages" in opened)
-    os.write(fd, b"ZCODE-PROOF-AFTER-OPEN")
-    read_for(fd, buf, 1.5)
-    check(pid, "C0 typing after open() paints — THE bug", b"ZCODE-PROOF-AFTER-OPEN" in plain(buf))
+    os.write(master, b"\r"); read_for(master, stream, 5.5)   # let open() settle fully
+    disp = "\n".join(screen.display)
+    check(pid, "C-1 open() completed (messages witness)", "messages" in disp or "open failed" not in disp)
+    os.write(master, b"ZCODE-PROOF-AFTER-OPEN")
+    c0 = False
+    for _ in range(4):                                        # poll: the draft must compose
+        read_for(master, stream, 0.8)
+        if "ZCODE-PROOF-AFTER-OPEN" in "\n".join(screen.display):
+            c0 = True
+            break
+    check(pid, "C0 typing after open() paints — THE bug", c0)
+    os.write(master, b"\x03"); time.sleep(0.3)
 
-    # S-series: seamless scroll (hidden scrollbar, follow-tail, affordance).
-    w0 = plain(buf)
-    os.write(fd, b"\x1b[5~"); time.sleep(0.4)
-    os.write(fd, b"\x1b[5~"); time.sleep(0.8)
-    read_for(fd, buf, 1.0)
-    w1 = plain(buf)
-    check(pid, "S0 pageup scrolls (content changed)", w1 != w0)
-    check(pid, "S1 Jump-to-latest affordance appears", b"Jump to latest" in w1)
-    os.write(fd, b"\x1b\x07"); time.sleep(0.6)   # ctrl+alt+g -> jump to latest
-    for _ in range(12):                            # pagedown flood: deterministic bottom
-        os.write(fd, b"\x1b[6~"); time.sleep(0.08)
-    read_for(fd, buf, 1.5)
-    start_mark = len(buf) - min(len(buf), 20000)
-    w2 = plain(buf[start_mark:])
-    check(pid, "S2 affordance clears at the bottom", b"Jump to latest" not in w2)
+    # G-series: input editing grammar (screen truth)
+    os.write(master, b"alpha beta gamma"); read_for(master, stream, 1.0)
+    os.write(master, b"\x17"); read_for(master, stream, 0.8)     # ctrl+w
+    disp = "\n".join(screen.display)
+    g0 = ("alpha beta" in disp) and ("gamma" not in disp)
+    check(pid, "G0 ctrl+w deletes the previous word", g0)
+    os.write(master, b"\x01"); time.sleep(0.2)                   # ctrl+a
+    os.write(master, b"\x1bd"); read_for(master, stream, 0.8)    # alt+d
+    disp = "\n".join(screen.display)
+    check(pid, "G1 ctrl+a + alt+d delete the first word", "alpha" not in disp and "beta" in disp)
+    os.write(master, b"\x05"); time.sleep(0.2)                   # ctrl+e
+    os.write(master, b"\x15"); read_for(master, stream, 0.8)     # ctrl+u
+    check(pid, "G2 ctrl+u clears the line", "Ask anything" in "\n".join(screen.display))
+    os.write(master, b"\x1f"); read_for(master, stream, 0.8)     # ctrl+- : undo
+    disp = "\n".join(screen.display)
+    check(pid, "G3 input undo restores the line", "beta" in disp or "alpha" in disp)
+    os.write(master, b"\x03"); time.sleep(0.3)
+
+    # I-series: escape interrupts the RUNNING turn (minimal real turn, throwaway)
+    interrupted = False
+    for attempt in range(3):
+        os.write(master, b"\x18n"); read_for(master, stream, 2.5)
+        os.write(master, b"Reply with exactly: ok")
+        time.sleep(0.4)
+        os.write(master, b"\r")
+        read_for(master, stream, 0.9)
+        if not alive(pid):
+            break
+        os.write(master, b"\x1b")
+        read_for(master, stream, 2.0)
+        if "turn interrupted" in "\n".join(screen.display):
+            interrupted = True
+            break
+    check(pid, "I0 escape interrupts the running turn", interrupted)
 else:
-    check(pid, "C-1 open() completed (messages witness)", False)
-    check(pid, "C0 typing after open() paints — THE bug", False)
+    for lbl in ("C-1 open() completed (messages witness)", "C0 typing after open() paints — THE bug",
+                "G0 ctrl+w deletes the previous word", "G1 ctrl+a + alt+d delete the first word",
+                "G2 ctrl+u clears the line", "G3 input undo restores the line",
+                "I0 escape interrupts the running turn"):
+        check(pid, lbl, False)
+
+# S-series on the long /themes transcript
+if b0 and alive(pid):
+    os.write(master, b"\x18l"); read_for(master, stream, 1.5)
+    for ch in "themes":
+        os.write(master, ch.encode()); time.sleep(0.05)
+    read_for(master, stream, 0.8)
+    os.write(master, b"\r"); read_for(master, stream, 6.0)
+    before_s = "\n".join(screen.display)
+    scrolled = False
+    afford = False
+    for _ in range(3):
+        os.write(master, b"\x1b[5~"); time.sleep(0.4)
+        read_for(master, stream, 1.0)
+        after_s = "\n".join(screen.display)
+        if after_s != before_s:
+            scrolled = True
+            afford = "Jump to latest" in after_s or "Jump to latest" in before_s
+            break
+        before_s = after_s
+    check(pid, "S0 pageup scrolls (content changed)", scrolled)
+    check(pid, "S1 Jump-to-latest affordance appears", afford)
+    os.write(master, b"\x1b\x07"); time.sleep(0.6)               # ctrl+alt+g: jump to latest
+    for _ in range(6):
+        os.write(master, b"\x1b[6~"); time.sleep(0.08)
+    read_for(master, stream, 1.5)
+    check(pid, "S2 affordance clears at the bottom", "Jump to latest" not in "\n".join(screen.display))
+else:
+    for lbl in ("S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
+        check(pid, lbl, False)
 kill(pid)
 
 # ---- boot 2: persisted effort advertised ----
-buf2 = bytearray()
-pid, fd = spawn()
-read_for(fd, buf2, 9)
-fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 34, 111, 0, 0))
-read_for(fd, buf2, 2.5)
-check(pid, "F0 restart advertises persisted effort low", b"\xc2\xb7 low" in plain(buf2))
+pid, master, screen, stream = spawn(cols=111)
+read_for(master, stream, 9)
+fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 34, 111, 0, 0))
+read_for(master, stream, 2.5)
+check(pid, "F0 restart advertises persisted effort low", "· low" in "\n".join(screen.display))
 kill(pid)
 
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")

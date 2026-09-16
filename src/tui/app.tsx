@@ -32,7 +32,7 @@ import {
   type ThemeTokens,
 } from "./design";
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync } from "node:fs";
 import pkgJson from "../../package.json";
 
 const VERSION = pkgJson.version;
@@ -304,6 +304,29 @@ function recentModels(model: ModelKey, recent: ModelKey[]): ModelKey[] {
     })
     .slice(0, 10)
     .map((item) => ({ providerId: item.providerId, modelId: item.modelId }));
+}
+// Word-motion helpers for the input editing grammar (opencode input_*):
+// a word is a run of non-whitespace; motions skip the whitespace gap first.
+function wordBackward(text: string, pos: number): number {
+  let i = pos;
+  while (i > 0 && /\s/.test(text[i - 1] ?? "")) i--;
+  while (i > 0 && !/\s/.test(text[i - 1] ?? "")) i--;
+  return i;
+}
+function wordForward(text: string, pos: number): number {
+  const n = text.length;
+  let i = pos;
+  while (i < n && /\s/.test(text[i] ?? "")) i++;
+  while (i < n && !/\s/.test(text[i] ?? "")) i++;
+  return i;
+}
+function lineStart(text: string, pos: number): number {
+  const nl = text.lastIndexOf("\n", Math.max(0, pos - 1));
+  return nl + 1;
+}
+function lineEnd(text: string, pos: number): number {
+  const nl = text.indexOf("\n", pos);
+  return nl === -1 ? text.length : nl;
 }
 const isEffort = (value: unknown): value is (typeof EFFORTS)[number] =>
   typeof value === "string" && (EFFORTS as readonly string[]).includes(value);
@@ -787,15 +810,15 @@ export function App({
     leaderArmed.current = false;
     setLeaderActive(false);
   };
-  // Seamless transcript scroll (the OpenCode model): one scrollbox, scrollbar
-  // hidden, tail pinned while streaming and unpinned the moment the user
-  // scrolls up — with the reference "Jump to latest" affordance. The tree is
-  // bounded by a SLIDING window (last WINDOW messages); scrolling to the top
-  // prepends older blocks with scroll anchoring, so long transcripts stay
-  // smooth without any paging jumps. The old 30-message page window fought
-  // its own scrollTop nudges; both mechanisms are gone.
-  const scrollRef = useRef<{ scrollTop?: number; scrollHeight?: number; viewport?: { height?: number }; scrollTo?: (p: unknown) => void; scrollBy?: (d: unknown) => void } | null>(null);
-  const followRef = useRef(true);
+  // Seamless transcript scroll — the OpenCode model, on the scrollbox's
+  // NATIVE sticky engine (stickyScroll + stickyStart "bottom"): the tail
+  // glues itself, follows streamed growth, and disengages the moment the
+  // user scrolls up — re-engaging at the bottom. We only MIRROR that state
+  // for the "Jump to latest" affordance, bind the reference extras the box
+  // does not (half-page, line, first/last message), and bound the tree with
+  // a sliding 200-message window whose older blocks prepend at the content
+  // top with scroll anchoring. No forced scrolling anywhere.
+  const scrollRef = useRef<{ scrollTop?: number; scrollHeight?: number; viewport?: { height?: number }; scrollBy?: (d: unknown) => void; scrollTo?: (p: unknown) => void; isAtStickyPosition?: () => boolean } | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
   const [windowEnd, setWindowEnd] = useState<number | null>(null); // null = live tail
@@ -804,36 +827,47 @@ export function App({
     windowEndRef.current = windowEnd;
   }, [windowEnd]);
   const anchor = useRef<number | null>(null); // scrollHeight before a prepend
-  const SCROLL_WINDOW = 30;
-  const scrollBottom = () => {
-    const box = scrollRef.current;
-    if (!box?.scrollTo || typeof box.scrollHeight !== "number") return;
-    box.scrollTo({ y: box.scrollHeight });
-    followRef.current = true;
-    if (!atBottomRef.current) { atBottomRef.current = true; setAtBottom(true); }
+  const SCROLL_WINDOW = 200;
+  const jumpToLatest = () => {
+    // Negative y travels toward the tail (bottom, scrollTop max) and
+    // re-engages the sticky glue.
+    scrollRef.current?.scrollBy?.({ y: -99999 });
   };
   const resetToTail = () => {
     setWindowEnd(null);
     windowEndRef.current = null;
-    resetToTail();
+    jumpToLatest();
   };
   const syncAtBottom = () => {
     const box = scrollRef.current;
-    if (!box || typeof box.scrollTop !== "number" || typeof box.scrollHeight !== "number") return;
-    // Anchor a just-prepended block first (layout has settled by next tick).
+    if (!box) return;
+    // Anchor a just-prepended block first (layout has settled by next tick):
+    // content grew ABOVE the viewport, so scrollTop grows by the same amount
+    // to keep the same text under the eyes.
     if (anchor.current !== null) {
-      const grown = box.scrollHeight - anchor.current;
+      const grown = (box.scrollHeight ?? 0) - anchor.current;
       anchor.current = null;
       if (grown > 0) box.scrollTop = (box.scrollTop ?? 0) + grown;
     }
-    const vp = (box.viewport?.height as number | undefined) ?? 0;
-    const bottom = box.scrollTop + vp >= box.scrollHeight - 3;
-    followRef.current = bottom;
+    let stickyVal = "n/a";
+    try { stickyVal = String((box as { isAtStickyPosition?: () => boolean }).isAtStickyPosition?.()); } catch {}
+    try { appendFileSync("/tmp/zct-keys.log", "sync st=" + String(box.scrollTop) + " sh=" + String(box.scrollHeight) + " vp=" + String(box.viewport?.height) + " sticky=" + stickyVal + "\n"); } catch {}
+    // At-tail truth, all three voices OR'd (measured 2026-09-16): the
+    // engine's own isAtStickyPosition() (glue engaged), the sticky anchor
+    // (scrollTop ~0), and the classic geometric bottom (scrollTop + viewport
+    // >= scrollHeight). Whichever coordinate voice the engine is using this
+    // frame, the tail is the tail.
+    try { appendFileSync("/tmp/zct-keys.log", "sync st=" + String(box.scrollTop) + " glue=" + String((box as { _stickyScrollBottom?: boolean })._stickyScrollBottom) + "\n"); } catch {}
+    const classicBottom = (box.scrollTop ?? 0) + ((box.viewport?.height as number | undefined) ?? 0) >= (box.scrollHeight ?? 0) - 3;
+    const bottom = (typeof box.isAtStickyPosition === "function" && box.isAtStickyPosition())
+      || (box.scrollTop ?? 999) <= 2
+      || classicBottom;
     if (bottom !== atBottomRef.current) { atBottomRef.current = bottom; setAtBottom(bottom); }
-    // Reached the window top with older messages off-window: prepend a block.
+    // At the content top with older messages off-window: prepend a block.
     const end = windowEndRef.current ?? msgsRef.current.length;
-    if (box.scrollTop <= 0 && end < msgsRef.current.length) {
-      anchor.current = box.scrollHeight;
+    const maxScroll = Math.max(0, (box.scrollHeight ?? 0) - (box.viewport?.height ?? 0));
+    if ((box.scrollTop ?? 0) <= 2 && end < msgsRef.current.length) {
+      anchor.current = box.scrollHeight ?? 0;
       setWindowEnd(Math.max(0, end - SCROLL_WINDOW));
     }
   };
@@ -916,11 +950,6 @@ export function App({
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
-  // Content changes re-pin the tail immediately (followRef gates it: the
-  // moment the user scrolls up, streaming no longer drags the view).
-  useEffect(() => {
-    if (view === "session" && followRef.current) scrollBottom();
-  }, [msgs, thinking, view]);
 
 
   useEffect(() => {
@@ -1174,6 +1203,57 @@ export function App({
     if (!row) { flashStatus(`no session in quick slot ${slot}`); return; }
     if (row.sessionId === activeId) { closeDialog(); setView("session"); return; }
     void open(row);
+  };
+
+  // Interrupt the running turn (opencode session_interrupt: escape). The
+  // draft is untouched — only the turn stops.
+  const stopTurn = async () => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    try {
+      await client.request("session/stop", { sessionId: id });
+      setRunning(false);
+      flashStatus("turn interrupted", "warning");
+      probe("turn-stop", id.slice(0, 18));
+    } catch (e) {
+      flashStatus(`interrupt failed: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  };
+
+  // Input undo/redo (opencode input_undo/redo): snapshots pushed before
+  // structural edits — word deletes, line deletes, newline, paste bursts.
+  const undoStack = useRef<string[]>([]);
+  const redoStack = useRef<string[]>([]);
+  const pushUndo = () => {
+    undoStack.current.push(draftRef.current);
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    redoStack.current = [];
+  };
+  const applyDraft = (next: string, cursorAt: number) => {
+    draftRef.current = next;
+    setDraft(next);
+    setCursorBoth(cursorAt);
+    sugDismissed.current = false;
+    moveSug(0);
+  };
+
+  // Effort select: persist per model (opencode variant map) AND carry it to
+  // the active session — setModel accepts model.variant (measured live
+  // 2026-09-16) and the backend persists it as workspace last-used.
+  const applyEffort = (e: (typeof EFFORTS)[number]) => {
+    setEffort(e);
+    uiState.current.variant[modelKey(activeModel)] = e;
+    writeUiState(uiState.current);
+    if (!activeId) { flashStatus(`effort → ${e}`); return; }
+    void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
+      .then(() => flashStatus(`effort → ${e}`))
+      .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${err instanceof Error ? err.message : err}`));
+  };
+
+  const cycleEffort = () => {
+    const cur = isEffort(effort) ? effort : "max";
+    const next = EFFORTS[(EFFORTS.indexOf(cur) + 1) % EFFORTS.length];
+    applyEffort(next);
   };
 
   const cycleMode = async () => {
@@ -1563,6 +1643,8 @@ export function App({
     if (leaderArmed.current) {
       disarmLeader();
       if (key.name === "b") { if (view === "session") setSidebarOpen((s) => !s); return; }
+      if (key.name === "a") { setDialog("mode"); return; }
+      if (key.name === "m") { setDialog("model"); return; }
       if (key.name === "t") { setDialog("themes"); return; }
       if (key.name === "l") { openSessions(); return; }
       if (key.name === "n") { void newSession(); return; }
@@ -1576,9 +1658,20 @@ export function App({
       armLeader();
       return;
     }
-    if (key.ctrl && key.name === "k" || key.ctrl && key.name === "p") {
+    if (key.ctrl && key.name === "p") {
       setTyping(false);
       setDialog("palette");
+      return;
+    }
+    // opencode session_interrupt: escape stops the running turn, wherever
+    // focus is. The composer's own escape semantics live in the typing branch.
+    if (running && key.name === "escape" && view === "session") {
+      void stopTurn();
+      return;
+    }
+    // opencode variant_cycle: ctrl+t cycles the reasoning effort.
+    if (key.ctrl && key.name === "t") {
+      cycleEffort();
       return;
     }
     // shift+tab cycles the mode — the OpenCode agent-cycle slot.
@@ -1594,16 +1687,18 @@ export function App({
     // line, first/last) — these keys can never be composer input, so they are
     // handled before the typing branch and work mid-draft.
     if (view === "session" && msgsRef.current.length > 0 && scrollRef.current) {
-      const vp = (scrollRef.current.viewport?.height as number | undefined) ?? 24;
-      const pageScroll = (delta: number) => { scrollRef.current?.scrollBy?.({ y: delta * Math.max(3, vp - 2) }); syncAtBottom(); };
+      // The reference messages_* scroll grammar. pageup/pagedown and these
+      // extras can never be composer input, so they work mid-draft.
+      const vp = ((scrollRef.current.viewport?.height as number | undefined) ?? 26) - 2;
+      const pageScroll = (pages: number) => { scrollRef.current?.scrollBy?.({ y: pages * Math.max(3, vp) }); syncAtBottom(); };
       if (key.name === "pageup") { pageScroll(-1); return; }
       if (key.name === "pagedown") { pageScroll(1); return; }
       if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "u") { pageScroll(-0.5); return; }
       if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "d") { pageScroll(0.5); return; }
-      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "y") { pageScroll(-2 / Math.max(3, vp - 2)); return; }
-      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "e") { pageScroll(2 / Math.max(3, vp - 2)); return; }
-      if (key.ctrl && key.name === "g") { scrollRef.current.scrollTo?.({ y: 0 }); followRef.current = false; atBottomRef.current = false; setAtBottom(false); syncAtBottom(); return; }
-      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "g") { scrollBottom(); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "y") { scrollRef.current?.scrollBy?.({ y: -2 }); syncAtBottom(); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "e") { scrollRef.current?.scrollBy?.({ y: 2 }); syncAtBottom(); return; }
+      if (key.ctrl && key.name === "g") { scrollRef.current?.scrollBy?.({ y: -99999 }); syncAtBottom(); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "g") { jumpToLatest(); syncAtBottom(); return; }
     }
     if (key.ctrl && key.name === "q" || key.ctrl && key.name === "d") {
       onQuit();
@@ -1638,7 +1733,10 @@ export function App({
       const sugOpenNow = sugMatches.length > 0 && !sugDismissed.current;
       if (key.name === "escape") {
         if (sugOpenNow) { sugDismissed.current = true; return; }
-        setTyping(false); draftRef.current = ""; setDraft(""); setCursorBoth(null); discardPending(); return;
+        if (running) { void stopTurn(); return; }
+        // The reference escape clears nothing (input_clear is ctrl+c) and
+        // never leaves the composer.
+        return;
       }
       if (key.name === "backspace" || key.sequence === "\x7f" || key.sequence === "\b") {
         const cur = cursorRef.current ?? draftRef.current.length;
@@ -1665,6 +1763,9 @@ export function App({
         moveSug(Math.max(0, Math.min(total - 1, sugIdxRef.current + delta)));
         return;
       }
+      // opencode agent_cycle: tab cycles agents when the popup is not open
+      // (with the popup up, tab completes).
+      if (key.name === "tab" && !sugOpenNow) { void cycleMode(); return; }
       if (sugOpenNow && key.name === "tab") {
         if (sugMatches.length > 0) {
           const picked = `${sugMatches[sugIdxRef.current].name} `;
@@ -1684,6 +1785,7 @@ export function App({
       if ((key.name === "return" && (key as { shift?: boolean }).shift)
         || (key.name === "return" && (key as { meta?: boolean }).meta)
         || (key.ctrl && key.name === "j")) {
+        pushUndo();
         const cur = cursorRef.current ?? draftRef.current.length;
         const next = `${draftRef.current.slice(0, cur)}\n${draftRef.current.slice(cur)}`;
         draftRef.current = next;
@@ -1696,6 +1798,38 @@ export function App({
       if (key.name === "right") { moveCursor(1); return; }
       if (key.name === "home") { setCursorBoth(0); return; }
       if (key.name === "end") { setCursorBoth(draftRef.current.length); return; }
+      // ---- the OpenCode input_* editing grammar ----
+      const meta = (key as { meta?: boolean }).meta;
+      const cur0 = cursorRef.current ?? draftRef.current.length;
+      const text0 = draftRef.current;
+      if (key.name === "left" && key.ctrl) { setCursorBoth(wordBackward(text0, cur0)); return; }
+      if (key.name === "right" && key.ctrl) { setCursorBoth(wordForward(text0, cur0)); return; }
+      if (meta && (key.name === "left" || key.name === "b")) { setCursorBoth(wordBackward(text0, cur0)); return; }
+      if (meta && (key.name === "right" || key.name === "f")) { setCursorBoth(wordForward(text0, cur0)); return; }
+      if (key.ctrl && (key.name === "b")) { moveCursor(-1); return; }
+      if (key.ctrl && (key.name === "f") && !sugOpenNow) { moveCursor(1); return; }
+      if (key.ctrl && key.name === "a") { setCursorBoth(lineStart(text0, cur0)); return; }
+      if (key.ctrl && key.name === "e") { setCursorBoth(lineEnd(text0, cur0)); return; }
+      // Deletes push an undo snapshot first.
+      if (key.ctrl && key.name === "k") { pushUndo(); applyDraft(text0.slice(0, cur0), cur0); return; }
+      if (key.ctrl && key.name === "u") { pushUndo(); const ls = lineStart(text0, cur0); applyDraft(text0.slice(0, ls) + text0.slice(cur0), ls); return; }
+      if ((meta && key.name === "d") || (key.ctrl && key.name === "delete")) { pushUndo(); const wf = wordForward(text0, cur0); applyDraft(text0.slice(0, cur0) + text0.slice(wf), cur0); return; }
+      if (key.ctrl && key.name === "w" || meta && key.name === "backspace" || key.ctrl && key.name === "backspace") {
+        pushUndo();
+        const wb = wordBackward(text0, cur0);
+        applyDraft(text0.slice(0, wb) + text0.slice(cur0), wb);
+        return;
+      }
+      if (key.ctrl && (key.name === "-" || key.sequence === "\x1f")) {
+        const prev = undoStack.current.pop();
+        if (prev !== undefined) { redoStack.current.push(text0); applyDraft(prev, prev.length); }
+        return;
+      }
+      if (key.ctrl && (key.name === "." || key.sequence === "\x1e")) {
+        const next = redoStack.current.pop();
+        if (next !== undefined) { undoStack.current.push(text0); applyDraft(next, next.length); }
+        return;
+      }
       if (key.name === "up" || key.name === "down") {
         // Multiline drafts move the cursor across lines; single-line drafts
         // walk the prompt history.
@@ -1779,8 +1913,9 @@ export function App({
     }
 
     if (key.name === "escape") {
-      if (view === "session") { setView("home"); setTyping(true); }
-      else onQuit();
+      // Our home nav surface is an extension; escape there returns to the
+      // composer. The reference never quits on escape.
+      setTyping(true);
     } else if (key.name === "q") onQuit();
     else if (key.name === "i") { setTyping(true); setDraft(""); }
     else if (key.name === "s") openSessions();
@@ -1921,19 +2056,7 @@ footerHints={[
           { key: "enter", label: "select" },
           { key: "esc", label: "close" },
         ]}
-        onSelect={(e) => {
-          setEffort(e);
-          // Persist per model (opencode variant map) AND carry it to the
-          // active session — setModel accepts model.variant (measured live
-          // 2026-09-16) and the backend persists it as workspace last-used.
-          uiState.current.variant[modelKey(activeModel)] = e;
-          writeUiState(uiState.current);
-          closeDialog();
-          if (!activeId) { flashStatus(`effort → ${e}`); return; }
-          void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
-            .then(() => flashStatus(`effort → ${e}`))
-            .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${err instanceof Error ? err.message : err}`));
-        }}
+        onSelect={(e) => { closeDialog(); applyEffort(e); }}
         onClose={closeDialog}
       />
     );
@@ -2103,6 +2226,9 @@ footerHints={[
           <scrollbox
             ref={scrollRef as never}
             style={{ flexGrow: 1, flexDirection: "column", paddingTop: 1 }}
+            scrollbarOptions={{ visible: false }}
+            stickyScroll
+            stickyStart="bottom"
           >
             {visibleEnd < msgs.length ? (
               <text content={`… ${msgs.length - visibleEnd} older messages — scroll up to load`} fg={C.faint} />
@@ -2124,11 +2250,19 @@ footerHints={[
           <SessionSidebar C={C} title={activeTitle || "zcode-tui"} sessionId={activeId} ctx={ctx} />
         ) : null}
       </box>
-      {!atBottom && msgs.length > 0 ? (
-        <box style={{ flexDirection: "row", justifyContent: "flex-end", paddingRight: 2, flexShrink: 0 }}>
-          <text content="Jump to latest " fg={C.subtle} />
-          <text content="↓" fg={C.accent} />
-          <text content="  ctrl+alt+g" fg={C.faint} />
+      {/* Always-reserved row: a structural unmount leaves stale cells in the
+          renderer (measured 2026-09-16), a content swap repaints cleanly. */}
+      {view === "session" ? (
+        <box style={{ flexDirection: "row", flexShrink: 0, paddingLeft: 2, height: 1 }}>
+          {!atBottom && msgs.length > 0 ? (
+            <>
+              <text content="Jump to latest " fg={C.subtle} />
+              <text content="↓" fg={C.accent} />
+              <text content="  ctrl+alt+g" fg={C.faint} />
+            </>
+          ) : (
+            <text content=" " fg={C.subtle} />
+          )}
         </box>
       ) : null}
       {ask ? (
