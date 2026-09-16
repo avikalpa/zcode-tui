@@ -171,7 +171,9 @@ export function wrapText(text: string, width: number): string[] {
 export function formatDateHeading(epochMs: number): string {
   // Date#toDateString is the compact grouping voice used by the reference
   // picker: "Fri Sep 04 2026" rather than a locale-dependent long date.
-  return new Date(epochMs).toDateString();
+  // Today reads as "Today", same as the reference session list.
+  const label = new Date(epochMs).toDateString();
+  return label === new Date().toDateString() ? "Today" : label;
 }
 
 export interface SlashCommandSpec {

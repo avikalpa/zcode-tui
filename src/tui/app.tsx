@@ -32,7 +32,7 @@ import {
   type ThemeTokens,
 } from "./design";
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import pkgJson from "../../package.json";
 
 const VERSION = pkgJson.version;
@@ -249,6 +249,64 @@ function normalizeSession(value: Record<string, unknown>): SessionRow {
     modelId: typeof value.modelId === "string" ? value.modelId : undefined,
   };
 }
+
+// The UX-state store, copied from the OpenCode reference (packages/tui
+// context/local.tsx model.json): recent models (most recent first, capped at
+// 10) and the reasoning variant (effort) keyed per provider/model survive
+// restarts. Theme and pinned sessions keep their dedicated files; this file is
+// the model/effort voice. Writes are atomic (temp + rename), same as
+// writeJsonAtomic upstream.
+type ModelKey = { providerId: string; modelId: string };
+type UiState = { recent: ModelKey[]; variant: Record<string, string> };
+const uiStatePath = `${process.env.HOME}/.config/zcode-tui/state.json`;
+function modelKey(model: ModelKey): string {
+  return `${model.providerId}/${model.modelId}`;
+}
+function readUiState(): UiState {
+  try {
+    const raw = JSON.parse(readFileSync(uiStatePath, "utf8")) as Record<string, unknown>;
+    const recent: ModelKey[] = Array.isArray(raw.recent)
+      ? raw.recent.filter((x): x is ModelKey => {
+          if (!x || typeof x !== "object") return false;
+          const m = x as Record<string, unknown>;
+          return typeof m.providerId === "string" && typeof m.modelId === "string";
+        })
+      : [];
+    const variant: Record<string, string> = {};
+    if (raw.variant && typeof raw.variant === "object") {
+      for (const [k, v] of Object.entries(raw.variant as Record<string, unknown>)) {
+        if (typeof v === "string") variant[k] = v;
+      }
+    }
+    return { recent, variant };
+  } catch {
+    return { recent: [], variant: {} };
+  }
+}
+function writeUiState(next: UiState): void {
+  try {
+    mkdirSync(`${process.env.HOME}/.config/zcode-tui`, { recursive: true });
+    const temporary = `${uiStatePath}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(next));
+    renameSync(temporary, uiStatePath);
+  } catch {
+    /* best effort — a dead state file must never take the TUI down */
+  }
+}
+function recentModels(model: ModelKey, recent: ModelKey[]): ModelKey[] {
+  const seen = new Set<string>();
+  return [model, ...recent]
+    .filter((item) => {
+      const key = modelKey(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 10)
+    .map((item) => ({ providerId: item.providerId, modelId: item.modelId }));
+}
+const isEffort = (value: unknown): value is (typeof EFFORTS)[number] =>
+  typeof value === "string" && (EFFORTS as readonly string[]).includes(value);
 
 // Braille spinner for the running state — OpenCode mounts a block spinner on
 // the composer underline while a turn runs; this is the same slot.
@@ -642,7 +700,10 @@ export function App({
   const [history, setHistory] = useState<string[]>([]);
   const historyIdx = useRef(-1);
   const [thoughtLevel, setThoughtLevel] = useState<string>("enabled");
-  const [effort, setEffort] = useState<(typeof EFFORTS)[number]>("low");
+  // Reasoning effort: default matches the runtime catalog's defaultLevel
+  // ("max", measured live 2026-09-16); the /effort dialog and state seeding
+  // refine it from the UX-state store and the workspace catalog.
+  const [effort, setEffort] = useState<(typeof EFFORTS)[number]>("max");
   const [ctx, setCtx] = useState<{ used: number; window: number } | null>(null);
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
@@ -687,6 +748,19 @@ export function App({
   const queueRef = useRef<string[]>([]);
   const [models, setModels] = useState<ModelChoice[]>(ALLOWED_MODELS.map((m) => ({ ...m })));
   const [modelIdx, setModelIdx] = useState(0);
+  // modelsRef backs the push handler (registered once): model/effort patches
+  // from the backend must resolve against the live catalog, not a stale one.
+  const modelsRef = useRef(models);
+  useEffect(() => {
+    modelsRef.current = models;
+  }, [models]);
+  // The UX-state store (opencode model.json pattern) — loaded once, saved on
+  // every model/effort choice.
+  const uiState = useRef<UiState>(readUiState());
+  const rememberModel = (choice: ModelChoice) => {
+    uiState.current.recent = recentModels({ providerId: choice.providerId, modelId: choice.modelId }, uiState.current.recent);
+    writeUiState(uiState.current);
+  };
   const [pinned, setPinned] = useState<string[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<SessionRow | null>(null);
@@ -820,14 +894,33 @@ export function App({
   const loadModels = async () => {
     try {
       const ws = { workspacePath: process.cwd(), workspaceKey: process.cwd() };
-      await client.request("workspace/readState", { workspace: ws });
-      // The allowlist remains authoritative. The response is only a backend
-      // liveness check; it cannot add paid or stale catalog entries.
+      const res = (await client.request("workspace/readState", { workspace: ws })) as Record<string, unknown>;
+      // The allowlist remains authoritative. The response only seeds: the
+      // reasoning levels per model (effort dialog + defaultLevel) and the
+      // catalog liveness.
       const avail = ALLOWED_MODELS.map((m) => ({ ...m }));
       setModels(avail);
       const requested = modelId ? avail.findIndex((m) => m.modelId === modelId) : -1;
+      const remembered = uiState.current.recent.find((r) =>
+        avail.some((m) => m.providerId === r.providerId && m.modelId === r.modelId));
+      const rememberedIdx = remembered
+        ? avail.findIndex((m) => m.providerId === remembered.providerId && m.modelId === remembered.modelId)
+        : -1;
       const defaultIndex = avail.findIndex((m) => m.isDefault);
-      setModelIdx(requested >= 0 ? requested : Math.max(0, defaultIndex));
+      const idx = requested >= 0 ? requested : rememberedIdx >= 0 ? rememberedIdx : Math.max(0, defaultIndex);
+      setModelIdx(idx);
+      // Effort precedence (opencode local.tsx): the user's per-model variant
+      // from the UX-state store, then the catalog's defaultLevel.
+      const chosen = avail[idx];
+      const localVariant = uiState.current.variant[modelKey(chosen)];
+      if (isEffort(localVariant)) {
+        setEffort(localVariant);
+      } else {
+        const settings = res.settings as Record<string, unknown> | undefined;
+        const catalog = (res.modelCatalog ?? settings?.model) as { available?: { modelId?: string; reasoning?: { defaultLevel?: string } }[] } | undefined;
+        const level = catalog?.available?.find((m) => m.modelId === chosen.modelId)?.reasoning?.defaultLevel;
+        if (isEffort(level)) setEffort(level);
+      }
     } catch {
       // The home screen remains usable while optional catalog polish is down.
     }
@@ -854,7 +947,8 @@ export function App({
       const res = (await client.request("session/resume", { sessionId: row.sessionId })) as {
         messages?: { info: Record<string, unknown>; parts: unknown }[];
       };
-      const turns: TurnMessage[] = (res.messages ?? []).map((m) => ({
+      const rawMessages = res.messages ?? [];
+      const turns: TurnMessage[] = rawMessages.map((m) => ({
         role: String(m.info?.role ?? "?"),
         text: extractText(m.parts),
         model: String((m.info?.model as Record<string, unknown> | undefined)?.modelId ?? "") || undefined,
@@ -863,12 +957,26 @@ export function App({
       setMsgs(turns);
       setActiveId(row.sessionId);
       setMode(row.mode ?? "build");
+      // Adopt the session's own model and effort (opencode prompt/index.tsx:
+      // agent/model/variant re-initialize from the last user message when the
+      // session changes).
+      if (row.modelId) {
+        const i = modelsRef.current.findIndex((m) => m.modelId === row.modelId);
+        if (i >= 0) setModelIdx(i);
+      }
+      const lastModel = rawMessages.at(-1)?.info?.model as Record<string, unknown> | undefined;
+      if (isEffort(lastModel?.variant)) setEffort(lastModel.variant);
       setPage(0);
       await subscribe(row.sessionId);
       setStatus(`${displayTitle(row)} · ${turns.length} messages`);
       probe("resume", row.sessionId.slice(0, 18));
     } catch (e) {
       setStatus(`open failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      // The composer is ALWAYS live once the session view settles — this is
+      // the bug the owner hit 2026-09-16 ("cannot even type in a zcodetui
+      // session after opening it"): the old code left typing=false forever.
+      setTyping(true);
     }
   };
 
@@ -876,13 +984,15 @@ export function App({
     setStatus("creating session…");
     try {
       const selected = modelId && models.some((m) => m.modelId === modelId)
-        ? modelId
-        : activeModel?.modelId ?? "GLM-5.3-Flash";
+        ? models.find((m) => m.modelId === modelId)!
+        : activeModel;
+      // The chosen model AND its effort variant ride creation — a new session
+      // starts with exactly what the composer advertises.
       const res = (await client.request("session/create", {
         workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() },
         mode: "build",
         persistence: "immediate",
-        model: { providerId: "zai", modelId: selected },
+        model: { providerId: selected.providerId, modelId: selected.modelId, variant: effort },
       })) as { session?: Record<string, unknown> };
       const raw = res.session;
       if (!raw) throw new Error("create returned no session");
@@ -970,7 +1080,10 @@ export function App({
 
   const closeDialog = () => {
     setDialog(null);
-    if (view === "home") setTyping(true);
+    // The composer is always live once a dialog closes — the old home-only
+    // restore left session-view dialogs (palette, model, effort, sessions)
+    // draining every keystroke after close.
+    setTyping(true);
   };
 
   const statusSummary = () => {
@@ -1211,6 +1324,16 @@ export function App({
         if (typeof modePatch?.current === "string") setMode(modePatch.current);
         const level = patch.thoughtLevel as Record<string, unknown> | undefined;
         if (typeof level?.current === "string") setThoughtLevel(level.current);
+        // The model available/current/lastUsed triple: follow the backend's
+        // current model and effort variant (a choice made in the desktop or
+        // another client keeps this TUI honest).
+        const modelPatch = patch.model as Record<string, unknown> | undefined;
+        const currentModel = modelPatch?.current as Record<string, unknown> | undefined;
+        if (currentModel && typeof currentModel.providerId === "string" && typeof currentModel.modelId === "string") {
+          const i = modelsRef.current.findIndex((m) => m.providerId === currentModel.providerId && m.modelId === currentModel.modelId);
+          if (i >= 0) setModelIdx(i);
+        }
+        if (isEffort(currentModel?.variant)) setEffort(currentModel.variant);
         if (patch.status === "running") setRunning(true);
         if (patch.status === "idle" || patch.status === "completed") setRunning(false);
       } else if (method === "v4/telemetry/event" && params?.kind === "turn.terminal") {
@@ -1261,15 +1384,19 @@ export function App({
 
     if (askRef.current) {
       const resolve = askRef.current;
+      // Every resolve path hands typing back to the composer — the banner
+      // took it, and an unresolved typing gate eats all further input.
       if (key.name === "y") {
         askRef.current = null;
         setAsk(null);
+        setTyping(true);
         resolve({ decision: "allow" });
         probe("permission-answered", "allow");
         flashStatus("permission allowed");
       } else if (key.name === "a") {
         askRef.current = null;
         setAsk(null);
+        setTyping(true);
         const always = askOptionsRef.current.find((x) => /always|project|allow/i.test(x.id));
         resolve(always?.response ?? { decision: "allow" });
         probe("permission-answered", "always");
@@ -1277,6 +1404,7 @@ export function App({
       } else if (key.name === "n" || key.name === "escape") {
         askRef.current = null;
         setAsk(null);
+        setTyping(true);
         resolve({ decision: "deny" });
         probe("permission-answered", "deny");
         flashStatus("permission denied");
@@ -1296,6 +1424,7 @@ export function App({
         if (!resolve) return;
         askRef.current = null;
         setAsk(null);
+        setTyping(true);
         if (askSel === 0) { resolve({ decision: "allow" }); probe("permission-answered", "allow"); flashStatus("permission allowed"); }
         else if (askSel === 1) {
           const always = askOptionsRef.current.find((x) => /always|project|allow/i.test(x.id));
@@ -1531,12 +1660,17 @@ export function App({
     } else if (key.name === "return" && view === "home") setTyping(true);
   });
 
-  const sessionOptions: DialogOption<SessionRow>[] = orderedSessions.map((row) => ({
+  // Session rows follow the reference picker (dialog-session-list.tsx): the
+  // title is the row — no "idle · mode · age" clutter; a busy session gets a
+  // spinner gutter, quick slots 1-9 show in the gutter, and the armed delete
+  // repaints the row in the error colour with a confirm label.
+  const sessionOptions: DialogOption<SessionRow>[] = orderedSessions.map((row, index) => ({
     id: row.sessionId,
-    label: displayTitle(row),
+    label: deleteId === row.sessionId ? "Press ctrl+d again to confirm" : displayTitle(row),
     meta: pinned.includes(row.sessionId) ? "pinned" : undefined,
     group: formatDateHeading(row.updatedAt),
-    description: statusMeta(row),
+    gutter: /run|busy|work/i.test(row.status) ? "⠋" : index < 9 ? String(index + 1) : undefined,
+    bg: deleteId === row.sessionId ? C.error : undefined,
     value: row,
   }));
 
@@ -1548,6 +1682,14 @@ export function App({
         options={sessionOptions}
         currentId={activeId ?? undefined}
         theme={C}
+        footerHints={[
+          { key: "enter", label: "open" },
+          { key: "ctrl+f", label: "pin" },
+          { key: "ctrl+d", label: "delete" },
+          { key: "ctrl+r", label: "rename" },
+          { key: "ctrl+1-9", label: "switch" },
+          { key: "esc", label: "close" },
+        ]}
         onAction={(action, option) => {
           if (!option) return;
           if (action === "pin") togglePin(option.value);
@@ -1571,9 +1713,14 @@ export function App({
         currentId={activeModel?.modelId}
         theme={C}
         countLabel="model"
+footerHints={[
+          { key: "enter", label: "select" },
+          { key: "esc", label: "close" },
+        ]}
         onSelect={(choice) => {
           const index = models.findIndex((m) => m.modelId === choice.modelId);
           setModelIdx(Math.max(0, index));
+          rememberModel(choice);
           setDialog(null);
           if (!activeId) { flashStatus(`model → ${modelLabel(choice)}`); return; }
           void client.request("session/setModel", { sessionId: activeId, model: { providerId: choice.providerId, modelId: choice.modelId } })
@@ -1592,6 +1739,10 @@ export function App({
         currentId={mode}
         theme={C}
         countLabel="mode"
+footerHints={[
+          { key: "enter", label: "select" },
+          { key: "esc", label: "close" },
+        ]}
         onSelect={(m) => {
           setDialog(null);
           if (!activeId) { setMode(m); flashStatus(`mode → ${m}`); return; }
@@ -1616,7 +1767,23 @@ export function App({
         currentId={effort}
         theme={C}
         countLabel="effort"
-        onSelect={(e) => { setEffort(e); setDialog(null); flashStatus(`effort → ${e}`); }}
+footerHints={[
+          { key: "enter", label: "select" },
+          { key: "esc", label: "close" },
+        ]}
+        onSelect={(e) => {
+          setEffort(e);
+          // Persist per model (opencode variant map) AND carry it to the
+          // active session — setModel accepts model.variant (measured live
+          // 2026-09-16) and the backend persists it as workspace last-used.
+          uiState.current.variant[modelKey(activeModel)] = e;
+          writeUiState(uiState.current);
+          setDialog(null);
+          if (!activeId) { flashStatus(`effort → ${e}`); return; }
+          void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
+            .then(() => flashStatus(`effort → ${e}`))
+            .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${err instanceof Error ? err.message : err}`));
+        }}
         onClose={closeDialog}
       />
     );
@@ -1630,6 +1797,10 @@ export function App({
         currentId={theme}
         theme={C}
         countLabel="theme"
+footerHints={[
+          { key: "enter", label: "select" },
+          { key: "esc", label: "close" },
+        ]}
         onSelect={(name) => { persistTheme(name); setDialog(null); flashStatus(`theme → ${name}`); }}
         onClose={closeDialog}
       />
@@ -1642,6 +1813,10 @@ export function App({
         options={forkOptions}
         theme={C}
         countLabel="message"
+footerHints={[
+          { key: "enter", label: "select" },
+          { key: "esc", label: "close" },
+        ]}
         onSelect={(messageId) => {
           setDialog(null);
           if (!activeId) return;
@@ -1703,6 +1878,10 @@ export function App({
         options={commands}
         theme={C}
         countLabel="command"
+footerHints={[
+          { key: "enter", label: "select" },
+          { key: "esc", label: "close" },
+        ]}
         onSelect={(fn) => { setDialog(null); setTimeout(fn, 30); }}
         onClose={closeDialog}
       />

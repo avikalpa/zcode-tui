@@ -2,14 +2,19 @@
 //
 // The dialog container follows the reference modal recipe (consult
 // 2026-09-13, item 1): a flat, borderless panel on a dimmed backdrop — no
-// rounded borders, no recessed search box, no footer hint row. Selection is a
-// full-width primary bar with background-coloured text; the current item wears
-// a filled dot. Dialogs deliberately use the global keyboard hook instead of a
-// focused InputRenderable: OpenTUI can retain focus on a component that has
-// already been reconciled away, so keeping filter state here makes every modal
+// rounded borders, no recessed search box. Selection is a full-width primary
+// bar with background-coloured text; the current item wears a filled dot.
+// Group headers are accent + bold with a spacer row between groups, and the
+// dialog carries the reference footer hint row (bold key + muted label) —
+// owner ruling 2026-09-16 ("the sessions overlay of opencode is more
+// polished; copy it") supersedes the earlier no-footer consult line.
+// Dialogs deliberately use the global keyboard hook instead of a focused
+// InputRenderable: OpenTUI can retain focus on a component that has already
+// been reconciled away, so keeping filter state here makes every modal
 // deterministic under fast PTY typing.
 import { useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
 
 export interface DialogOption<T> {
@@ -18,6 +23,8 @@ export interface DialogOption<T> {
   description?: string;
   meta?: string;
   group?: string;
+  bg?: string;
+  gutter?: string;
   value: T;
 }
 
@@ -82,6 +89,7 @@ export function SelectDialog<T>({
   onAction,
   size,
   countLabel,
+  footerHints,
   theme,
 }: {
   title: string;
@@ -92,6 +100,7 @@ export function SelectDialog<T>({
   onAction?: DialogAction<T>;
   size?: "medium" | "large" | "xlarge";
   countLabel?: string;
+  footerHints?: { key: string; label: string }[];
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
@@ -156,7 +165,7 @@ export function SelectDialog<T>({
         }}
       >
         <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
-          <text content={title} fg={C.fg} />
+          <text content={title} fg={C.fg} attributes={TextAttributes.BOLD} />
           <text content="esc" fg={C.faint} />
         </box>
         <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
@@ -168,10 +177,12 @@ export function SelectDialog<T>({
           const selected = abs === sel;
           const previous = visible[visible.indexOf(o) - 1];
           const group = o.group && o.group !== previous?.group ? o.group : undefined;
+          const groupSpacer = visible.indexOf(o) > 0;
           const labelWidth = Math.max(16, cardWidth - 10);
           return (
             <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
-              {group ? <text content={` ${group}`} fg={C.subtle} /> : null}
+              {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}
+              {group ? <text content={` ${group}`} fg={C.accent} attributes={TextAttributes.BOLD} /> : null}
               <box
                 style={{
                   height: 1,
@@ -179,9 +190,10 @@ export function SelectDialog<T>({
                   flexShrink: 0,
                   paddingLeft: 1,
                   paddingRight: 1,
-                  backgroundColor: selected ? C.accent : undefined,
+                  backgroundColor: selected ? C.accent : o.bg,
                 }}
               >
+                {o.gutter ? <text content={`${o.gutter} `} fg={selected ? C.accentText : C.accent} /> : null}
                 <text
                   content={`${truncate(o.label, labelWidth)}${o.id === currentId ? "  ●" : ""}${o.meta ? `  ${o.meta}` : ""}`}
                   fg={selected ? C.accentText : C.fg}
@@ -197,6 +209,16 @@ export function SelectDialog<T>({
           );
         })}
         {visible.length === 0 ? <text content=" No matching items" fg={C.faint} /> : null}
+        {footerHints && footerHints.length > 0 ? (
+          <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+            {footerHints.map((hint) => (
+              <box key={hint.key} style={{ flexDirection: "row", flexShrink: 0 }}>
+                <text content={`  ${hint.key}`} fg={C.fg} />
+                <text content={` ${hint.label}`} fg={C.faint} />
+              </box>
+            ))}
+          </box>
+        ) : null}
         {shown.length > visible.length ? (
           <box style={{ height: 1, flexShrink: 0 }}>
             <text content={` ${winStart + 1}-${winStart + visible.length} / ${shown.length} ${countLabel ?? ""}`} fg={C.faint} />
