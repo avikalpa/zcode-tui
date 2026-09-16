@@ -98,6 +98,22 @@ if b0 and alive(pid):
     os.write(fd, b"ZCODE-PROOF-AFTER-OPEN")
     read_for(fd, buf, 1.5)
     check(pid, "C0 typing after open() paints — THE bug", b"ZCODE-PROOF-AFTER-OPEN" in plain(buf))
+
+    # S-series: seamless scroll (hidden scrollbar, follow-tail, affordance).
+    w0 = plain(buf)
+    os.write(fd, b"\x1b[5~"); time.sleep(0.4)
+    os.write(fd, b"\x1b[5~"); time.sleep(0.8)
+    read_for(fd, buf, 1.0)
+    w1 = plain(buf)
+    check(pid, "S0 pageup scrolls (content changed)", w1 != w0)
+    check(pid, "S1 Jump-to-latest affordance appears", b"Jump to latest" in w1)
+    os.write(fd, b"\x1b\x07"); time.sleep(0.6)   # ctrl+alt+g -> jump to latest
+    for _ in range(12):                            # pagedown flood: deterministic bottom
+        os.write(fd, b"\x1b[6~"); time.sleep(0.08)
+    read_for(fd, buf, 1.5)
+    start_mark = len(buf) - min(len(buf), 20000)
+    w2 = plain(buf[start_mark:])
+    check(pid, "S2 affordance clears at the bottom", b"Jump to latest" not in w2)
 else:
     check(pid, "C-1 open() completed (messages witness)", False)
     check(pid, "C0 typing after open() paints — THE bug", False)

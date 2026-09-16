@@ -695,7 +695,6 @@ export function App({
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
-  const [page, setPage] = useState(0);
   const [mode, setMode] = useState<string>("auto");
   const [history, setHistory] = useState<string[]>([]);
   const historyIdx = useRef(-1);
@@ -758,6 +757,10 @@ export function App({
   const [modelIdx, setModelIdx] = useState(0);
   // modelsRef backs the push handler (registered once): model/effort patches
   // from the backend must resolve against the live catalog, not a stale one.
+  const msgsRef = useRef<TurnMessage[]>([]);
+  useEffect(() => {
+    msgsRef.current = msgs;
+  }, [msgs]);
   const modelsRef = useRef(models);
   useEffect(() => {
     modelsRef.current = models;
@@ -784,7 +787,61 @@ export function App({
     leaderArmed.current = false;
     setLeaderActive(false);
   };
-  const scrollRef = useRef<{ scrollTop?: number } | null>(null);
+  // Seamless transcript scroll (the OpenCode model): one scrollbox, scrollbar
+  // hidden, tail pinned while streaming and unpinned the moment the user
+  // scrolls up — with the reference "Jump to latest" affordance. The tree is
+  // bounded by a SLIDING window (last WINDOW messages); scrolling to the top
+  // prepends older blocks with scroll anchoring, so long transcripts stay
+  // smooth without any paging jumps. The old 30-message page window fought
+  // its own scrollTop nudges; both mechanisms are gone.
+  const scrollRef = useRef<{ scrollTop?: number; scrollHeight?: number; viewport?: { height?: number }; scrollTo?: (p: unknown) => void; scrollBy?: (d: unknown) => void } | null>(null);
+  const followRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const atBottomRef = useRef(true);
+  const [windowEnd, setWindowEnd] = useState<number | null>(null); // null = live tail
+  const windowEndRef = useRef<number | null>(null);
+  useEffect(() => {
+    windowEndRef.current = windowEnd;
+  }, [windowEnd]);
+  const anchor = useRef<number | null>(null); // scrollHeight before a prepend
+  const SCROLL_WINDOW = 30;
+  const scrollBottom = () => {
+    const box = scrollRef.current;
+    if (!box?.scrollTo || typeof box.scrollHeight !== "number") return;
+    box.scrollTo({ y: box.scrollHeight });
+    followRef.current = true;
+    if (!atBottomRef.current) { atBottomRef.current = true; setAtBottom(true); }
+  };
+  const resetToTail = () => {
+    setWindowEnd(null);
+    windowEndRef.current = null;
+    resetToTail();
+  };
+  const syncAtBottom = () => {
+    const box = scrollRef.current;
+    if (!box || typeof box.scrollTop !== "number" || typeof box.scrollHeight !== "number") return;
+    // Anchor a just-prepended block first (layout has settled by next tick).
+    if (anchor.current !== null) {
+      const grown = box.scrollHeight - anchor.current;
+      anchor.current = null;
+      if (grown > 0) box.scrollTop = (box.scrollTop ?? 0) + grown;
+    }
+    const vp = (box.viewport?.height as number | undefined) ?? 0;
+    const bottom = box.scrollTop + vp >= box.scrollHeight - 3;
+    followRef.current = bottom;
+    if (bottom !== atBottomRef.current) { atBottomRef.current = bottom; setAtBottom(bottom); }
+    // Reached the window top with older messages off-window: prepend a block.
+    const end = windowEndRef.current ?? msgsRef.current.length;
+    if (box.scrollTop <= 0 && end < msgsRef.current.length) {
+      anchor.current = box.scrollHeight;
+      setWindowEnd(Math.max(0, end - SCROLL_WINDOW));
+    }
+  };
+  useEffect(() => {
+    if (view !== "session") return;
+    const timer = setInterval(syncAtBottom, 300);
+    return () => clearInterval(timer);
+  }, [view]);
   const activeIdRef = useRef<string | null>(null);
   const resumed = useRef(false);
   const dims = useTerminalDimensions();
@@ -859,6 +916,12 @@ export function App({
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+  // Content changes re-pin the tail immediately (followRef gates it: the
+  // moment the user scrolls up, streaming no longer drags the view).
+  useEffect(() => {
+    if (view === "session" && followRef.current) scrollBottom();
+  }, [msgs, thinking, view]);
+
 
   useEffect(() => {
     draftRef.current = draft;
@@ -974,7 +1037,7 @@ export function App({
       }
       const lastModel = rawMessages.at(-1)?.info?.model as Record<string, unknown> | undefined;
       if (isEffort(lastModel?.variant)) setEffort(lastModel.variant);
-      setPage(0);
+      resetToTail();
       await subscribe(row.sessionId);
       setStatus(`${displayTitle(row)} · ${turns.length} messages`);
       probe("resume", row.sessionId.slice(0, 18));
@@ -1010,7 +1073,7 @@ export function App({
       setMsgs([]);
       setActiveId(row.sessionId);
       setMode("build");
-      setPage(0);
+      resetToTail();
       setView("session");
       await subscribe(row.sessionId);
       setTyping(true);
@@ -1027,7 +1090,7 @@ export function App({
     probe("turn-start", content.slice(0, 40));
     setRunning(true);
     setView("session");
-    setPage(0);
+    resetToTail();
     setHistory((h) => [content, ...h.filter((x) => x !== content)]);
     historyIdx.current = -1;
     setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
@@ -1527,6 +1590,21 @@ export function App({
       openSessions();
       return;
     }
+    // The OpenCode messages_* scroll grammar (pageup/pagedown, half-page,
+    // line, first/last) — these keys can never be composer input, so they are
+    // handled before the typing branch and work mid-draft.
+    if (view === "session" && msgsRef.current.length > 0 && scrollRef.current) {
+      const vp = (scrollRef.current.viewport?.height as number | undefined) ?? 24;
+      const pageScroll = (delta: number) => { scrollRef.current?.scrollBy?.({ y: delta * Math.max(3, vp - 2) }); syncAtBottom(); };
+      if (key.name === "pageup") { pageScroll(-1); return; }
+      if (key.name === "pagedown") { pageScroll(1); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "u") { pageScroll(-0.5); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "d") { pageScroll(0.5); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "y") { pageScroll(-2 / Math.max(3, vp - 2)); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "e") { pageScroll(2 / Math.max(3, vp - 2)); return; }
+      if (key.ctrl && key.name === "g") { scrollRef.current.scrollTo?.({ y: 0 }); followRef.current = false; atBottomRef.current = false; setAtBottom(false); syncAtBottom(); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "g") { scrollBottom(); return; }
+    }
     if (key.ctrl && key.name === "q" || key.ctrl && key.name === "d") {
       onQuit();
       return;
@@ -1724,11 +1802,11 @@ export function App({
       }
       void refresh();
     } else if (key.name === "[") {
-      if (page * 30 < msgs.length) setPage((p) => p + 1);
-      if (scrollRef.current?.scrollTop !== undefined) scrollRef.current.scrollTop = Math.max(0, scrollRef.current.scrollTop - 10);
+      scrollRef.current?.scrollBy?.({ y: -10 });
+      syncAtBottom();
     } else if (key.name === "]") {
-      if (page > 0) setPage((p) => p - 1);
-      if (scrollRef.current?.scrollTop !== undefined) scrollRef.current.scrollTop += 10;
+      scrollRef.current?.scrollBy?.({ y: 10 });
+      syncAtBottom();
     } else if (key.name === "return" && view === "home") setTyping(true);
   });
 
@@ -2011,8 +2089,8 @@ footerHints={[
     );
   }
 
-  const end = Math.max(30, msgs.length - page * 30);
-  const start = Math.max(0, end - 30);
+  const visibleEnd = windowEnd ?? msgs.length;
+  const visibleMsgs = msgs.slice(Math.max(0, visibleEnd - SCROLL_WINDOW), visibleEnd);
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
       <box style={{ flexDirection: "row", flexGrow: 1, minHeight: 0 }}>
@@ -2022,8 +2100,14 @@ footerHints={[
             <text content="i to type · Enter sends · /sessions opens the session browser" fg={C.faint} />
           </box>
         ) : (
-          <scrollbox ref={scrollRef as never} style={{ flexGrow: 1, flexDirection: "column", paddingTop: 1 }}>
-            {msgs.slice(start, end).map((m, index) => (
+          <scrollbox
+            ref={scrollRef as never}
+            style={{ flexGrow: 1, flexDirection: "column", paddingTop: 1 }}
+          >
+            {visibleEnd < msgs.length ? (
+              <text content={`… ${msgs.length - visibleEnd} older messages — scroll up to load`} fg={C.faint} />
+            ) : null}
+            {visibleMsgs.map((m, index) => (
               <MessageView
                 key={`${m.messageId ?? index}-${m.role}`}
                 m={m}
@@ -2031,7 +2115,7 @@ footerHints={[
                 thinking={thinking}
                 C={C}
                 mdStyle={mdStyle}
-                isTail={page === 0 && start + index === msgs.length - 1}
+                isTail={index === visibleMsgs.length - 1}
               />
             ))}
           </scrollbox>
@@ -2040,6 +2124,13 @@ footerHints={[
           <SessionSidebar C={C} title={activeTitle || "zcode-tui"} sessionId={activeId} ctx={ctx} />
         ) : null}
       </box>
+      {!atBottom && msgs.length > 0 ? (
+        <box style={{ flexDirection: "row", justifyContent: "flex-end", paddingRight: 2, flexShrink: 0 }}>
+          <text content="Jump to latest " fg={C.subtle} />
+          <text content="↓" fg={C.accent} />
+          <text content="  ctrl+alt+g" fg={C.faint} />
+        </box>
+      ) : null}
       {ask ? (
         <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
           <box
