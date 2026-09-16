@@ -1091,7 +1091,10 @@ export function App({
     setDialog(null);
     // The composer is always live once a dialog closes — the old home-only
     // restore left session-view dialogs (palette, model, effort, sessions)
-    // draining every keystroke after close.
+    // draining every keystroke after close. Every dialog select path goes
+    // through HERE (not an inline setDialog(null)) so a selection can never
+    // leave the composer dead — the 4th instance of the family, found by the
+    // PTY driver 2026-09-16.
     setTyping(true);
   };
 
@@ -1106,7 +1109,7 @@ export function App({
   const quickSwitch = (slot: number) => {
     const row = orderedSessions[slot - 1];
     if (!row) { flashStatus(`no session in quick slot ${slot}`); return; }
-    if (row.sessionId === activeId) { setDialog(null); setView("session"); return; }
+    if (row.sessionId === activeId) { closeDialog(); setView("session"); return; }
     void open(row);
   };
 
@@ -1196,7 +1199,7 @@ export function App({
       setSessions((current) => current.filter((x) => x.sessionId !== row.sessionId));
       setPinned((current) => current.filter((id) => id !== row.sessionId));
       setDeleteId(null);
-      setDialog(null);
+      closeDialog();
       if (activeId === row.sessionId) {
         setActiveId(null);
         setMsgs([]);
@@ -1535,7 +1538,14 @@ export function App({
     }
 
     if (typing) {
-      const printable = !!key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence);
+// A parser that delivers a printable keystroke with only key.name set
+      // (no sequence) must still compose — a single-char name is printable.
+      // Everything else keeps the unicode sequence grammar.
+      const printable = key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)
+        ? key.sequence
+        : !key.ctrl && !key.meta && key.name && key.name.length === 1 && key.name >= " "
+          ? key.name
+          : undefined;
       // A burst mid-flight settles before any structural key touches the draft.
       if (!printable && pendingBuf.current) flushPending();
       // Slash autocomplete reads the immediate draft ref: while the draft is a
@@ -1680,7 +1690,7 @@ export function App({
       // ONE atomic insert on the next tick: order and offsets live in the
       // refs, so React commit timing can no longer scramble the draft.
       if (printable) {
-        pendingBuf.current += key.sequence;
+        pendingBuf.current += printable;
         if (pendingTimer.current === null) {
           pendingTimer.current = setTimeout(flushPending, 8);
         }
@@ -1762,7 +1772,7 @@ export function App({
             setDialog("rename");
           }
         }}
-        onSelect={(row) => { setDialog(null); void open(row); }}
+        onSelect={(row) => { closeDialog(); void open(row); }}
         onClose={closeDialog}
       />
     );
@@ -1783,7 +1793,7 @@ footerHints={[
           const index = models.findIndex((m) => m.modelId === choice.modelId);
           setModelIdx(Math.max(0, index));
           rememberModel(choice);
-          setDialog(null);
+          closeDialog();
           if (!activeId) { flashStatus(`model → ${modelLabel(choice)}`); return; }
           void client.request("session/setModel", { sessionId: activeId, model: { providerId: choice.providerId, modelId: choice.modelId } })
             .then(() => flashStatus(`model → ${modelLabel(choice)}`))
@@ -1806,7 +1816,7 @@ footerHints={[
           { key: "esc", label: "close" },
         ]}
         onSelect={(m) => {
-          setDialog(null);
+          closeDialog();
           if (!activeId) { setMode(m); flashStatus(`mode → ${m}`); return; }
           void client.request("session/setMode", { sessionId: activeId, mode: m })
             .then(() => { setMode(m); flashStatus(`mode → ${m}`); })
@@ -1840,7 +1850,7 @@ footerHints={[
           // 2026-09-16) and the backend persists it as workspace last-used.
           uiState.current.variant[modelKey(activeModel)] = e;
           writeUiState(uiState.current);
-          setDialog(null);
+          closeDialog();
           if (!activeId) { flashStatus(`effort → ${e}`); return; }
           void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
             .then(() => flashStatus(`effort → ${e}`))
@@ -1863,7 +1873,7 @@ footerHints={[
           { key: "enter", label: "select" },
           { key: "esc", label: "close" },
         ]}
-        onSelect={(name) => { persistTheme(name); setDialog(null); flashStatus(`theme → ${name}`); }}
+        onSelect={(name) => { persistTheme(name); closeDialog(); flashStatus(`theme → ${name}`); }}
         onClose={closeDialog}
       />
     );
@@ -1880,7 +1890,7 @@ footerHints={[
           { key: "esc", label: "close" },
         ]}
         onSelect={(messageId) => {
-          setDialog(null);
+          closeDialog();
           if (!activeId) return;
           setStatus("forking…");
           void client.request("session/fork", { sessionId: activeId, target: { kind: "message", messageId } })
@@ -1909,7 +1919,7 @@ footerHints={[
         onSubmit={(value) => {
           // The standalone protocol has no rename method yet. Keep this
           // honest instead of pretending a local title survived a refresh.
-          setDialog(null);
+          closeDialog();
           flashStatus(`rename pending host support · ${value}`);
         }}
         onClose={closeDialog}
@@ -1944,7 +1954,7 @@ footerHints={[
           { key: "enter", label: "select" },
           { key: "esc", label: "close" },
         ]}
-        onSelect={(fn) => { setDialog(null); setTimeout(fn, 30); }}
+        onSelect={(fn) => { closeDialog(); setTimeout(fn, 30); }}
         onClose={closeDialog}
       />
     );
