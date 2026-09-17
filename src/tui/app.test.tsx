@@ -90,3 +90,14 @@ describe("session transcript reconstruction", () => {
     expect(b2.split("\n").every((l) => l.length <= 60)).toBe(true);
   });
 });
+
+describe("submit route copies opencode v2 (no refusal path)", () => {
+  test("exact command names route as commands; unknowns and paths are messages", async () => {
+    const { submitRoute } = AppModule;
+    expect(submitRoute("/sessions")).toBe("command");
+    expect(submitRoute("/home/pi/.yggterm/clipboard/x.png I can see UX issues")).toBe("message");
+    expect(submitRoute("/asdf")).toBe("message");
+    expect(submitRoute("/two words")).toBe("message");
+    expect(submitRoute("plain text")).toBe("message");
+  });
+});

@@ -1,5 +1,16 @@
 # opencode v2 parity ledger
 
+## ★ PRIME DOCTRINE (owner, 2026-09-17 23:34 — supersedes all earlier UX invention)
+
+**COPY opencode v2 (latest stable code) instead of inventing ANY UX. ONLY the
+wiring — adapting v2's surfaces to the zcode protocol/backend — is our
+intelligent work. This file is the doc spec.** Every surface must trace to a
+v2 source file (component structure, labels, colors, key behavior); where we
+shipped an invention in the past, it is a DEVIATION to be fixed, not a
+feature to keep. Audit pass 2026-09-17 filed the known deviations below
+(Deviation queue). The non-parities (model allowlist, provider_connect)
+remain the only exceptions.
+
 **Reference:** opencode **v2.0.6** (stable) — dev `~/gh/opencode` branch
 `v2ref` (tag `v2.0.6`). The v2 TUI surface is **239 keybind definitions**
 (`packages/tui/src/config/keybind.ts`) + the component set under
@@ -37,6 +48,27 @@ console_org.
   1-9, running-status adoption on open (0.6.17).
 - Agents: list (leader a), cycle (tab), modes (shift+tab), status view
   (leader s).
+
+## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
+
+1. **Tool-call rendering** — ours: one invented "● Tool summary ✓ms" line
+   with truncated inline output (the TodoWrite raw-JSON row in the owner's
+   screenshot). v2: per-tool title formatters + collapsible details rows
+   (`routes/session/index.tsx` message parts + `component/patch-diff.tsx`).
+2. **Permission card** — header/labels ported 0.6.19 (△ Permission
+   required / Allow once / Always allow / Reject, esc=Reject); residual:
+   hidden y/a/n accelerators (invisible; keep) + the v2 body variants
+   (EditBody diff view, PatchDiff) not ported.
+3. **Flash status line** — ours invented (transient hint-slot text). v2 uses
+   toasts only. Re-point confirmations to toast variants.
+4. **Home screen** — ours is logo+composer; v2 home = session-destination
+   (recent sessions, frecency) + tips. Ledger P2 line upgraded to deviation.
+5. **Footer hint rows** — our "enter select esc close" bracket-less hints
+   approximate v2's FooterAction pattern; diff the exact rendering.
+6. **Queue manager / timeline / sessions dialogs** — modeled on v2 but with
+   our own chrome; re-diff each against v2's dialog-* source file by file.
+7. **Turn footers, context label, spinner** — verify token-for-token against
+   v2 (formatTurnFooter was measured earlier; re-verify on v2.0.6).
 
 ## Remaining (v2.0.6 → us)
 

@@ -540,6 +540,14 @@ const MessageView = memo(function MessageView({
   );
 });
 
+// opencode v2 submit semantics (component/prompt/index.tsx: isCommand is an
+// EXACT registered-command-name match; there is no refusal path — unknown
+// "/xyz" and pasted paths deliver as normal messages). Supersedes the
+// 0.5-era unknown-command refusal (owner: "just copy opencode", 2026-09-17).
+export function submitRoute(content: string): "command" | "message" {
+  return content.startsWith("/") && parseSlashCommand(content) !== null ? "command" : "message";
+}
+
 // Markdown must keep its structure — only UNBREAKABLE runs (URLs, base64,
 // minified JSON — the "beyond the border" screenshot) get split at the
 // content width. Everything else passes through untouched.
@@ -1319,14 +1327,7 @@ export function App({
   };
 
   const submitPrompt = async (content: string) => {
-    if (content.startsWith("/") && parseSlashCommand(content) === null) {
-      // Refuse locally instead of feeding the model a typo (owner law:
-      // unknown slash commands must never become a billed chat turn).
-      // Astra correction (2026-09-08): keep the rejected draft on screen so
-      // the user edits rather than retypes.
-      flashStatus(`unknown command ${content.split(/\s+/, 1)[0]} · type / for the command list`);
-      return;
-    }
+    const route = submitRoute(content);
     setDraft("");
     draftRef.current = "";
     setCursorBoth(null);
@@ -1334,7 +1335,7 @@ export function App({
     sugDismissed.current = false;
     moveSug(0);
     setTyping(true);
-    if (content.startsWith("/")) {
+    if (route === "command") {
       const command = parseSlashCommand(content);
       if (command === "sessions") { setDeleteId(null); setDialog("sessions"); return; }
       if (command === "home") { setView("home"); return; }
@@ -2713,23 +2714,26 @@ footerHints={[
             }}
           >
             <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
-              <text content="△ Permission Request" fg={C.warning} attributes={TextAttributes.BOLD} />
-              <text content={`tool: ${ask.toolName}${ask.riskLevel ? ` · ${ask.riskLevel}` : ""}`} fg={C.faint} />
+              {/* opencode v2 permission.tsx, verbatim shape: "△ Permission
+                  required" header, icon+title row, select options with the
+                  reference labels; escape = Reject. */}
+              <text content="△ Permission required" fg={C.warning} attributes={TextAttributes.BOLD} />
+              <text content={ask.detail} fg={C.fg} wrapMode="word" />
             </box>
             <box style={{ flexDirection: "row", flexShrink: 0, paddingRight: 2 }}>
               <box style={{ flexGrow: 1, backgroundColor: C.surface, paddingLeft: 1, paddingRight: 1 }}>
-                <text content={ask.detail} fg={C.fg} wrapMode="word" />
+                <text content={`${ask.toolName}${ask.riskLevel ? ` · ${ask.riskLevel}` : ""}`} fg={C.subtle} wrapMode="word" />
               </box>
             </box>
             {[
-              { key: "y", label: "Allow once" },
-              { key: "a", label: "Always allow for this session" },
-              { key: "n", label: "Deny" },
+              { id: "once", label: "Allow once" },
+              { id: "always", label: "Always allow" },
+              { id: "reject", label: "Reject" },
             ].map((opt, index) => {
               const selected = askSel === index;
               return (
                 <box
-                  key={opt.key}
+                  key={opt.id}
                   style={{
                     height: 1,
                     flexDirection: "row",
@@ -2738,7 +2742,6 @@ footerHints={[
                     backgroundColor: selected ? C.accent : undefined,
                   }}
                 >
-                  <text content={`[${opt.key}] `} fg={selected ? C.accentText : C.subtle} />
                   <text content={opt.label} fg={selected ? C.accentText : C.fg} />
                 </box>
               );
