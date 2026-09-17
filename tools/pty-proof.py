@@ -26,16 +26,23 @@ def check(pid, label, ok):
     verdicts.append((label, ok))
     print(f"{'PASS' if ok else 'FAIL'}{'' if alive(pid) else ' (DEAD)'} {label}")
 
+with open("/tmp/zct-fake-editor.sh", "w") as f:
+    f.write('#!/bin/sh\nprintf EDITED-BY-EDITOR >> "$1"\ncp "$1" /tmp/zct-export-latest.md\n')
+os.chmod("/tmp/zct-fake-editor.sh", 0o755)
+
 def spawn(cols=110, rows=34):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     screen = pyte.Screen(cols, rows)
     stream = pyte.ByteStream(screen)
     pid = subprocess.Popen([binary], stdin=slave, stdout=slave, stderr=subprocess.DEVNULL,
-                           cwd="/tmp/zct-proof-cwd", env=dict(os.environ, TERM="xterm-256color"),
+                           cwd="/tmp/zct-proof-cwd",
+                           env=dict(os.environ, TERM="xterm-256color", EDITOR="/tmp/zct-fake-editor.sh"),
                            close_fds=True).pid
     os.close(slave)
     return pid, master, screen, stream
+
+RAW = bytearray()
 
 def read_for(master, stream, seconds):
     end = time.time() + seconds
@@ -48,6 +55,7 @@ def read_for(master, stream, seconds):
                 return
             if not chunk:
                 return
+            RAW.extend(chunk)
             stream.feed(chunk)
 
 def kill(pid):
@@ -71,6 +79,18 @@ for _ in range(3):
         a1 = True
         break
 check(pid, "A1 typing on home paints", a1)
+os.write(master, b"\x03"); time.sleep(0.3)
+
+# X0: leader e hands the draft to $EDITOR and loads it back
+os.write(master, b"base-")
+read_for(master, stream, 0.6)
+os.write(master, b"\x18e")                    # ctrl+x e: external editor
+read_for(master, stream, 2.5)
+disp = "\n".join(screen.display)
+check(pid, "X0 editor round-trip loads the draft", "base-EDITED-BY-EDITOR" in disp)
+os.write(master, b"!")
+read_for(master, stream, 0.8)
+check(pid, "X0b composer alive after editor resume", "base-EDITED-BY-EDITOR!" in "\n".join(screen.display))
 os.write(master, b"\x03"); time.sleep(0.3)
 
 # TAB/L-series (home-local)
@@ -162,6 +182,22 @@ if b0 and alive(pid):
     check(pid, "G3 input undo restores the line", "beta" in disp or "alpha" in disp)
     os.write(master, b"\x03"); time.sleep(0.3)
 
+    # X1/X2: export transcript to $EDITOR; copy last message via OSC 52
+    os.write(master, b"\x03"); time.sleep(0.4)   # settle: clear any draft
+    try:
+        os.remove("/tmp/zct-export-latest.md")
+    except FileNotFoundError:
+        pass
+    os.write(master, b"\x18x"); read_for(master, stream, 2.5)    # leader x: export
+    try:
+        export = open("/tmp/zct-export-latest.md").read()
+        x1 = "## " in export and len(export) > 50
+    except FileNotFoundError:
+        x1 = False
+    check(pid, "X1 leader x exports the transcript to $EDITOR", x1)
+    mark_raw = len(RAW)
+    os.write(master, b"\x18y"); read_for(master, stream, 1.2)    # leader y: copy
+    check(pid, "X2 leader y copies via OSC 52", b"\x1b]52;c;" in bytes(RAW[mark_raw:]))
     # I-series: escape interrupts the RUNNING turn (minimal real turn, throwaway)
     interrupted = False
     for attempt in range(3):
@@ -178,6 +214,8 @@ if b0 and alive(pid):
             interrupted = True
             break
     check(pid, "I0 escape interrupts the running turn", interrupted)
+
+
 else:
     for lbl in ("C-1 open() completed (messages witness)", "C0 typing after open() paints — THE bug",
                 "G0 ctrl+w deletes the previous word", "G1 ctrl+a + alt+d delete the first word",
@@ -207,10 +245,15 @@ if b0 and alive(pid):
     check(pid, "S0 pageup scrolls (content changed)", scrolled)
     check(pid, "S1 Jump-to-latest affordance appears", afford)
     os.write(master, b"\x1b\x07"); time.sleep(0.6)               # ctrl+alt+g: jump to latest
-    for _ in range(6):
-        os.write(master, b"\x1b[6~"); time.sleep(0.08)
-    read_for(master, stream, 1.5)
-    check(pid, "S2 affordance clears at the bottom", "Jump to latest" not in "\n".join(screen.display))
+    cleared = False
+    for _ in range(8):
+        for _ in range(3):
+            os.write(master, b"\x1b[6~"); time.sleep(0.08)        # pagedown: toward the tail
+        read_for(master, stream, 0.6)
+        if "Jump to latest" not in "\n".join(screen.display):
+            cleared = True
+            break
+    check(pid, "S2 affordance clears at the bottom", cleared)
 else:
     for lbl in ("S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
         check(pid, lbl, False)

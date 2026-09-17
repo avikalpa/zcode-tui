@@ -50,7 +50,7 @@ async function main() {
   const renderer = await createCliRenderer({ exitOnCtrlC: false });
   renderer.setBackgroundColor(THEMES.opencode.bg);
   createRoot(renderer).render(
-    <App client={client} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
+    <App client={client} renderer={renderer} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
   );
 }
 

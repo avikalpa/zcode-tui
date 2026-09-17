@@ -32,7 +32,8 @@ import {
   type ThemeTokens,
 } from "./design";
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
+import { spawn } from "node:child_process";
 import pkgJson from "../../package.json";
 
 const VERSION = pkgJson.version;
@@ -334,6 +335,47 @@ function lineStart(text: string, pos: number): number {
 function lineEnd(text: string, pos: number): number {
   const nl = text.indexOf("\n", pos);
   return nl === -1 ? text.length : nl;
+}
+// The reference editor handoff (packages/tui editor.ts): write the text to a
+// temp .md, suspend the renderer, spawn VISUAL||EDITOR with inherit stdio,
+// read back, resume. normalizeEditorContent strips ONE trailing newline.
+function normalizeEditorContent(content: string): string {
+  if (content.endsWith("\r\n")) {
+    const body = content.slice(0, -2);
+    return !body.includes("\n") && !body.includes("\r") ? body : content;
+  }
+  if (content.endsWith("\n")) {
+    const body = content.slice(0, -1);
+    return !body.includes("\n") && !body.includes("\r") ? body : content;
+  }
+  return content;
+}
+// The reference clipboard primitive (packages/tui clipboard.ts writeOsc52):
+// OSC 52 with tmux/screen passthrough. OpenTUI owns fd 1, so the sequence
+// goes through /dev/tty — the controlling PTY — like the probe channel does.
+function osc52Copy(text: string): boolean {
+  const sequence = `\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`;
+  const passthrough = `\x1bPtmux;\x1b${sequence}\x1b\\`;
+  const payload = process.env.TMUX ? sequence + passthrough : process.env.STY ? passthrough : sequence;
+  // Preferred: the controlling terminal. Fallback: raw fd 1 — OpenTUI
+  // replaces the process.stdout STREAM but a raw writeSync syscall still
+  // lands in the PTY.
+  try {
+    const tty = openSync("/dev/tty", "w");
+    try {
+      writeSync(tty, payload);
+    } finally {
+      closeSync(tty);
+    }
+    return true;
+  } catch {
+    try {
+      writeSync(1, payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 const isEffort = (value: unknown): value is (typeof EFFORTS)[number] =>
   typeof value === "string" && (EFFORTS as readonly string[]).includes(value);
@@ -696,11 +738,14 @@ function SessionSidebar({
 
 export function App({
   client,
+  renderer,
   onQuit,
   resumeId,
   modelId,
 }: {
   client: AppServer;
+
+  renderer?: { suspend?: () => void; resume?: () => void } | null;
   onQuit: () => void;
   resumeId?: string | null;
   modelId?: string | null;
@@ -998,6 +1043,49 @@ export function App({
     setQueue(rest);
     void send(next, activeId);
   }, [running, queue, activeId]);
+
+  // The reference editor handoff: suspend the renderer, hand the text to
+  // VISUAL||EDITOR over inherit stdio, read back, resume. Resolves null when
+  // no editor is configured or the editor failed — callers toast, the draft
+  // is untouched.
+  const suspendForEditor = (initial: string): Promise<string | null> => {
+    const editor = process.env.VISUAL || process.env.EDITOR;
+    // NOTE: call renderer.suspend()/resume() as METHODS — caching them in
+    // locals detaches `this` and the delegated suspend throws.
+    if (!editor || !renderer?.suspend || !renderer.resume) return Promise.resolve(null);
+    const file = `/tmp/zcode-tui-${Date.now()}.md`;
+    return new Promise((resolve) => {
+      try {
+        writeFileSync(file, initial);
+        renderer?.suspend?.();
+      } catch (e) {
+        try { appendFileSync("/tmp/zct-keys.log", "suspend THROW " + String(e) + "\n"); } catch {}
+        flashStatus(`editor suspend failed: ${e instanceof Error ? e.message : e}`, "error");
+        try { unlinkSync(file); } catch {}
+        resolve(null);
+        return;
+      }
+      const parts = editor.split(" ");
+      const child = spawn(parts[0]!, [...parts.slice(1), file], {
+        cwd: process.cwd(),
+        stdio: ["inherit", "inherit", "inherit"],
+      });
+      child.on("error", () => {
+        try { renderer?.resume?.(); } catch {}
+        resolve(null);
+      });
+      child.on("exit", (code) => {
+        let out: string | null = null;
+        try {
+          const raw = readFileSync(file, "utf8");
+          out = raw.length > 0 ? normalizeEditorContent(raw) : null;
+        } catch {}
+        try { unlinkSync(file); } catch {}
+        try { renderer?.resume?.(); } catch {}
+        resolve(out);
+      });
+    });
+  };
 
   const persistTheme = (next: ThemeName) => {
     try {
@@ -1677,6 +1765,31 @@ export function App({
       if (key.name === "b") { if (view === "session") setSidebarOpen((s) => !s); return; }
       if (key.name === "a") { setDialog("mode"); return; }
       if (key.name === "m") { setDialog("model"); return; }
+      // opencode editor_open: the draft goes to VISUAL||EDITOR and comes
+      // back as the new draft (empty editor output = no change).
+      if (key.name === "e") {
+        void suspendForEditor(draftRef.current).then((text) => {
+          if (text === null) { flashStatus(process.env.VISUAL || process.env.EDITOR ? "editor failed" : "no $EDITOR set", "warning"); return; }
+          applyDraft(text, text.length);
+          flashStatus("draft loaded from editor");
+        });
+        return;
+      }
+      // opencode session_export: the transcript as markdown, into the editor.
+      if (key.name === "x" && view === "session") {
+        const text = [`# ${activeTitle || "zcode-tui session"}`, ...msgsRef.current.map((m) => `## ${m.role === "tool" ? `tool: ${m.toolName ?? "tool"}` : m.role}\n\n${m.text}`)].join("\n\n");
+        void suspendForEditor(text).then((out) => {
+          flashStatus(out === null ? (process.env.VISUAL || process.env.EDITOR ? "export failed" : "no $EDITOR set") : "session exported to editor", out === null ? "warning" : "info");
+        });
+        return;
+      }
+      // opencode messages_copy: the last assistant message, via OSC 52.
+      if (key.name === "y" && view === "session") {
+        const last = [...msgsRef.current].reverse().find((m) => m.role === "assistant" && m.text);
+        if (!last) { flashStatus("nothing to copy yet"); return; }
+        flashStatus(osc52Copy(last.text) ? `copied ${last.text.length} chars` : "copy failed (terminal)");
+        return;
+      }
       if (key.name === "t") { setDialog("themes"); return; }
       if (key.name === "l") { openSessions(); return; }
       if (key.name === "n") { void newSession(); return; }
