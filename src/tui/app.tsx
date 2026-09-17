@@ -8,7 +8,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions, usePaste } from "@opentui/react";
 import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
-import { SelectDialog, TextPromptDialog, type DialogOption } from "./select-dialog";
+import { SelectDialog, TextPromptDialog, ModalBackdrop, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { probe } from "./probes";
@@ -145,7 +145,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -1276,6 +1276,7 @@ export function App({
       if (command === "model") { setDialog("model"); return; }
       if (command === "themes") { setDialog("themes"); return; }
       if (command === "commands") { setDialog("palette"); return; }
+      if (command === "help") { setDialog("help"); return; }
       if (command === "agents") { setDialog("mode"); return; }
       if (command === "status") { flashStatus(statusSummary()); return; }
       if (command === "effort") { setDialog("effort"); return; }
@@ -1784,6 +1785,9 @@ export function App({
         return;
       }
       // opencode messages_copy: the last assistant message, via OSC 52.
+      // opencode session_queued_prompts: manage the prompts queued behind a
+      // running turn (enter removes the selected entry).
+      if (key.name === "q" && queueRef.current.length > 0) { setDialog("queue"); return; }
       if (key.name === "y" && view === "session") {
         const last = [...msgsRef.current].reverse().find((m) => m.role === "assistant" && m.text);
         if (!last) { flashStatus("nothing to copy yet"); return; }
@@ -1822,6 +1826,8 @@ export function App({
     // opencode model_cycle_recent: f2 / shift+f2 walk the recent models.
     if (key.name === "f2") { cycleRecentModel(1); return; }
     if (key.name === "f2" && (key as { shift?: boolean }).shift) { cycleRecentModel(-1); return; }
+    // opencode help_show: `?` opens the keybind help overlay.
+    if (key.sequence === "?" || key.name === "?") { setDialog("help"); return; }
     // shift+tab cycles the mode — the OpenCode agent-cycle slot.
     if ((key.name === "tab" && (key as { shift?: boolean }).shift) || key.sequence === "\x1b[Z") {
       void cycleMode();
@@ -2297,6 +2303,89 @@ footerHints={[
         onClose={closeDialog}
       />
     );
+  }
+
+
+// The keybind help overlay (opencode help_show): a flat panel of the
+// implemented grammar. Owns its keyboard — escape/enter close — because the
+// App-level hook goes silent while a dialog is open.
+function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: () => void; width: number; height: number }) {
+  useKeyboard((key) => {
+    if (key.name === "escape" || key.name === "return" || (key.ctrl && key.name === "c")) { onClose(); return; }
+  });
+  const rows: [string, string][] = [
+    ["ctrl+x then b / t / l / n / c / s / q", "sidebar · themes · sessions · new · compact · status · quit"],
+    ["ctrl+x then a / m / e / x / y", "agents · model · effort · export · copy last message"],
+    ["ctrl+x then 1-9 / e", "quick-switch session · external editor"],
+    ["ctrl+x then q (turn running)", "queued prompts manager"],
+    ["ctrl+p", "command palette"],
+    ["escape (turn running)", "interrupt the turn"],
+    ["tab / shift+tab", "cycle agent mode"],
+    ["ctrl+t / f2 / shift+f2", "cycle effort · cycle recent models"],
+    ["ctrl+f (model dialog)", "toggle favorite"],
+    ["ctrl+a / ctrl+e / ctrl+k / ctrl+u", "line home / line end / delete to line end / to line start"],
+    ["alt+b / alt+f / ctrl+arrows", "word backward / forward"],
+    ["ctrl+w / alt+d", "delete word backward / forward"],
+    ["ctrl+- / ctrl+.", "input undo / redo"],
+    ["ctrl+c", "clear the draft"],
+    ["pageup / pagedown / ctrl+alt+u,d,y,e", "scroll transcript"],
+    ["ctrl+g / ctrl+alt+g", "first message / jump to latest"],
+  ];
+  return (
+    <ModalBackdrop C={C} width={width} height={height}>
+      <box
+        style={{
+          width: Math.min(96, Math.max(30, width - 4)),
+          flexDirection: "column",
+          flexShrink: 0,
+          backgroundColor: C.panel,
+          paddingTop: 1,
+          paddingBottom: 1,
+          paddingLeft: 2,
+          paddingRight: 2,
+        }}
+      >
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content="Help — keybinds" fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content="esc / enter" fg={C.faint} />
+        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        {rows.map(([k, d]) => (
+          <box key={k} style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+            <text content={k} fg={C.accent} />
+            <text content={"  " + d} fg={C.subtle} />
+          </box>
+        ))}
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <text content="enter / esc close · ctrl+p lists every command" fg={C.faint} />
+      </box>
+    </ModalBackdrop>
+  );
+}
+
+  if (dialog === "queue") {
+    return (
+      <SelectDialog
+        title="Queued prompts"
+        size="large"
+        options={queue.map((q, i) => ({ id: String(i), label: q, description: "queued", value: i }))}
+        theme={C}
+        footerHints={[
+          { key: "enter", label: "remove" },
+          { key: "esc", label: "close" },
+        ]}
+        onSelect={(i) => {
+          const next = queue.filter((_, j) => j !== i);
+          queueRef.current = next;
+          setQueue(next);
+          if (next.length === 0) closeDialog();
+        }}
+        onClose={closeDialog}
+      />
+    );
+  }
+  if (dialog === "help") {
+    return <HelpDialog C={C} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
   if (dialog === "palette") {
     const commands: DialogOption<() => void>[] = [

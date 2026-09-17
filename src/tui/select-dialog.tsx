@@ -49,7 +49,7 @@ function truncate(value: string, width: number): string {
   return `${value.slice(0, width - 1)}…`;
 }
 
-function ModalBackdrop({
+export function ModalBackdrop({
   C,
   width,
   height,

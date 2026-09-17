@@ -93,6 +93,15 @@ read_for(master, stream, 0.8)
 check(pid, "X0b composer alive after editor resume", "base-EDITED-BY-EDITOR!" in "\n".join(screen.display))
 os.write(master, b"\x03"); time.sleep(0.3)
 
+# H-series: ? opens the keybind help overlay
+os.write(master, b"?")
+read_for(master, stream, 1.0)
+disp = "\n".join(screen.display)
+check(pid, "H0 ? opens the keybind help overlay", "Help — keybinds" in disp and "ctrl+x then" in disp)
+os.write(master, b"\x1b")
+read_for(master, stream, 0.6)
+check(pid, "H1 help overlay closes", "Help — keybinds" not in "\n".join(screen.display))
+
 # TAB/L-series (home-local)
 before_mode = [l for l in screen.display if "Z.AI Coding Plan" in l]
 os.write(master, b"\t")
@@ -208,6 +217,26 @@ if b0 and alive(pid):
         read_for(master, stream, 0.9)
         if not alive(pid):
             break
+        # Q-series: a prompt typed mid-turn queues; leader q manages it.
+        os.write(master, b"queued test")
+        time.sleep(0.3)
+        os.write(master, b"\r")
+        read_for(master, stream, 0.8)
+        q0 = "queued" in "\n".join(screen.display)
+        check(pid, "Q0 prompt typed mid-turn queues", q0)
+        os.write(master, b"\x18q")
+        read_for(master, stream, 1.0)
+        disp = "\n".join(screen.display)
+        q1 = "Queued prompts" in disp and "queued test" in disp
+        check(pid, "Q1 leader q opens the queue manager", q1)
+        if q1:
+            os.write(master, b"\r")                 # enter removes the entry
+            read_for(master, stream, 0.8)
+            q2 = "Queued prompts" not in "\n".join(screen.display)
+            check(pid, "Q2 enter removes the queued prompt", q2)
+        else:
+            check(pid, "Q2 enter removes the queued prompt", False)
+        os.write(master, b"\x1b"); time.sleep(0.4)
         os.write(master, b"\x1b")
         read_for(master, stream, 2.0)
         if "turn interrupted" in "\n".join(screen.display):
