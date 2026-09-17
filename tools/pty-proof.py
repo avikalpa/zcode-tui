@@ -152,12 +152,40 @@ check(pid, "W2 f2 cycles recent and persists (state.json)", w2)
 
 os.write(master, b"\x18l"); read_for(master, stream, 1.5)
 disp = "\n".join(screen.display)
-b0 = "Sessions" in disp and "search" in disp
+b0 = "Sessions" in disp and "Search" in disp
 check(pid, "B0 sessions dialog opens", b0)
 check(pid, "B1 date group headers render", re.search(r"(Sep|Oct|Nov|Dec) \d\d 20\d\d|Today", disp) is not None)
 check(pid, "B2 footer hints", "pin" in disp and "delete" in disp and "switch" in disp)
 check(pid, "B3 no idle clutter", "idle ·" not in disp)
 check(pid, "B4 quick-slot gutters", re.search(r"\b1 \S", disp) is not None)
+
+# D-series: the themes dialog (reference parity — bare rows, Search, ● gutter).
+# Runs HERE, before the turn-dependent stages, so a flaky interrupt can never
+# poison it; the sessions dialog is re-opened afterwards for the C-series.
+if alive(pid):
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)   # close sessions
+    os.write(master, b"\x18t"); read_for(master, stream, 1.5)
+    d0 = "\n".join(screen.display)
+    has_dialog = "Themes" in d0
+    check(pid, "D0 themes dialog opens with bare rows (no OpenCod suffix)", has_dialog and "OpenCod" not in d0)
+    check(pid, "D1 search row shows the Search placeholder", has_dialog and "Search" in d0)
+    check(pid, "D2 the origin theme wears the ● gutter marker", has_dialog and "●" in d0)
+    for ch in "dra":
+        os.write(master, ch.encode()); time.sleep(0.08)
+    read_for(master, stream, 1.0)
+    d1 = "\n".join(screen.display)
+    check(pid, "D3 typing filters the rows (dra → dracula)", has_dialog and "dracula" in d1 and "everforest" not in d1)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.8)
+    d2 = "\n".join(screen.display)
+    check(pid, "D4 escape closes the dialog", "Search" not in d2)
+    os.write(master, b"\x18l"); read_for(master, stream, 1.5)  # reopen sessions for the C-series
+else:
+    for lbl in ("D0 themes dialog opens with bare rows (no OpenCod suffix)",
+                "D1 search row shows the Search placeholder",
+                "D2 the origin theme wears the ● gutter marker",
+                "D3 typing filters the rows (dra → dracula)",
+                "D4 escape closes the dialog"):
+        check(pid, lbl, False)
 
 if b0 and alive(pid):
     os.write(master, b"\r"); read_for(master, stream, 5.5)   # let open() settle fully
@@ -294,6 +322,7 @@ if b0 and alive(pid):
 else:
     for lbl in ("S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
         check(pid, lbl, False)
+
 kill(pid)
 
 # ---- boot 2: persisted effort advertised ----

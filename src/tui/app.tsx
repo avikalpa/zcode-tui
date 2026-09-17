@@ -955,6 +955,10 @@ export function App({
   }, [view]);
   const activeIdRef = useRef<string | null>(null);
   const resumed = useRef(false);
+  // The themes dialog's ORIGIN theme: captured once at open so the ● marker
+  // and the esc-restore follow where you STARTED, not the live preview.
+  const themesOriginRef = useRef<ThemeName | null>(null);
+  const openThemes = () => { themesOriginRef.current = theme; setDialog("themes"); };
   const dims = useTerminalDimensions();
   const C = THEMES[theme];
   const mdStyle = useMemo(() => mdStyleFor(theme), [theme]);
@@ -1277,7 +1281,7 @@ export function App({
       if (command === "home") { setView("home"); return; }
       if (command === "new") { await newSession(); return; }
       if (command === "model") { setDialog("model"); return; }
-      if (command === "themes") { setDialog("themes"); return; }
+      if (command === "themes") { openThemes(); return; }
       if (command === "commands") { setDialog("palette"); return; }
       if (command === "help") { setDialog("help"); return; }
       if (command === "timeline") { openTimeline(); return; }
@@ -1822,7 +1826,7 @@ export function App({
         flashStatus(osc52Copy(last.text) ? `copied ${last.text.length} chars` : "copy failed (terminal)");
         return;
       }
-      if (key.name === "t") { setDialog("themes"); return; }
+      if (key.name === "t") { openThemes(); return; }
       if (key.name === "l") { openSessions(); return; }
       if (key.name === "n") { void newSession(); return; }
         if (key.name === "c") { void compactActive(); return; }
@@ -2103,7 +2107,7 @@ export function App({
     else if (key.name === "s") openSessions();
     else if (key.name === "a") void newSession();
     else if (key.name === "m") setDialog("model");
-    else if (key.name === "t") setDialog("themes");
+    else if (key.name === "t") openThemes();
     else if (key.name === "o") void cycleMode();
     else if (key.name === "e") setDialog("effort");
     else if (key.name === "f") void forkActive();
@@ -2267,20 +2271,25 @@ footerHints={[
     );
   }
   if (dialog === "themes") {
+    // Reference dialog-theme-list: bare rows, the ● marks the ORIGIN theme
+    // while you arrow around, every highlighted row repaints the TUI live
+    // (onMove/onFilter), esc restores the origin, enter persists.
+    const initialTheme = themesOriginRef.current ?? theme;
     return (
       <SelectDialog
         title="Themes"
         size="large"
-        options={sortedThemes().map((name) => ({ id: name, label: name, description: name === "opencode" ? "OpenCode reference palette" : name === "zai-dark" || name === "zai-light" ? "ZCode brand arm" : "OpenCode palette", value: name }))}
-        currentId={theme}
+        options={sortedThemes().map((name) => ({ id: name, label: name, value: name }))}
+        currentId={initialTheme}
         theme={C}
         countLabel="theme"
-footerHints={[
+        onHighlight={(opt) => { const n = opt?.id as ThemeName | undefined; if (n) setTheme(n); }}
+        footerHints={[
           { key: "enter", label: "select" },
           { key: "esc", label: "close" },
         ]}
-        onSelect={(name) => { persistTheme(name); closeDialog(); flashStatus(`theme → ${name}`); }}
-        onClose={closeDialog}
+        onSelect={(name) => { themesOriginRef.current = null; persistTheme(name as ThemeName); closeDialog(); flashStatus(`theme → ${name}`); }}
+        onClose={() => { setTheme(initialTheme); themesOriginRef.current = null; closeDialog(); }}
       />
     );
   }
@@ -2397,7 +2406,7 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
       <SelectDialog
         title="Queued prompts"
         size="large"
-        options={queue.map((q, i) => ({ id: String(i), label: q, description: "queued", value: i }))}
+        options={queue.map((q, i) => ({ id: String(i), label: q, value: i }))}
         theme={C}
         footerHints={[
           { key: "enter", label: "remove" },
@@ -2427,7 +2436,7 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
       { id: "fork", label: "fork session", description: "latest checkpoint", value: () => void forkActive() },
       { id: "fork-message", label: "fork at message…", value: openForkDialog },
       { id: "compact", label: "compact session", value: () => void compactActive() },
-      { id: "themes", label: "themes…", description: "the full OpenCode palette set", value: () => setDialog("themes") },
+      { id: "themes", label: "themes…", description: "the full OpenCode palette set", value: () => openThemes() },
       { id: "sidebar", label: "toggle sidebar", description: "leader b", value: () => { if (view === "session") setSidebarOpen((s) => !s); } },
       { id: "refresh", label: "refresh sessions", value: () => void refresh() },
       { id: "home", label: "home", description: "return to the zcodetui front page", value: () => { setView("home"); setTyping(true); } },

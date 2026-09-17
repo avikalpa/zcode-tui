@@ -12,7 +12,7 @@
 // InputRenderable: OpenTUI can retain focus on a component that has already
 // been reconciled away, so keeping filter state here makes every modal
 // deterministic under fast PTY typing.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
@@ -87,6 +87,7 @@ export function SelectDialog<T>({
   onSelect,
   onClose,
   onAction,
+  onHighlight,
   size,
   countLabel,
   footerHints,
@@ -98,13 +99,23 @@ export function SelectDialog<T>({
   onSelect: (value: T, id: string) => void;
   onClose: () => void;
   onAction?: DialogAction<T>;
+  /** Live-preview hook (reference onMove/onFilter): fires whenever the
+   * highlighted row changes — arrows and typing both count. */
+  onHighlight?: (option: DialogOption<T> | undefined) => void;
   size?: "medium" | "large" | "xlarge";
   countLabel?: string;
   footerHints?: { key: string; label: string }[];
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
-  const [idx, setIdx] = useState(0);
+  // The reference opens with the selection ON the current row (DialogSelect
+  // moves to props.current on mount) — otherwise the ● origin marker can sit
+  // outside the initial window for long lists like the 35 themes.
+  const currentStartIndex = () => {
+    const at = currentId ? options.findIndex((o) => o.id === currentId) : -1;
+    return at >= 0 ? at : 0;
+  };
+  const [idx, setIdx] = useState(currentStartIndex);
   const dims = useTerminalDimensions();
   const C = theme ?? THEMES.opencode;
   const cardWidth = tierWidth(size, dims.width);
@@ -137,6 +148,13 @@ export function SelectDialog<T>({
     else onClose();
   };
 
+  // Fire the preview whenever the highlighted row moves (arrows, typing,
+  // backspace — anything that re-filters). No onHighlight → no-op.
+  useEffect(() => {
+    if (onHighlight) onHighlight(shown[sel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, filter, options]);
+
   useKeyboard((key) => {
     if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
     if (key.ctrl && key.name === "f") { onAction?.("pin", shown[sel]); return; }
@@ -149,7 +167,13 @@ export function SelectDialog<T>({
       setIdx((i) => Math.min(Math.max(0, shown.length - 1), i + 1));
       return;
     }
-    if (key.name === "backspace") { setFilter((f) => f.slice(0, -1)); setIdx(0); return; }
+    if (key.name === "backspace") {
+      setFilter((f) => f.slice(0, -1));
+      // Emptying the query restores the selection to the current row
+      // (reference onFilter: query.length === 0 → back to where you started).
+      setIdx(filter.length <= 1 ? currentStartIndex() : 0);
+      return;
+    }
     if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
       setFilter((f) => f + key.sequence);
       setIdx(0);
@@ -176,16 +200,30 @@ export function SelectDialog<T>({
           <text content="esc" fg={C.faint} />
         </box>
         <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
-          <text content={filter ? `${filter}` : "search"} fg={filter ? C.fg : C.faint} />
-          <text content={filter ? "█" : ""} fg={C.accent} />
+          {filter ? (
+            <>
+              <text content={filter} fg={C.fg} />
+              <text content="█" fg={C.accent} />
+            </>
+          ) : (
+            <>
+              <text content="█" fg={C.accent} />
+              <text content="Search" fg={C.faint} />
+            </>
+          )}
         </box>
         {visible.map((o) => {
           const abs = shown.indexOf(o);
           const selected = abs === sel;
+          const current = o.id === currentId;
           const previous = visible[visible.indexOf(o) - 1];
           const group = o.group && o.group !== previous?.group ? o.group : undefined;
           const groupSpacer = visible.indexOf(o) > 0;
           const labelWidth = Math.max(16, cardWidth - 10);
+          // Reference row shape (dialog-select.tsx): titles align at column 3;
+          // the CURRENT row donates its gutter to a ● so its title stays put,
+          // and its label wears the accent when not selected.
+          const rowFg = selected ? C.accentText : current ? C.accent : C.fg;
           return (
             <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
               {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}
@@ -195,15 +233,16 @@ export function SelectDialog<T>({
                   height: 1,
                   flexDirection: "row",
                   flexShrink: 0,
-                  paddingLeft: 1,
+                  paddingLeft: current || o.gutter ? 1 : 3,
                   paddingRight: 1,
                   backgroundColor: selected ? C.accent : o.bg,
                 }}
               >
+                {current && !o.gutter ? <text content="● " fg={rowFg} /> : null}
                 {o.gutter ? <text content={`${o.gutter} `} fg={selected ? C.accentText : C.accent} /> : null}
                 <text
-                  content={`${truncate(o.label, labelWidth)}${o.id === currentId ? "  ●" : ""}${o.meta ? `  ${o.meta}` : ""}`}
-                  fg={selected ? C.accentText : C.fg}
+                  content={`${truncate(o.label, labelWidth)}${o.meta ? `  ${o.meta}` : ""}`}
+                  fg={rowFg}
                 />
                 {o.description ? (
                   <text
