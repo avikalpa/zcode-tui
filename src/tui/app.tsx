@@ -1111,39 +1111,34 @@ export function App({
     }
   };
 
+  // 3.12.x removed workspace/readState — per-model reasoning defaults ride
+  // the session create/resume replies (settings.model.available).
+  const applyCatalogDefaultLevel = (settings: unknown, chosenModelId: string | undefined) => {
+    const catalog = (settings as { model?: { available?: { modelId?: string; reasoning?: { defaultLevel?: string } }[] } } | undefined)?.model;
+    const level = catalog?.available?.find((m) => m.modelId === chosenModelId)?.reasoning?.defaultLevel;
+    if (isEffort(level)) setEffort(level);
+  };
+
   const loadModels = async () => {
-    try {
-      const ws = { workspacePath: process.cwd(), workspaceKey: process.cwd() };
-      const res = (await client.request("workspace/readState", { workspace: ws })) as Record<string, unknown>;
-      // The allowlist remains authoritative. The response only seeds: the
-      // reasoning levels per model (effort dialog + defaultLevel) and the
-      // catalog liveness.
-      const avail = ALLOWED_MODELS.map((m) => ({ ...m }));
-      setModels(avail);
-      const requested = modelId ? avail.findIndex((m) => m.modelId === modelId) : -1;
-      const remembered = uiState.current.recent.find((r) =>
-        avail.some((m) => m.providerId === r.providerId && m.modelId === r.modelId));
-      const rememberedIdx = remembered
-        ? avail.findIndex((m) => m.providerId === remembered.providerId && m.modelId === remembered.modelId)
-        : -1;
-      const defaultIndex = avail.findIndex((m) => m.isDefault);
-      const idx = requested >= 0 ? requested : rememberedIdx >= 0 ? rememberedIdx : Math.max(0, defaultIndex);
-      setModelIdx(idx);
-      // Effort precedence (opencode local.tsx): the user's per-model variant
-      // from the UX-state store, then the catalog's defaultLevel.
-      const chosen = avail[idx];
-      const localVariant = uiState.current.variant[modelKey(chosen)];
-      if (isEffort(localVariant)) {
-        setEffort(localVariant);
-      } else {
-        const settings = res.settings as Record<string, unknown> | undefined;
-        const catalog = (res.modelCatalog ?? settings?.model) as { available?: { modelId?: string; reasoning?: { defaultLevel?: string } }[] } | undefined;
-        const level = catalog?.available?.find((m) => m.modelId === chosen.modelId)?.reasoning?.defaultLevel;
-        if (isEffort(level)) setEffort(level);
-      }
-    } catch {
-      // The home screen remains usable while optional catalog polish is down.
-    }
+    // The allowlist remains authoritative. It seeds the composer and the
+    // dialogs; the catalog's defaultLevel arrives with the first session
+    // create/resume reply and is applied there.
+    const avail = ALLOWED_MODELS.map((m) => ({ ...m }));
+    setModels(avail);
+    const requested = modelId ? avail.findIndex((m) => m.modelId === modelId) : -1;
+    const remembered = uiState.current.recent.find((r) =>
+      avail.some((m) => m.providerId === r.providerId && m.modelId === r.modelId));
+    const rememberedIdx = remembered
+      ? avail.findIndex((m) => m.providerId === remembered.providerId && m.modelId === remembered.modelId)
+      : -1;
+    const defaultIndex = avail.findIndex((m) => m.isDefault);
+    const idx = requested >= 0 ? requested : rememberedIdx >= 0 ? rememberedIdx : Math.max(0, defaultIndex);
+    setModelIdx(idx);
+    // Effort precedence (opencode local.tsx): the user's per-model variant
+    // from the UX-state store, else the initial default until a session
+    // reply refines it from the catalog.
+    const localVariant = uiState.current.variant[modelKey(avail[idx])];
+    if (isEffort(localVariant)) setEffort(localVariant);
   };
 
   const subscribe = async (sessionId: string) => {
@@ -1166,6 +1161,8 @@ export function App({
     try {
       const res = (await client.request("session/resume", { sessionId: row.sessionId })) as {
         messages?: { info: Record<string, unknown>; parts: unknown }[];
+        session?: { model?: { modelId?: string } };
+        settings?: unknown;
       };
       const rawMessages = res.messages ?? [];
       const turns: TurnMessage[] = rawMessages.map((m) => ({
@@ -1186,6 +1183,7 @@ export function App({
       }
       const lastModel = rawMessages.at(-1)?.info?.model as Record<string, unknown> | undefined;
       if (isEffort(lastModel?.variant)) setEffort(lastModel.variant);
+      else applyCatalogDefaultLevel(res.settings, row.modelId ?? res.session?.model?.modelId);
       resetToTail();
       await subscribe(row.sessionId);
       setStatus(`${displayTitle(row)} · ${turns.length} messages`);
@@ -1213,7 +1211,12 @@ export function App({
         mode: "build",
         persistence: "immediate",
         model: { providerId: selected.providerId, modelId: selected.modelId, variant: effort },
-      })) as { session?: Record<string, unknown> };
+      })) as { session?: Record<string, unknown>; settings?: unknown };
+      // A brand-new model with no remembered variant adopts the catalog's
+      // defaultLevel for it (3.12.x: the catalog rides this reply).
+      if (!isEffort(uiState.current.variant[modelKey(selected)])) {
+        applyCatalogDefaultLevel(res.settings, selected.modelId);
+      }
       const raw = res.session;
       if (!raw) throw new Error("create returned no session");
       const row = normalizeSession(raw);

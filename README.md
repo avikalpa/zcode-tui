@@ -38,6 +38,21 @@ can be distributed to the rest of the yggterm fleet. For source development,
 run `bun install && bun run tui` (bun ≥ 1.1), then publish or distribute the
 dev build with `ynpm dev`.
 
+## Auth
+
+zcode-tui's auth IS the zcode machine settings. At startup it syncs the
+SSOT provider config (`~/.zcode/v2/provider_config.json`) — read locally on
+the SSOT host or over `ssh <host>` elsewhere (fleet default: jojo) — stores
+it verbatim in `~/.config/zcode-tui/auth-provider-config.json` (0600, with
+metadata in `auth.json`), heals the local machine settings from it
+(`~/.zcode/v2/provider_config.json` + the api key field in
+`~/.zcode/cli/config.json`, dated `.pre-authsync-<date>` backups), and hands
+the stored copy to the spawned backend via
+`ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`. Configure with
+`~/.config/zcode-tui/config.json` → `{"auth": {"source": "jojo",
+"syncAtStartup": true}}` or the `ZCODE_TUI_AUTH_SOURCE` env. Sync failure
+never blocks the boot.
+
 ## Keys
 
 Launch opens the centered `zcodetui` front page. Type a prompt and press Enter
@@ -85,6 +100,7 @@ release v0.1.0.
 ## Layout
 
 - `src/protocol/` — client + types for the v4 protocol (zero-dep).
+- `src/auth/` — startup auth sync from the zcode machine settings (SSOT).
 - `src/bin/` — probe, probe-script, live (stream capture), battery.
 - `docs/screenshots/` — captured character frames (real app, real data).
 - `docs/` — capture notes + evidence. `docs/evidence/strace-cli-50s.txt` is
