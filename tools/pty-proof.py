@@ -97,6 +97,30 @@ except FileNotFoundError:
     l2 = False
 check(pid, "L2 ctrl+t cycles the reasoning effort (state.json)", l2)
 
+# W-series: model dialog depth (favorites + recent select + f2 cycle)
+os.write(master, b"\x18m"); read_for(master, stream, 1.2)
+os.write(master, b"\x06"); time.sleep(0.3)                    # ctrl+f: favorite
+read_for(master, stream, 0.6)
+try:
+    stw = open(os.path.expanduser("~/.config/zcode-tui/state.json")).read()
+    w0 = '"favorite"' in stw
+except FileNotFoundError:
+    w0 = False
+check(pid, "W0 ctrl+f favorites the model (state.json)", w0)
+os.write(master, b"\x1b"); time.sleep(0.3)
+os.write(master, b"\x18m"); read_for(master, stream, 1.2)     # model dialog again
+os.write(master, b"\x1b[B"); time.sleep(0.2)                  # down: GLM-5.3
+os.write(master, b"\r"); read_for(master, stream, 1.2)        # select
+disp = "\n".join(screen.display)
+check(pid, "W1 selecting a model updates the composer label", "GLM-5.3 ·" in disp or "GLM-5.3 " in disp)
+os.write(master, b"\x1bOQ"); read_for(master, stream, 1.0)    # f2: cycle recent
+try:
+    stw = open(os.path.expanduser("~/.config/zcode-tui/state.json")).read()
+    w2 = '"GLM-5.3"' in stw
+except FileNotFoundError:
+    w2 = False
+check(pid, "W2 f2 cycles recent and persists (state.json)", w2)
+
 os.write(master, b"\x18l"); read_for(master, stream, 1.5)
 disp = "\n".join(screen.display)
 b0 = "Sessions" in disp and "search" in disp
@@ -197,7 +221,10 @@ pid, master, screen, stream = spawn(cols=111)
 read_for(master, stream, 9)
 fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 34, 111, 0, 0))
 read_for(master, stream, 2.5)
-check(pid, "F0 restart advertises persisted effort low", "· low" in "\n".join(screen.display))
+# W1 switched the model to GLM-5.3 (recent head), so the restart must
+# advertise THAT model; its per-model variant is the catalog default (max).
+f0 = "GLM-5.3 Z.AI" in "\n".join(screen.display) and "· max" in "\n".join(screen.display)
+check(pid, "F0 restart advertises the persisted model (GLM-5.3) with its effort", f0)
 kill(pid)
 
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")

@@ -257,7 +257,7 @@ function normalizeSession(value: Record<string, unknown>): SessionRow {
 // the model/effort voice. Writes are atomic (temp + rename), same as
 // writeJsonAtomic upstream.
 type ModelKey = { providerId: string; modelId: string };
-type UiState = { recent: ModelKey[]; variant: Record<string, string> };
+type UiState = { recent: ModelKey[]; favorite: ModelKey[]; variant: Record<string, string> };
 const uiStatePath = `${process.env.HOME}/.config/zcode-tui/state.json`;
 function modelKey(model: ModelKey): string {
   return `${model.providerId}/${model.modelId}`;
@@ -278,9 +278,16 @@ function readUiState(): UiState {
         if (typeof v === "string") variant[k] = v;
       }
     }
-    return { recent, variant };
+    const favorite: ModelKey[] = Array.isArray(raw.favorite)
+      ? raw.favorite.filter((x): x is ModelKey => {
+          if (!x || typeof x !== "object") return false;
+          const m = x as Record<string, unknown>;
+          return typeof m.providerId === "string" && typeof m.modelId === "string";
+        })
+      : [];
+    return { recent, favorite, variant };
   } catch {
-    return { recent: [], variant: {} };
+    return { recent: [], favorite: [], variant: {} };
   }
 }
 function writeUiState(next: UiState): void {
@@ -794,6 +801,31 @@ export function App({
   const rememberModel = (choice: ModelChoice) => {
     uiState.current.recent = recentModels({ providerId: choice.providerId, modelId: choice.modelId }, uiState.current.recent);
     writeUiState(uiState.current);
+  };
+  const toggleFavoriteModel = (choice: ModelChoice) => {
+    const key = modelKey(choice);
+    const isFav = uiState.current.favorite.some((f) => modelKey(f) === key);
+    uiState.current.favorite = isFav
+      ? uiState.current.favorite.filter((f) => modelKey(f) !== key)
+      : [{ providerId: choice.providerId, modelId: choice.modelId }, ...uiState.current.favorite];
+    writeUiState(uiState.current);
+    flashStatus(`${isFav ? "unfavorited" : "favorited"} ${modelLabel(choice)}`);
+  };
+  // opencode model_cycle_recent: f2 / shift+f2 walk the recent list.
+  const cycleRecentModel = (dir: 1 | -1) => {
+    const valid = uiState.current.recent.filter((r) => modelsRef.current.some((m) => m.providerId === r.providerId && m.modelId === r.modelId));
+    if (valid.length === 0) { flashStatus("no recent models yet"); return; }
+    const idx = valid.findIndex((r) => r.providerId === activeModel.providerId && r.modelId === activeModel.modelId);
+    const next = valid[(idx + (dir === 1 ? 1 : -1) + valid.length * 2) % valid.length];
+    const i = modelsRef.current.findIndex((m) => m.providerId === next.providerId && m.modelId === next.modelId);
+    if (i < 0) return;
+    setModelIdx(i);
+    rememberModel({ providerId: next.providerId, modelId: next.modelId, label: next.modelId });
+    if (activeIdRef.current) {
+      void client.request("session/setModel", { sessionId: activeIdRef.current, model: { providerId: next.providerId, modelId: next.modelId, variant: effort } })
+        .catch(() => {});
+    }
+    flashStatus(`model → ${next.modelId}`);
   };
   const [pinned, setPinned] = useState<string[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -1674,6 +1706,9 @@ export function App({
       cycleEffort();
       return;
     }
+    // opencode model_cycle_recent: f2 / shift+f2 walk the recent models.
+    if (key.name === "f2") { cycleRecentModel(1); return; }
+    if (key.name === "f2" && (key as { shift?: boolean }).shift) { cycleRecentModel(-1); return; }
     // shift+tab cycles the mode — the OpenCode agent-cycle slot.
     if ((key.name === "tab" && (key as { shift?: boolean }).shift) || key.sequence === "\x1b[Z") {
       void cycleMode();
@@ -1991,17 +2026,40 @@ export function App({
     );
   }
   if (dialog === "model") {
+    // Reference model dialog: favorites first, then the recent list order,
+    // then the rest; rows wear their star/recent meta.
+    const recentKeys = uiState.current.recent.map(modelKey);
+    const favKeys = uiState.current.favorite.map(modelKey);
+    const orderedModels = [...models].sort((a, b) => {
+      const af = favKeys.includes(modelKey(a)) ? 0 : 1;
+      const bf = favKeys.includes(modelKey(b)) ? 0 : 1;
+      if (af !== bf) return af - bf;
+      const ar = recentKeys.indexOf(modelKey(a));
+      const br = recentKeys.indexOf(modelKey(b));
+      if (ar !== -1 || br !== -1) return (ar === -1 ? 999 : ar) - (br === -1 ? 999 : br);
+      return 0;
+    });
+    const modelOpts = orderedModels.map((m) => {
+      const metas: string[] = [];
+      if (favKeys.includes(modelKey(m))) metas.push("★");
+      if (recentKeys.includes(modelKey(m))) metas.push("recent");
+      return { id: m.modelId, label: modelLabel(m), description: `${m.providerId}/${m.modelId}`, meta: metas.join(" · ") || undefined, value: m };
+    });
     return (
       <SelectDialog
         title="Model"
-        options={models.map((m) => ({ id: m.modelId, label: modelLabel(m), description: `${m.providerId}/${m.modelId}`, value: m }))}
+        options={modelOpts}
+        footerHints={[
+          { key: "enter", label: "select" },
+          { key: "ctrl+f", label: "favorite" },
+          { key: "esc", label: "close" },
+        ]}
         currentId={activeModel?.modelId}
         theme={C}
         countLabel="model"
-footerHints={[
-          { key: "enter", label: "select" },
-          { key: "esc", label: "close" },
-        ]}
+        onAction={(action, option) => {
+          if (action === "pin" && option) toggleFavoriteModel(option.value);
+        }}
         onSelect={(choice) => {
           const index = models.findIndex((m) => m.modelId === choice.modelId);
           setModelIdx(Math.max(0, index));
