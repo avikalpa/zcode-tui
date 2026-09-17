@@ -461,6 +461,7 @@ const MessageView = memo(function MessageView({
   C,
   mdStyle,
   isTail,
+  width,
 }: {
   m: TurnMessage;
   running: boolean;
@@ -468,15 +469,23 @@ const MessageView = memo(function MessageView({
   C: ThemeTokens;
   mdStyle: SyntaxStyle;
   isTail: boolean;
+  width: number;
 }) {
   if (m.role === "tool") {
-    const output = (m.toolOut ?? m.text).replace(/\s+/g, " ").slice(0, 110);
+    const name = `● ${m.toolName ?? "tool"} `;
+    const output = (m.toolOut ?? m.text).replace(/\s+/g, " ");
     const result = m.toolOk === undefined ? " …" : m.toolOk ? ` ✓${m.toolMs ? ` ${m.toolMs}ms` : ""}` : " ✗";
+    const budget = Math.max(16, width - 8 - name.length - result.length);
     return (
-      <box style={{ flexDirection: "row", paddingLeft: 3, paddingRight: 3, height: 1, flexShrink: 0 }}>
-        <text content={`● ${m.toolName ?? "tool"} `} fg={C.tool} />
-        <text content={output} fg={C.subtle} />
-        <text content={result} fg={m.toolOk === false ? C.error : C.success} />
+      <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+        <box style={{ flexDirection: "row", flexShrink: 0 }}>
+          <text content={name} fg={C.tool} />
+          <text content={wrapText(output, budget)[0] ?? ""} fg={C.subtle} />
+          <text content={result} fg={m.toolOk === false ? C.error : C.success} />
+        </box>
+        {wrapText(output, budget).length > 1 ? (
+          <text content={wrapText(output, budget).slice(1).join("\n")} fg={C.subtle} />
+        ) : null}
       </box>
     );
   }
@@ -488,7 +497,7 @@ const MessageView = memo(function MessageView({
         <box style={{ flexDirection: "row", flexShrink: 0 }}>
           <box style={{ width: 1, flexShrink: 0, backgroundColor: C.user }} />
           <box style={{ flexGrow: 1, flexShrink: 0, backgroundColor: C.panel, paddingLeft: 2, paddingRight: 2 }}>
-            <text content={m.text} fg={C.fg} />
+            <text content={wrapText(m.text, Math.max(20, width - 8)).join("\n")} fg={C.fg} />
           </box>
         </box>
       </box>
@@ -501,16 +510,16 @@ const MessageView = memo(function MessageView({
     : null;
   return (
     <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
-      {m.thinkingMs && m.thinking ? (
-        <text content={`+ Thought · ${(m.thinkingMs / 1000).toFixed(1)}s`} fg={C.faint} />
+      {m.thinking ? (
+        <text content={`+ Thought${m.thinkingMs ? ` · ${(m.thinkingMs / 1000).toFixed(1)}s` : ""}`} fg={C.faint} />
       ) : null}
       {streaming && thinking ? (
-        <text content={thinking.slice(-160)} fg={C.faint} />
+        <text content={wrapText(thinking.slice(-160), Math.max(20, width - 6)).join("\n")} fg={C.faint} />
       ) : null}
       {!streaming ? (
         m.text.trim() ? (
           <markdown
-            content={m.text}
+            content={breakLongTokens(m.text, Math.max(24, width - 8))}
             syntaxStyle={mdStyle}
             streaming={true}
             internalBlockMode="top-level"
@@ -519,7 +528,7 @@ const MessageView = memo(function MessageView({
           />
         ) : null
       ) : (
-        <text content={m.text || "…"} fg={C.fg} />
+        <text content={wrapText(m.text || "…", Math.max(20, width - 6)).join("\n")} fg={C.fg} />
       )}
       {footer ? (
         <box style={{ flexDirection: "row", paddingTop: 0, flexShrink: 0 }}>
@@ -531,14 +540,60 @@ const MessageView = memo(function MessageView({
   );
 });
 
-function extractText(parts: unknown): string {
-  if (!Array.isArray(parts)) return "";
-  const out: string[] = [];
-  for (const p of parts as Record<string, unknown>[]) {
-    if (typeof p.text === "string") out.push(p.text);
-    else if (typeof p.content === "string") out.push(p.content);
+// Markdown must keep its structure — only UNBREAKABLE runs (URLs, base64,
+// minified JSON — the "beyond the border" screenshot) get split at the
+// content width. Everything else passes through untouched.
+export function breakLongTokens(text: string, limit: number): string {
+  if (limit < 12) return text;
+  const long = new RegExp(`[^\\s]{${limit},}`, "g");
+  const chunker = new RegExp(`[^\\s]{1,${limit}}`, "g");
+  return text.replace(long, (run) => (run.match(chunker) ?? [run]).join("\n"));
+}
+
+// Rebuild transcript rows from a message's TYPED parts (the store keeps
+// reasoning / tool / text as separate parts). The old extractText pulled
+// .text from ANY part, so reopening a session leaked reasoning into the
+// body and lost the tool rows entirely.
+export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
+  const info = (m.info ?? {}) as Record<string, unknown>;
+  const role = String(info.role ?? "?");
+  const model = (info.model as Record<string, unknown> | undefined)?.modelId;
+  const parts = Array.isArray(m.parts) ? (m.parts as Record<string, unknown>[]) : [];
+  let text = "";
+  let thinkingText = "";
+  const toolRows: TurnMessage[] = [];
+  for (const p of parts) {
+    const type = String(p.type ?? "");
+    if (type === "reasoning" && typeof p.text === "string") {
+      thinkingText += (thinkingText ? "\n" : "") + p.text;
+    } else if (type === "tool") {
+      const state = (p.state ?? {}) as Record<string, unknown>;
+      const input = (state.input ?? {}) as Record<string, unknown>;
+      const summary = String(
+        input.command ?? input.description ?? input.file_path ?? input.url ?? input.pattern ?? JSON.stringify(input).slice(0, 60),
+      );
+      const status = String(state.status ?? "");
+      toolRows.push({
+        role: "tool",
+        text: summary,
+        toolName: String(p.tool ?? "tool"),
+        toolCallId: String(p.callID ?? ""),
+        toolOk: status === "completed" ? true : status === "error" ? false : undefined,
+        toolOut: String(state.output ?? state.result ?? "").replace(/\s+/g, " ").slice(0, 220) || undefined,
+      });
+    } else if (typeof p.text === "string") {
+      text += p.text;
+    }
   }
-  return out.join("");
+  const out: TurnMessage[] = [{
+    role,
+    text,
+    model: String(model ?? "") || undefined,
+    messageId: String(info.id ?? info.messageId ?? "") || undefined,
+    thinking: thinkingText || undefined,
+  }];
+  out.push(...toolRows);
+  return out;
 }
 
 function sortedThemes(): ThemeName[] {
@@ -1169,15 +1224,17 @@ export function App({
         settings?: unknown;
       };
       const rawMessages = res.messages ?? [];
-      const turns: TurnMessage[] = rawMessages.map((m) => ({
-        role: String(m.info?.role ?? "?"),
-        text: extractText(m.parts),
-        model: String((m.info?.model as Record<string, unknown> | undefined)?.modelId ?? "") || undefined,
-        messageId: String(m.info?.id ?? m.info?.messageId ?? "") || undefined,
-      }));
+      const turns: TurnMessage[] = rawMessages.flatMap((m) => partsToTurns(m as Record<string, unknown>));
       setMsgs(turns);
       setActiveId(row.sessionId);
       setMode(row.mode ?? "build");
+      // A session whose turn is ALREADY running (desktop or another client
+      // started it) must open in the working state — the status patch only
+      // fires on change, so subscribing alone never learns about it.
+      if ((res.session as Record<string, unknown> | undefined)?.status === "running") {
+        setRunning(true);
+        probe("resume", `${row.sessionId.slice(0, 18)} · adopts running turn`);
+      }
       // Adopt the session's own model and effort (opencode prompt/index.tsx:
       // agent/model/variant re-initialize from the last user message when the
       // session changes).
@@ -1335,15 +1392,30 @@ export function App({
     void open(row);
   };
 
-  // Interrupt the running turn (opencode session_interrupt: escape). The
-  // draft is untouched — only the turn stops.
+  // Interrupt the running turn (opencode session_interrupt: escape). An
+  // interrupt is a FULL stop: a pending permission ask is denied, queued
+  // prompts are dropped — the pump would otherwise start a fresh turn the
+  // moment running drops (the owner's "kept on working despite interrupt",
+  // 2026-09-17). The draft is untouched — only the turn stops.
   const stopTurn = async () => {
     const id = activeIdRef.current;
     if (!id) return;
+    if (askRef.current) {
+      const resolve = askRef.current;
+      askRef.current = null;
+      setAsk(null);
+      setTyping(true);
+      resolve({ decision: "deny" });
+    }
+    const dropped = queueRef.current.length;
+    if (dropped > 0) {
+      queueRef.current = [];
+      setQueue([]);
+    }
     try {
       await client.request("session/stop", { sessionId: id });
       setRunning(false);
-      flashStatus("turn interrupted", "warning");
+      flashStatus(dropped > 0 ? `turn interrupted · ${dropped} queued dropped` : "turn interrupted", "warning");
       probe("turn-stop", id.slice(0, 18));
     } catch (e) {
       flashStatus(`interrupt failed: ${e instanceof Error ? e.message : e}`, "error");
@@ -1756,6 +1828,14 @@ export function App({
         setTyping(true);
         resolve({ decision: "deny" });
         probe("permission-answered", "deny");
+        if (key.name === "escape") {
+          // Esc on the permission card means INTERRUPT: deny this tool AND
+          // stop the turn (a bare deny lets the model keep working — the
+          // owner's "kept on working despite permission popup", 2026-09-17).
+          // [n] stays the model-continues deny.
+          void stopTurn();
+          return;
+        }
         flashStatus("permission denied");
       }
       return;
@@ -2540,6 +2620,7 @@ footerHints={[
                 C={C}
                 mdStyle={mdStyle}
                 isTail={index === visibleMsgs.length - 1}
+                width={dims.width}
               />
             ))}
           </scrollbox>

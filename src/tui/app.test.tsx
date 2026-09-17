@@ -22,6 +22,8 @@ function fakeClient() {
   return client;
 }
 
+const AppModule = await import("./app");
+
 describe("zcode-tui OpenCode-shaped shell", () => {
   test("opens the sessions picker from the front-page slash command", async () => {
     const setup = await testRender(
@@ -45,5 +47,46 @@ describe("zcode-tui OpenCode-shaped shell", () => {
     );
     expect(picker).toContain("Fri Sep 04 2026");
     setup.renderer.destroy();
+  });
+});
+
+
+
+describe("session transcript reconstruction", () => {
+  test("partsToTurns: reasoning becomes thinking, tools become tool rows, text stays body", () => {
+    const { partsToTurns } = AppModule;
+    const turns = partsToTurns({
+      info: { role: "assistant", id: "msg_1", model: { modelId: "GLM-5.3-Flash" } },
+      parts: [
+        { type: "reasoning", text: "let me check the file first" },
+        { type: "text", text: "Here is what I found." },
+        { type: "tool", callID: "call_1", tool: "Bash", state: { status: "completed", input: { command: "ls /tmp" }, output: "file.txt\n" } },
+        { type: "tool", callID: "call_2", tool: "Write", state: { status: "error", input: { file_path: "/tmp/x.py" } } },
+      ],
+    });
+    expect(turns.length).toBe(3);
+    expect(turns[0].role).toBe("assistant");
+    expect(turns[0].text).toBe("Here is what I found.");
+    expect(turns[0].thinking).toBe("let me check the file first");
+    expect(turns[1].role).toBe("tool");
+    expect(turns[1].toolName).toBe("Bash");
+    expect(turns[1].text).toBe("ls /tmp");
+    expect(turns[1].toolOk).toBe(true);
+    expect(turns[2].toolOk).toBe(false);
+    expect(turns[2].text).toBe("/tmp/x.py");
+  });
+
+  test("breakLongTokens splits only unbreakable runs, leaves prose alone", async () => {
+    const { breakLongTokens } = AppModule;
+    const prose = "hello world this is fine";
+    expect(breakLongTokens(prose, 24)).toBe(prose);
+    const wall = "x".repeat(80);
+    const broken = breakLongTokens(wall, 24);
+    for (const line of broken.split("\n")) expect(line.length).toBeLessThanOrEqual(24);
+    expect(broken.split("\n").join("")).toBe(wall);
+    const url = "see https://example.com/" + "a".repeat(60) + " end";
+    const b2 = breakLongTokens(url, 30);
+    expect(b2).toContain("see https://example.com/");
+    expect(b2.split("\n").every((l) => l.length <= 60)).toBe(true);
   });
 });
