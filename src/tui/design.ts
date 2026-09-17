@@ -196,6 +196,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "themes", aliases: ["theme"], description: "OpenCode plus terminal colour arms" },
   { name: "commands", aliases: [], description: "open the command palette" },
   { name: "help", aliases: [], description: "keybind help" },
+  { name: "timeline", aliases: [], description: "session timeline · fork at a prompt" },
   { name: "status", aliases: [], description: "session and backend status" },
   { name: "effort", aliases: [], description: "choose reasoning effort · low high max" },
   { name: "thinking", aliases: [], description: "toggle thinking" },
@@ -214,7 +215,7 @@ export function matchSlashCommands(prefix: string): SlashCommandSpec[] {
 
 export type SlashCommand =
   | "agents" | "sessions" | "new" | "home" | "model" | "themes" | "commands"
-  | "status" | "effort" | "thinking" | "fork" | "compact" | "quit" | "help"
+  | "status" | "effort" | "thinking" | "fork" | "compact" | "quit" | "help" | "timeline"
   | null;
 
 export function parseSlashCommand(input: string): SlashCommand {

@@ -1277,6 +1277,7 @@ export function App({
       if (command === "themes") { setDialog("themes"); return; }
       if (command === "commands") { setDialog("palette"); return; }
       if (command === "help") { setDialog("help"); return; }
+      if (command === "timeline") { openTimeline(); return; }
       if (command === "agents") { setDialog("mode"); return; }
       if (command === "status") { flashStatus(statusSummary()); return; }
       if (command === "effort") { setDialog("effort"); return; }
@@ -1301,6 +1302,7 @@ export function App({
   };
 
   const closeDialog = () => {
+    setTimelineMode(false);
     setDialog(null);
     // The composer is always live once a dialog closes — the old home-only
     // restore left session-view dialogs (palette, model, effort, sessions)
@@ -1408,6 +1410,26 @@ export function App({
     } catch (e) {
       flashStatus(`setThoughtLevel failed: ${e instanceof Error ? e.message : e}`);
     }
+  };
+
+  // The timeline (opencode session_timeline + fork-from-timeline): the
+  // session's USER prompts, newest first; selecting one forks the session at
+  // that message.
+  const [timelineMode, setTimelineMode] = useState(false);
+  const openTimeline = () => {
+    if (!activeId || running || msgsRef.current.length === 0) { flashStatus("timeline: nothing to show yet"); return; }
+    const opts = msgsRef.current
+      .filter((m) => m.role === "user" && m.messageId)
+      .map((m) => ({
+        id: m.messageId ?? "",
+        value: m.messageId ?? "",
+        label: m.text.replace(/\s+/g, " ").slice(0, 70) || "(empty)",
+      }))
+      .reverse();
+    if (opts.length === 0) { flashStatus("timeline: no user messages with checkpoints yet"); return; }
+    setForkOptions(opts);
+    setTimelineMode(true);
+    setDialog("fork");
   };
 
   const openForkDialog = () => {
@@ -1788,6 +1810,9 @@ export function App({
       // opencode session_queued_prompts: manage the prompts queued behind a
       // running turn (enter removes the selected entry).
       if (key.name === "q" && queueRef.current.length > 0) { setDialog("queue"); return; }
+      // opencode session_timeline: the user prompts of the session, fork at
+      // any of them.
+      if (key.name === "g") { openTimeline(); return; }
       if (key.name === "y" && view === "session") {
         const last = [...msgsRef.current].reverse().find((m) => m.role === "assistant" && m.text);
         if (!last) { flashStatus("nothing to copy yet"); return; }
@@ -2259,16 +2284,17 @@ footerHints={[
   if (dialog === "fork") {
     return (
       <SelectDialog
-        title="Fork at message"
+        title={timelineMode ? "Timeline — fork at message" : "Fork at message"}
         options={forkOptions}
         theme={C}
-        countLabel="message"
-footerHints={[
-          { key: "enter", label: "select" },
+        footerHints={[
+          { key: "enter", label: "fork here" },
           { key: "esc", label: "close" },
         ]}
+        countLabel="message"
         onSelect={(messageId) => {
           closeDialog();
+          setTimelineMode(false);
           if (!activeId) return;
           setStatus("forking…");
           void client.request("session/fork", { sessionId: activeId, target: { kind: "message", messageId } })

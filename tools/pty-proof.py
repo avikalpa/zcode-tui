@@ -207,6 +207,14 @@ if b0 and alive(pid):
     mark_raw = len(RAW)
     os.write(master, b"\x18y"); read_for(master, stream, 1.2)    # leader y: copy
     check(pid, "X2 leader y copies via OSC 52", b"\x1b]52;c;" in bytes(RAW[mark_raw:]))
+
+    # TL-series: timeline dialog, fork at a prompt (wrapper closes the fork)
+    os.write(master, b"\x18g"); read_for(master, stream, 1.2)
+    disp = "\n".join(screen.display)
+    check(pid, "TL0 leader g opens the timeline", "Timeline — fork at message" in disp)
+    os.write(master, b"\r"); read_for(master, stream, 3.5)
+    disp = "\n".join(screen.display)
+    check(pid, "TL1 enter forks at the prompt", "fork" in disp.lower())
     # I-series: escape interrupts the RUNNING turn (minimal real turn, throwaway)
     interrupted = False
     for attempt in range(3):

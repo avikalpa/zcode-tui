@@ -79,7 +79,8 @@ describe("OpenCode-shaped zcode-tui design model", () => {
   test("slash registry: prefix matches, unknown tokens stay null", () => {
     expect(parseSlashCommand("/theme")).toBe("themes");
     expect(parseSlashCommand("/nonsense")).toBeNull();
-    expect(parseSlashCommand("/help")).toBe("commands");
+    expect(parseSlashCommand("/help")).toBe("help");
+    expect(parseSlashCommand("/timeline")).toBe("timeline");
     expect(SLASH_COMMANDS.length).toBeGreaterThanOrEqual(10);
     expect(matchSlashCommands("").length).toBe(SLASH_COMMANDS.length);
     expect(matchSlashCommands("ses").map((c) => c.name)).toContain("sessions");
