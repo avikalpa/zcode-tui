@@ -1013,6 +1013,8 @@ export function App({
   // The themes dialog's ORIGIN theme: captured once at open so the ● marker
   // and the esc-restore follow where you STARTED, not the live preview.
   const themesOriginRef = useRef<ThemeName | null>(null);
+  // opencode message navigation: the last user-message row we jumped to.
+  const userJumpIdxRef = useRef<number | null>(null);
   const openThemes = () => { themesOriginRef.current = theme; setDialog("themes"); };
   const dims = useTerminalDimensions();
   const C = THEMES[theme];
@@ -1420,6 +1422,50 @@ export function App({
     } catch (e) {
       flashStatus(`interrupt failed: ${e instanceof Error ? e.message : e}`, "error");
     }
+  };
+
+  // opencode session.message.user.* + messages_last_user: jump between the
+  // session's USER prompts (alt+up / alt+down walk, alt+end last). The
+  // anchor is the last jumped-to row; jump-to-latest clears it.
+  const userJump = (dir: 1 | -1 | "last") => {
+    const msgs = msgsRef.current;
+    const users: number[] = [];
+    msgs.forEach((m, i) => { if (m.role === "user") users.push(i); });
+    if (users.length === 0) return;
+    const at = userJumpIdxRef.current;
+    let target: number;
+    if (dir === "last" || at === null) target = users[users.length - 1];
+    else if (dir === -1) {
+      const below = users.filter((u) => u < at);
+      target = below.length > 0 ? below[below.length - 1] : users[0];
+    } else {
+      const above = users.filter((u) => u > at);
+      if (above.length === 0) { jumpToLatest(); userJumpIdxRef.current = null; syncAtBottom(); return; }
+      target = above[0];
+    }
+    userJumpIdxRef.current = target;
+    jumpToMessage(target);
+    flashStatus(`user message ${users.indexOf(target) + 1}/${users.length}`);
+  };
+
+  const jumpToMessage = (idx: number) => {
+    const box = scrollRef.current as unknown as { getChildren?: () => unknown[]; viewport?: { y: number }; scrollBy?: (d: { y: number }) => void } | null;
+    if (!box) return;
+    const ve = windowEndRef.current ?? msgsRef.current.length;
+    if (idx < ve - SCROLL_WINDOW) setWindowEnd(idx + 1); // pull it into the window
+    // two frames: one for a possible window re-base to commit, one to settle
+    setTimeout(() => setTimeout(() => {
+      const children = (scrollRef.current as unknown as { getChildren?: () => unknown[] } | null)?.getChildren?.() ?? [];
+      const ve2 = windowEndRef.current ?? msgsRef.current.length;
+      const start2 = Math.max(0, ve2 - SCROLL_WINDOW);
+      const header = ve2 < msgsRef.current.length ? 1 : 0;
+      const child = children[header + (idx - start2)] as { y?: number } | undefined;
+      const vp = (scrollRef.current as unknown as { viewport?: { y: number } } | null)?.viewport?.y ?? 0;
+      if (child && typeof child.y === "number") {
+        (scrollRef.current as unknown as { scrollBy?: (d: { y: number }) => void } | null)?.scrollBy?.({ y: child.y - vp });
+        syncAtBottom();
+      }
+    }, 16, 16));
   };
 
   // Input undo/redo (opencode input_undo/redo): snapshots pushed before
@@ -1964,7 +2010,11 @@ export function App({
       if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "y") { scrollRef.current?.scrollBy?.({ y: -2 }); syncAtBottom(); return; }
       if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "e") { scrollRef.current?.scrollBy?.({ y: 2 }); syncAtBottom(); return; }
       if (key.ctrl && key.name === "g") { scrollRef.current?.scrollBy?.({ y: -99999 }); syncAtBottom(); return; }
-      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "g") { jumpToLatest(); syncAtBottom(); return; }
+      if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "g") { jumpToLatest(); userJumpIdxRef.current = null; syncAtBottom(); return; }
+      // opencode session.message.user.previous/next + messages_last_user.
+      if ((key as { meta?: boolean }).meta && key.name === "up") { userJump(-1); return; }
+      if ((key as { meta?: boolean }).meta && key.name === "down") { userJump(1); return; }
+      if ((key as { meta?: boolean }).meta && key.name === "end") { userJump("last"); return; }
     }
     if (key.ctrl && key.name === "q" || key.ctrl && key.name === "d") {
       onQuit();
@@ -2448,6 +2498,7 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["ctrl+c", "clear the draft"],
     ["pageup / pagedown / ctrl+alt+u,d,y,e", "scroll transcript"],
     ["ctrl+g / ctrl+alt+g", "first message / jump to latest"],
+    ["alt+up / alt+down / alt+end", "previous / next / last user message"],
   ];
   return (
     <ModalBackdrop C={C} width={width} height={height}>
