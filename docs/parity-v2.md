@@ -104,10 +104,12 @@ ports AROUND the logo, never over it).
 3. ~~Flash status line~~ CLOSED 0.6.21 — flashStatus is toast-only (the
    transient status-slot text was already invisible; lifecycle state still
    feeds the leader-s status summary).
-4. **Home screen** — ours is logo+composer; v2 home = session-destination
-   (recent sessions, frecency) + tips. Ledger P2 line upgraded to deviation.
-   ⚠ owner 2026-09-18: the zcodetui LOGO STAYS — port the
-   session-destination surface around it.
+4. **Home screen** — CORRECTED 0.6.26 (stale audit line): v2.0.7 home is
+   logo + prompt + the home.footer status row (⊙ N MCP / plugins-failed /
+   version) — there is NO session-destination recent-sessions front page
+   upstream (grep-verified routes/home.tsx). The footer MCP half is ported
+   (0.6.26); the plugins half has no plane here. ⚠ owner 2026-09-18: the
+   zcodetui LOGO STAYS.
 5. **Footer hint rows** — our "enter select esc close" bracket-less hints
    approximate v2's FooterAction pattern; diff the exact rendering.
 6. **Queue manager / timeline / sessions dialogs** — modeled on v2 but with

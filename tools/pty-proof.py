@@ -119,6 +119,17 @@ if alive(pid):
     os.write(master, b"\x7f"); read_for(master, stream, 0.8)
     sl1 = "\n".join(screen.display)
     check(pid, "SL1 backspace deletes the selection", "abcX" not in sl1 and "abc" in sl1)
+
+    # HF-series: the v2 home.footer status row (0.6.26) — the MCP ⊙ count
+    # with the /mcps hint at width >= 64.
+    hf0 = False
+    for _ in range(10):                                        # poll: the boot MCP fetch
+        read_for(master, stream, 0.6)
+        d = "\n".join(screen.display)
+        if "\u2299" in d and "/mcps" in d:
+            hf0 = True
+            break
+    check(pid, "HF0 home footer shows the MCP status row", hf0)
     os.write(master, b"\x03"); time.sleep(0.3)
 else:
     check(pid, "SL0 shift-select + typing replaces the range", False)

@@ -87,11 +87,11 @@
   },
   "theme_switch_mode": {
    "status": "none",
-   "note": "light/dark mode switch"
+   "note": "v2.0.7 STUB: keybind defined, no implementation; theme assets carry no light/dark variants (grep-verified 0.6.26) — nothing to copy"
   },
   "theme_mode_lock": {
    "status": "none",
-   "note": "mode lock"
+   "note": "same v2 stub"
   },
   "theme.": {
    "status": "covered",
@@ -189,13 +189,16 @@
    "status": "none"
   },
   "server.pair": {
-   "status": "none"
+   "status": "blocked-host",
+   "note": "desktop-shell verb"
   },
   "service.restart": {
-   "status": "none"
+   "status": "blocked-host",
+   "note": "desktop-shell verb"
   },
   "docs.open": {
-   "status": "none"
+   "status": "blocked-host",
+   "note": "opens an external browser"
   },
   "app.exit": {
    "status": "covered",
@@ -248,6 +251,42 @@
   "session.child.": {
    "status": "blocked-host",
    "note": "0.6.24 measured: session/list carries no parentSessionId — no child tree to walk"
+  },
+  "prompt.submit": {
+   "status": "covered",
+   "note": "enter (the 0.5.x submit grammar); slash-routed commands too"
+  },
+  "prompt.queue": {
+   "status": "covered",
+   "note": "typed mid-turn queues visibly (0.6.13 manager + Q-series pty)"
+  },
+  "prompt.clear": {
+   "status": "covered",
+   "note": "ctrl+c"
+  },
+  "prompt.history.previous": {
+   "status": "covered",
+   "note": "up walks the store history"
+  },
+  "prompt.history.next": {
+   "status": "covered",
+   "note": "down walks the store history"
+  },
+  "prompt.editor": {
+   "status": "covered",
+   "note": "leader e (0.6.12 round-trip, X-series pty)"
+  },
+  "location.reload": {
+   "status": "blocked-host",
+   "note": "desktop-shell verb"
+  },
+  "prompt.images.view": {
+   "status": "none",
+   "note": "no attachments plane in this TUI"
+  },
+  "prompt.editor_context.clear": {
+   "status": "none",
+   "note": "n/a to the plain-text draft"
   }
  }
 }

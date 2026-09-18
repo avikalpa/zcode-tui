@@ -1097,6 +1097,30 @@ export function App({
   // Persisted in state.json; diff wrapping rides DiffPreferences.wrap.
   const [animations, setAnimations] = useState(uiState.current.animations);
   const [fileContext, setFileContext] = useState(uiState.current.fileContext);
+  // v2 home.footer status row (0.6.26): the MCP ⊙ count. Fetched on boot
+  // and on every return home; the plugins-failed half is omitted (no
+  // plugins plane in this TUI).
+  const [mcpStatus, setMcpStatus] = useState<{ total: number; failed: number } | null>(null);
+  useEffect(() => {
+    if (view !== "home") return;
+    let live = true;
+    client
+      .request("mcp/list", { workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() } })
+      .then((res) => {
+        if (!live) return;
+        const statuses = Object.values((res as { statuses?: Record<string, { status?: string }> }).statuses ?? {});
+        setMcpStatus({
+          total: statuses.length,
+          failed: statuses.filter((s) => s.status === "failed" || s.status === "needs_auth").length,
+        });
+      })
+      .catch(() => {
+        if (live) setMcpStatus(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [view, client]);
   useEffect(() => {
     if (!typing || !animations) {
       setCursorBlink(true);
@@ -3366,6 +3390,16 @@ footerHints={[
           <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
             <text content={`${cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
             <box style={{ flexDirection: "row", flexShrink: 0 }}>
+              {mcpStatus && mcpStatus.total > 0 ? (
+                <>
+                  <text
+                    content={"⊙ " + (mcpStatus.failed > 0 ? `${mcpStatus.failed} MCP failed` : `${mcpStatus.total} MCP`)}
+                    fg={mcpStatus.failed > 0 ? C.error : C.success}
+                  />
+                  {dims.width >= 64 ? <text content=" /mcps" fg={C.subtle} /> : null}
+                  <text content="   " fg={C.faint} />
+                </>
+              ) : null}
               <HintBits text={hintBits} C={C} />
               <text content={`   ${VERSION}`} fg={C.faint} />
             </box>
