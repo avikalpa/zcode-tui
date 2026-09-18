@@ -319,6 +319,36 @@ if b0 and alive(pid):
             cleared = True
             break
     check(pid, "S2 affordance clears at the bottom", cleared)
+
+    # TB-series: the session tabs strip (v2 session.tab.*)
+    read_for(master, stream, 0.8)
+    disp = "\n".join(screen.display)
+    check(pid, "TB1 the tabs strip renders with the tab-1 gutter",
+          re.search(r"(^|\s)1\s+\S", disp, re.M) is not None)
+    os.write(master, b"/new\r"); read_for(master, stream, 4.0)
+    disp = "\n".join(screen.display)
+    check(pid, "TB2 /new opens a second tab (gutter 2 + Untitled session)",
+          re.search(r"(^|\s)2\s+\S", disp, re.M) is not None and "Untitled session" in disp)
+    before_switch = disp
+    os.write(master, b"\x181"); read_for(master, stream, 2.0)   # leader 1: tab 1
+    disp = "\n".join(screen.display)
+    check(pid, "TB3 leader 1 switches to the first tab", disp != before_switch)
+    os.write(master, b"\x18w"); read_for(master, stream, 2.0)   # leader w: close tab
+    disp = "\n".join(screen.display)
+    check(pid, "TB4 leader w closes the tab (back to one)",
+          "2 Untitled session" not in disp)  # scoped: the new tab is always "2 Untitled session"
+    # ctrl+shift+t has no legacy PTY encoding - attempt it, grade SOFT (the
+    # reopen path is unit-tested; delivery is terminal-dependent).
+    os.write(master, b"\x1f"); time.sleep(0.2)
+    os.write(master, b"T"); read_for(master, stream, 2.0)
+    disp = "\n".join(screen.display)
+    if re.search(r"(^|\s)2\s+\S", disp, re.M) is not None:
+        check(pid, "TB5 ctrl+shift+t reopens the closed tab", True)
+    else:
+        print("NOTE ctrl+shift+t undeliverable on this PTY; reopen covered by unit tests")
+    os.write(master, b"\x03"); time.sleep(0.3)
+
+
 else:
     for lbl in ("S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
         check(pid, lbl, False)

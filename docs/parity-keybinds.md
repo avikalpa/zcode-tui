@@ -7,9 +7,9 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 | class | binds |
 |---|---|
 | blocked-host | 2 |
-| covered | 99 |
+| covered | 117 |
 | law | 7 |
-| none | 114 |
+| none | 96 |
 | partial | 18 |
 
 Open surfaces (partial / none / blocked-host):
@@ -36,30 +36,12 @@ Open surfaces (partial / none / blocked-host):
 - `opencode.debug` (none) [none] — dev-facing
 - `session.move` (none) [none] — dialog-move-session
 - `open.menu` (ctrl+o) [none]
-- `session.tab.next` (ctrl+tab,alt+down) [none] — tabs rail — the v2 navigation structure
-- `session.tab.previous` (ctrl+shift+tab,alt+up) [none] — tabs rail — the v2 navigation structure
-- `session.tab.history.back` (none) [none] — tabs rail — the v2 navigation structure
-- `session.tab.history.forward` (ctrl+i) [none] — tabs rail — the v2 navigation structure
-- `session.tab.next_unread` (alt+shift+down) [none] — tabs rail — the v2 navigation structure
-- `session.tab.previous_unread` (alt+shift+up) [none] — tabs rail — the v2 navigation structure
-- `session.tab.close` (<leader>w) [none] — tabs rail — the v2 navigation structure
-- `session.tab.reopen` (ctrl+shift+t) [none] — tabs rail — the v2 navigation structure
 - `session.share` (none) [none] — share/unshare
 - `queued_prompt.delete` (ctrl+d) [none]
 - `session.child.first` (down) [none] — child/parent navigation
 - `session.child.next` (right) [none] — child/parent navigation
 - `session.child.previous` (left) [none] — child/parent navigation
 - `session.parent` (up) [none] — child/parent navigation
-- `session.tab.select.1` (<leader>1,ctrl+1) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.2` (<leader>2,ctrl+2) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.3` (<leader>3,ctrl+3) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.4` (<leader>4,ctrl+4) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.5` (<leader>5,ctrl+5) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.6` (<leader>6,ctrl+6) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.7` (<leader>7,ctrl+7) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.8` (<leader>8,ctrl+8) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.9` (<leader>9,ctrl+9) [none] — tabs rail — the v2 navigation structure
-- `session.tab.select.10` (<leader>0,ctrl+0) [none] — tabs rail — the v2 navigation structure
 - `stash.delete` (ctrl+d) [none]
 - `mcp.list` (none) [none] — MCP server list dialog
 - `provider.connect` (none) [none]

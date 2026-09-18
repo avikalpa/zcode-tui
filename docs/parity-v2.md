@@ -53,6 +53,16 @@ ports AROUND the logo, never over it).
   1-9, running-status adoption on open (0.6.17).
 - Agents: list (leader a), cycle (tab), modes (shift+tab), status view
   (leader s).
+- **Session tabs** — the session.tab.* family (0.6.22): the open-session
+  strip above the transcript (adaptive widths 8/22/32 with ‹N / N› overflow
+  markers, number gutter, running spinner / • unread / ! ? attention,
+  elevated active tab), the tabs model verbatim (open/close, the 10-deep
+  closed stack with position-restoring reopen, move, cycle, the 100-entry
+  bounded switch history), leader 1-9/0 = tab select, leader w = close,
+  ctrl+shift+t = reopen, ctrl+i = history forward, ctrl+tab / alt+up+down =
+  cycle (shift = unread walk). v2.0.7 RE-POINT: alt+up/down now walk tabs —
+  the user-message walk keeps alt+end (its prev/next are palette commands
+  upstream). Tabs are in-memory for the TUI lifetime.
 - **Tool-call rows** — the v2 per-tool grammar (0.6.21): ToolPart
   dispatches on the display class (shell/glob/read/grep/webfetch/websearch/
   write/edit/subagent/patch/question/skill/generic) with the reference
@@ -118,9 +128,11 @@ ports AROUND the logo, never over it).
 
 - ~~diff.* family (19 binds)~~ SHIPPED 0.6.20 (the last-turn SOURCE stays
   blocked below).
-- **session.tab.* (16 binds) + session-tabs-rail** — session TABS:
-  next/prev/close/reopen/unread/history/select-1-10. We have sessions
-  dialog + quick slots only; tabs are the v2 navigation structure.
+- ~~session.tab.* (16 binds)~~ SHIPPED 0.6.22. Residuals: the horizontal
+  strip only (the vertical sidebar rail and the animation framework —
+  springs/marquee/shimmer — are opentui-stack-bound), mouse drag reorder
+  and the " + " add button are mouse-only upstream (no mouse plane here);
+  ctrl+shift+t delivery is terminal-dependent.
 - **session.message.next/previous** (binds "none" — palette commands;
   user-message walking shipped 0.6.18, all-message walking still open).
 - **messages.copy (extended)** — copy selected/all messages (we copy the

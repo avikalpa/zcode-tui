@@ -38,8 +38,8 @@
       "note": "0.6.10; 0.6.17 made it a full stop"
     },
     "session.tab.": {
-      "status": "none",
-      "note": "tabs rail \u2014 the v2 navigation structure"
+      "status": "covered",
+      "note": "0.6.22 \u2014 strip + close/reopen/history/unread/select; ctrl+shift+t delivery is terminal-dependent"
     },
     "session.child": {
       "status": "none",

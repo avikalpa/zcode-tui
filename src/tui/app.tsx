@@ -35,6 +35,18 @@ import {
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
 import { DiffViewer, diffSourceLabel, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
 import { ToolPart } from "./session/tool-parts";
+import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
+import {
+  closeSessionTab,
+  cycleSessionTab,
+  moveSessionTabHistory,
+  openSessionTab,
+  recordClosedSessionTab,
+  recordSessionTabHistory,
+  reopenSessionTab,
+  type ClosedSessionTab,
+  type SessionTabHistory,
+} from "./session/session-tabs-model";
 import { listBranches, type DiffMode } from "./diff/git";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -1066,6 +1078,19 @@ export function App({
     const bp = pinned.includes(b.sessionId) ? 1 : 0;
     return bp - ap || b.updatedAt - a.updatedAt;
   });
+  // opencode v2 session tabs (session.tab.*): the open-session strip above
+  // the transcript. In-memory for the TUI lifetime, like upstream's
+  // context; closed tabs keep a reopen stack, switches a bounded history.
+  const [tabs, setTabs] = useState<SessionTab[]>([]);
+  const [closedTabs, setClosedTabs] = useState<ClosedSessionTab[]>([]);
+  const tabsRef = useRef<SessionTab[]>([]);
+  tabsRef.current = tabs;
+  const tabHistoryRef = useRef<SessionTabHistory>({ entries: [], index: -1 });
+  const openTab = (sessionId: string, title?: string) => {
+    setTabs((current) => openSessionTab(current, { sessionID: sessionId, title }));
+    tabHistoryRef.current = recordSessionTabHistory(tabHistoryRef.current, sessionId);
+  };
+
   const activeTitle = activeId
     ? displayTitle(sessions.find((s) => s.sessionId === activeId) ?? { sessionId: activeId, title: "", status: "", updatedAt: Date.now() })
     : "";
@@ -1253,6 +1278,13 @@ export function App({
       setStatus(`subscribe failed: ${e instanceof Error ? e.message : e}`);
     }
   };
+
+  // Every session the TUI opens becomes a tab (the v2 model: switching
+  // opens tabs; the strip is the tab set, the store stays the full list).
+  useEffect(() => {
+    if (activeId) openTab(activeId, activeTitle || undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, activeTitle]);
 
   const open = async (row: SessionRow) => {
     setView("session");
@@ -1452,13 +1484,60 @@ export function App({
     writeUiState(uiState.current);
   };
 
-  // OpenCode's agent quick slots: leader 1..9 jumps straight into the Nth
-  // session of the recency list.
+  // opencode v2 session.tab.select.N: leader 1..9/0 select the Nth OPEN
+  // TAB (0.6.22 re-point — v2.0.7 owns these keys for tabs, not recency).
   const quickSwitch = (slot: number) => {
-    const row = orderedSessions[slot - 1];
-    if (!row) { flashStatus(`no session in quick slot ${slot}`); return; }
-    if (row.sessionId === activeId) { closeDialog(); setView("session"); return; }
-    void open(row);
+    const tab = tabsRef.current[slot - 1];
+    if (!tab) { flashStatus(`no tab in slot ${slot}`); return; }
+    if (tab.sessionID === activeId) { closeDialog(); setView("session"); return; }
+    const row = orderedSessions.find((s) => s.sessionId === tab.sessionID);
+    if (row) void open(row);
+    else flashStatus("tab session not in the store");
+  };
+
+  const tabStatusOf = (id: string): SessionTabStatus => {
+    const row = sessions.find((s) => s.sessionId === id);
+    const busy = /run|busy|work/i.test(row?.status ?? "");
+    if (id !== activeId && /fail|error/i.test(row?.status ?? "")) return { busy: false, unread: "error" };
+    if (id !== activeId && busy) return { busy: true, unread: "activity" };
+    return { busy };
+  };
+  const tabOpenSession = (sessionId: string | undefined) => {
+    if (!sessionId) return;
+    const row = orderedSessions.find((s) => s.sessionId === sessionId);
+    if (row) void open(row);
+  };
+  const tabCycle = (direction: 1 | -1, unreadOnly = false) => {
+    const next = cycleSessionTab(
+      tabsRef.current,
+      activeId ?? undefined,
+      direction,
+      unreadOnly ? (t) => Boolean(tabStatusOf(t.sessionID).unread) : () => true,
+    );
+    if (!next) { if (unreadOnly) flashStatus("no unread tabs"); return; }
+    tabOpenSession(next.sessionID);
+  };
+  const tabClose = () => {
+    if (!activeId) { flashStatus("no tab to close"); return; }
+    const index = tabsRef.current.findIndex((t) => t.sessionID === activeId);
+    const result = closeSessionTab(tabsRef.current, activeId);
+    setTabs(result.tabs);
+    setClosedTabs((stack) => recordClosedSessionTab(stack, { sessionID: activeId, title: activeTitle || undefined }, index));
+    if (result.next) tabOpenSession(result.next);
+    else setView("home");
+  };
+  const tabReopen = () => {
+    const result = reopenSessionTab(closedTabs, tabsRef.current);
+    if (!result.tabs || !result.sessionID) { flashStatus("no closed tab to reopen"); return; }
+    setClosedTabs(result.stack);
+    setTabs(result.tabs);
+    tabOpenSession(result.sessionID);
+  };
+  const tabHistoryForward = () => {
+    const result = moveSessionTabHistory(tabHistoryRef.current, tabsRef.current, activeId ?? undefined, 1);
+    if (!result.sessionID) { flashStatus("no forward tab history"); return; }
+    tabHistoryRef.current = result.history;
+    tabOpenSession(result.sessionID);
   };
 
   // Interrupt the running turn (opencode session_interrupt: escape). An
@@ -2055,7 +2134,8 @@ export function App({
       if (key.name === "n") { void newSession(); return; }
         if (key.name === "c") { void compactActive(); return; }
         if (key.name === "s") { flashStatus(statusSummary()); return; }
-        if (/^[1-9]$/.test(key.name ?? "")) { quickSwitch(Number(key.name)); return; }
+        if (key.name === "w") { tabClose(); return; }
+        if (/^[0-9]$/.test(key.name ?? "")) { quickSwitch(key.name === "0" ? 10 : Number(key.name)); return; }
         if (key.name === "q") { onQuit(); return; }
         return;
     }
@@ -2074,6 +2154,10 @@ export function App({
       void stopTurn();
       return;
     }
+    // opencode v2 session.tab.reopen (ctrl+shift+t) + session.tab.history.
+    // forward (ctrl+i) — bound BEFORE plain ctrl+t (variant cycle).
+    if (key.ctrl && key.name === "t" && (key as { shift?: boolean }).shift) { tabReopen(); return; }
+    if (key.ctrl && key.name === "i") { tabHistoryForward(); return; }
     // opencode variant_cycle: ctrl+t cycles the reasoning effort.
     if (key.ctrl && key.name === "t") {
       cycleEffort();
@@ -2084,8 +2168,10 @@ export function App({
     if (key.name === "f2" && (key as { shift?: boolean }).shift) { cycleRecentModel(-1); return; }
     // opencode help_show: `?` opens the keybind help overlay.
     if (key.sequence === "?" || key.name === "?") { setDialog("help"); return; }
+    // opencode v2 session.tab.next/previous: ctrl+tab walks the open tabs.
+    if (key.ctrl && key.name === "tab") { tabCycle((key as { shift?: boolean }).shift ? -1 : 1); return; }
     // shift+tab cycles the mode — the OpenCode agent-cycle slot.
-    if ((key.name === "tab" && (key as { shift?: boolean }).shift) || key.sequence === "\x1b[Z") {
+    if ((key.name === "tab" && (key as { shift?: boolean }).shift && !key.ctrl) || (key.sequence === "\x1b[Z" && !key.ctrl)) {
       void cycleMode();
       return;
     }
@@ -2113,8 +2199,14 @@ export function App({
       if (key.ctrl && key.name === "g") { scrollRef.current?.scrollBy?.({ y: -99999 }); syncAtBottom(); return; }
       if (key.ctrl && (key as { meta?: boolean }).meta && key.name === "g") { jumpToLatest(); userJumpIdxRef.current = null; syncAtBottom(); return; }
       // opencode session.message.user.previous/next + messages_last_user.
-      if ((key as { meta?: boolean }).meta && key.name === "up") { userJump(-1); return; }
-      if ((key as { meta?: boolean }).meta && key.name === "down") { userJump(1); return; }
+      // v2.0.7 re-point: alt+up/down now walk session TABS (session.tab.
+      // previous/next; shift = the unread walk). The user-message walk
+      // keeps alt+end (messages_last_user); its prev/next are palette
+      // commands upstream.
+      if ((key as { meta?: boolean }).meta && (key as { shift?: boolean }).shift && key.name === "down") { tabCycle(1, true); return; }
+      if ((key as { meta?: boolean }).meta && (key as { shift?: boolean }).shift && key.name === "up") { tabCycle(-1, true); return; }
+      if ((key as { meta?: boolean }).meta && key.name === "down") { tabCycle(1); return; }
+      if ((key as { meta?: boolean }).meta && key.name === "up") { tabCycle(-1); return; }
       if ((key as { meta?: boolean }).meta && key.name === "end") { userJump("last"); return; }
     }
     if (key.ctrl && key.name === "q" || key.ctrl && key.name === "d") {
@@ -2655,6 +2747,9 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["ctrl+g / ctrl+alt+g", "first message / jump to latest"],
     ["alt+up / alt+down / alt+end", "previous / next / last user message"],
     ["ctrl+o", "expand / collapse tool output"],
+    ["alt+up/down · ctrl+tab", "previous / next session tab (shift = unread)"],
+    ["ctrl+x then w / ctrl+shift+t", "close tab · reopen closed tab"],
+    ["ctrl+x then 1-9 / 0", "select session tab"],
   ];
   return (
     <ModalBackdrop C={C} width={width} height={height}>
@@ -2872,6 +2967,17 @@ footerHints={[
   const visibleMsgs = msgs.slice(Math.max(0, visibleEnd - SCROLL_WINDOW), visibleEnd);
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
+      {view === "session" && tabs.length > 0 ? (
+        <SessionTabsStrip
+          C={C}
+          tabs={tabs}
+          activeId={activeId ?? undefined}
+          width={dims.width}
+          spinnerChar={spinner}
+          statusOf={tabStatusOf}
+          titles={(id) => sessions.find((s) => s.sessionId === id)?.title}
+        />
+      ) : null}
       <box style={{ flexDirection: "row", flexGrow: 1, minHeight: 0 }}>
         {msgs.length === 0 ? (
           <box style={{ flexGrow: 1, flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 2 }}>
