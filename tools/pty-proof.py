@@ -102,6 +102,28 @@ os.write(master, b"\x1b")
 read_for(master, stream, 0.6)
 check(pid, "H1 help overlay closes", "Help — keybinds" not in "\n".join(screen.display))
 
+# SL-series: the input.select.* family (v2 shift-selections). Behavior proof —
+# the highlight itself is colour-only (invisible to the pyte text dump), so
+# the asserts read the CONSUMPTION: typing replaces the selected range,
+# backspace deletes it.
+if alive(pid):
+    os.write(master, b"\x03"); time.sleep(0.3)
+    os.write(master, b"abcdef"); read_for(master, stream, 0.8)
+    os.write(master, b"\x1b[1;2D"); time.sleep(0.2)     # shift+left
+    os.write(master, b"\x1b[1;2D"); time.sleep(0.2)
+    os.write(master, b"\x1b[1;2D"); time.sleep(0.2)     # "def" selected
+    os.write(master, b"X"); read_for(master, stream, 0.8)
+    sl0 = "\n".join(screen.display)
+    check(pid, "SL0 shift-select + typing replaces the range", "abcX" in sl0 and "abcdef" not in sl0)
+    os.write(master, b"\x1b[1;2D"); time.sleep(0.2)     # select "X"
+    os.write(master, b"\x7f"); read_for(master, stream, 0.8)
+    sl1 = "\n".join(screen.display)
+    check(pid, "SL1 backspace deletes the selection", "abcX" not in sl1 and "abc" in sl1)
+    os.write(master, b"\x03"); time.sleep(0.3)
+else:
+    check(pid, "SL0 shift-select + typing replaces the range", False)
+    check(pid, "SL1 backspace deletes the selection", False)
+
 # TAB/L-series (home-local)
 before_mode = [l for l in screen.display if "Z.AI Coding Plan" in l]
 os.write(master, b"\t")

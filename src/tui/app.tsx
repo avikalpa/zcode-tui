@@ -18,6 +18,7 @@ import {
   formatTokens,
   formatTurnFooter,
   matchSlashCommands,
+  wrapRows,
   wrapText,
   mdFor,
   modeAccent,
@@ -732,6 +733,7 @@ function Composer({
   draft,
   placeholder,
   cursor,
+  selection,
   cursorBlink,
   typing,
   mode,
@@ -747,6 +749,7 @@ function Composer({
   draft: string;
   placeholder: string;
   cursor: number | null;
+  selection?: [number, number] | null;
   cursorBlink: boolean;
   typing: boolean;
   mode: string;
@@ -764,19 +767,44 @@ function Composer({
   // splits the text at the cursor index (wrapped independently on either
   // side); an empty draft shows the block over the first placeholder cell.
   const glyph = cursorBlink ? "█" : " ";
-  let inputRows: { before: string; glyph: string; after: string }[];
+  // Rows come from the offset-carrying wrap so the cursor AND the selected
+  // slice land exactly on their characters (input.select.*, 0.6.25).
+  type InputSeg = { text: string; sel: boolean };
+  let inputRows: { segs: InputSeg[]; glyphIdx: number; glyph: string }[];
   if (!draft) {
-    inputRows = [{ before: "", glyph: typing ? glyph : " ", after: placeholder }];
+    inputRows = [{ segs: [{ text: placeholder, sel: false }], glyphIdx: 0, glyph: typing ? glyph : " " }];
   } else {
     const cur = cursor ?? draft.length;
-    const beforeL = wrapText(draft.slice(0, cur), wrapWidth);
-    const afterL = wrapText(draft.slice(cur), wrapWidth);
-    const beforeTail = beforeL.pop() ?? "";
-    inputRows = [
-      ...beforeL.map((l) => ({ before: l, glyph: "", after: "" })),
-      { before: beforeTail, glyph: typing ? glyph : "", after: afterL[0] ?? "" },
-      ...afterL.slice(1).map((l) => ({ before: "", glyph: "", after: l })),
-    ];
+    const lo = selection ? selection[0] : -1;
+    const hi = selection ? selection[1] : -1;
+    inputRows = wrapRows(draft, wrapWidth).map((row) => {
+      const rs = row.start;
+      const re = rs + row.text.length;
+      const cuts = new Set<number>([rs, re]);
+      const ownsCursor = cur >= rs && cur <= re;
+      if (ownsCursor) cuts.add(cur);
+      if (lo >= 0) {
+        cuts.add(Math.min(Math.max(lo, rs), re));
+        cuts.add(Math.min(Math.max(hi, rs), re));
+      }
+      const pts = [...cuts].sort((a, b) => a - b);
+      const segs: InputSeg[] = [];
+      const starts: number[] = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        if (b > a) {
+          segs.push({ text: draft.slice(a, b), sel: lo >= 0 && a >= lo && b <= hi });
+          starts.push(a);
+        }
+      }
+      let glyphIdx = -1;
+      if (ownsCursor) {
+        const at = starts.indexOf(cur);
+        glyphIdx = at === -1 ? segs.length : at;
+      }
+      return { segs, glyphIdx, glyph: typing ? glyph : "" };
+    });
   }
   return (
     <box style={{ width, flexDirection: "column", flexShrink: 0 }}>
@@ -792,9 +820,13 @@ function Composer({
         <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
           {inputRows.map((row, lineIndex) => (
             <box key={lineIndex} style={{ flexDirection: "row", flexShrink: 0 }}>
-              {row.before ? <text content={row.before} fg={draft ? C.fg : C.subtle} /> : null}
-              {row.glyph ? <text content={row.glyph} fg={draft ? C.fg : C.subtle} /> : null}
-              {row.after ? <text content={row.after} fg={draft ? C.fg : C.subtle} /> : null}
+              {row.segs.map((seg, si) => (
+                <box key={si} style={{ flexDirection: "row", flexShrink: 0, backgroundColor: seg.sel ? C.accent : undefined }}>
+                  {row.glyphIdx === si ? <text content={row.glyph} fg={draft ? C.fg : C.subtle} /> : null}
+                  <text content={seg.text} fg={draft ? (seg.sel ? C.bg : C.fg) : C.subtle} />
+                </box>
+              ))}
+              {row.glyphIdx === row.segs.length ? <text content={row.glyph} fg={draft ? C.fg : C.subtle} /> : null}
             </box>
           ))}
           <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
@@ -921,7 +953,46 @@ export function App({
     setCursor(v);
   };
   const [cursorBlink, setCursorBlink] = useState(true);
+  // ---- the input.select.* family (0.6.25): anchor-based selection. The
+  // anchor is fixed where a shift-motion starts; any non-shift motion or
+  // input collapses it. The ref mirrors the state (draftRef discipline).
+  const [selAnchor, setSelAnchor] = useState<number | null>(null);
+  const selAnchorRef = useRef<number | null>(null);
+  const wrapWidthRef = useRef(76);
+  const clearSelection = () => {
+    if (selAnchorRef.current === null) return;
+    selAnchorRef.current = null;
+    setSelAnchor(null);
+  };
+  const moveSelect = (next: number) => {
+    if (selAnchorRef.current === null) {
+      selAnchorRef.current = cursorRef.current ?? draftRef.current.length;
+      setSelAnchor(selAnchorRef.current);
+    }
+    setCursorBoth(Math.max(0, Math.min(draftRef.current.length, next)));
+  };
+  const selectionRange = (): [number, number] | null => {
+    const a = selAnchorRef.current;
+    if (a === null) return null;
+    const c = cursorRef.current ?? draftRef.current.length;
+    return a === c ? null : [Math.min(a, c), Math.max(a, c)];
+  };
+  // Display-row motion over the wrapped composer (v2 input.select.up/down
+  // and visual.line.home/end).
+  const visualMove = (dir: -1 | 1 | "home" | "end"): number => {
+    const rows = wrapRows(draftRef.current, wrapWidthRef.current);
+    const cur = cursorRef.current ?? draftRef.current.length;
+    let ri = rows.findIndex((r) => cur >= r.start && cur <= r.start + r.text.length);
+    if (ri === -1) ri = rows.length - 1;
+    const row = rows[ri];
+    if (dir === "home") return row.start;
+    if (dir === "end") return row.start + row.text.length;
+    const target = rows[ri + dir];
+    if (!target) return dir === -1 ? 0 : draftRef.current.length;
+    return target.start + Math.min(cur - row.start, target.text.length);
+  };
   const moveCursor = (delta: number) => {
+    clearSelection();
     const cur = cursorRef.current ?? draftRef.current.length;
     setCursorBoth(Math.max(0, Math.min(draftRef.current.length, cur + delta)));
   };
@@ -1181,6 +1252,10 @@ export function App({
     : "";
   const activeModel = models[modelIdx] ?? models[0];
   const promptWidth = Math.max(56, Math.min(86, Math.floor(dims.width * 0.62)));
+  wrapWidthRef.current = Math.max(12, promptWidth - 5);
+  const selRange = selAnchor === null
+    ? null
+    : ([Math.min(selAnchor, cursor ?? draft.length), Math.max(selAnchor, cursor ?? draft.length)] as [number, number]);
   const cwdFull = shortCwd(process.cwd());
   const cwd = cwdFull.length > 42 ? `…${cwdFull.slice(-41)}` : cwdFull;
   const cwdFiles = useRef<string[] | null>(null);
@@ -2081,6 +2156,18 @@ export function App({
   // boundary — and the popups never see pasted content, because they are
   // driven only by the typed-key state machine.
   const insertAtCursor = (text: string) => {
+    const sel = selectionRange();
+    if (sel) {
+      // v2 selection semantics: typed text REPLACES the selection.
+      pushUndo();
+      const next = draftRef.current.slice(0, sel[0]) + text + draftRef.current.slice(sel[1]);
+      draftRef.current = next;
+      setDraft(next);
+      selAnchorRef.current = null;
+      setSelAnchor(null);
+      setCursorBoth(sel[0] + text.length);
+      return;
+    }
     const cur = cursorRef.current ?? draftRef.current.length;
     const next = draftRef.current.slice(0, cur) + text + draftRef.current.slice(cur);
     draftRef.current = next;
@@ -2373,6 +2460,13 @@ export function App({
         return;
       }
       if (key.name === "backspace" || key.sequence === "\x7f" || key.sequence === "\b") {
+        const selNow = selectionRange();
+        if (selNow) {
+          pushUndo();
+          applyDraft(draftRef.current.slice(0, selNow[0]) + draftRef.current.slice(selNow[1]), selNow[0]);
+          clearSelection();
+          return;
+        }
         const cur = cursorRef.current ?? draftRef.current.length;
         if (cur === 0) return;
         const next = draftRef.current.slice(0, cur - 1) + draftRef.current.slice(cur);
@@ -2419,6 +2513,7 @@ export function App({
       if ((key.name === "return" && (key as { shift?: boolean }).shift)
         || (key.name === "return" && (key as { meta?: boolean }).meta)
         || (key.ctrl && key.name === "j")) {
+        clearSelection();
         pushUndo();
         const cur = cursorRef.current ?? draftRef.current.length;
         const next = `${draftRef.current.slice(0, cur)}\n${draftRef.current.slice(cur)}`;
@@ -2428,22 +2523,49 @@ export function App({
         return;
       }
       const multilineNow = draftRef.current.includes("\n");
-      if (key.name === "left") { moveCursor(-1); return; }
-      if (key.name === "right") { moveCursor(1); return; }
-      if (key.name === "home") { setCursorBoth(0); return; }
-      if (key.name === "end") { setCursorBoth(draftRef.current.length); return; }
+      // ---- input.select.* (v2): shift extends the selection from the
+      // anchor; the plain motions below collapse it (moveCursor clears).
+      const shiftK = (key as { shift?: boolean }).shift;
+      const metaK = (key as { meta?: boolean }).meta;
+      const superK = (key as { super?: boolean }).super;
+      const curK = cursorRef.current ?? draftRef.current.length;
+      const textK = draftRef.current;
+      if (superK && key.name === "a") {
+        selAnchorRef.current = 0;
+        setSelAnchor(0);
+        setCursorBoth(textK.length);
+        return;
+      }
+      if (shiftK && !key.ctrl && key.name === "left") { moveSelect(curK - 1); return; }
+      if (shiftK && !key.ctrl && key.name === "right") { moveSelect(curK + 1); return; }
+      if (shiftK && !key.ctrl && !metaK && (key.name === "up" || key.name === "down")) {
+        moveSelect(visualMove(key.name === "up" ? -1 : 1));
+        return;
+      }
+      if (key.ctrl && shiftK && key.name === "a") { moveSelect(lineStart(textK, curK)); return; }
+      if (key.ctrl && shiftK && key.name === "e") { moveSelect(lineEnd(textK, curK)); return; }
+      if (metaK && shiftK && key.name === "a") { moveSelect(visualMove("home")); return; }
+      if (metaK && shiftK && key.name === "e") { moveSelect(visualMove("end")); return; }
+      if (shiftK && key.name === "home") { moveSelect(0); return; }
+      if (shiftK && key.name === "end") { moveSelect(textK.length); return; }
+      if (metaK && shiftK && (key.name === "f" || key.name === "right")) { moveSelect(wordForward(textK, curK)); return; }
+      if (metaK && shiftK && (key.name === "b" || key.name === "left")) { moveSelect(wordBackward(textK, curK)); return; }
+      if (key.name === "left") { clearSelection(); moveCursor(-1); return; }
+      if (key.name === "right") { clearSelection(); moveCursor(1); return; }
+      if (key.name === "home") { clearSelection(); setCursorBoth(0); return; }
+      if (key.name === "end") { clearSelection(); setCursorBoth(draftRef.current.length); return; }
       // ---- the OpenCode input_* editing grammar ----
       const meta = (key as { meta?: boolean }).meta;
       const cur0 = cursorRef.current ?? draftRef.current.length;
       const text0 = draftRef.current;
       if (key.name === "left" && key.ctrl) { setCursorBoth(wordBackward(text0, cur0)); return; }
       if (key.name === "right" && key.ctrl) { setCursorBoth(wordForward(text0, cur0)); return; }
-      if (meta && (key.name === "left" || key.name === "b")) { setCursorBoth(wordBackward(text0, cur0)); return; }
-      if (meta && (key.name === "right" || key.name === "f")) { setCursorBoth(wordForward(text0, cur0)); return; }
+      if (meta && (key.name === "left" || key.name === "b")) { clearSelection(); setCursorBoth(wordBackward(text0, cur0)); return; }
+      if (meta && (key.name === "right" || key.name === "f")) { clearSelection(); setCursorBoth(wordForward(text0, cur0)); return; }
       if (key.ctrl && (key.name === "b")) { moveCursor(-1); return; }
       if (key.ctrl && (key.name === "f") && !sugOpenNow) { moveCursor(1); return; }
-      if (key.ctrl && key.name === "a") { setCursorBoth(lineStart(text0, cur0)); return; }
-      if (key.ctrl && key.name === "e") { setCursorBoth(lineEnd(text0, cur0)); return; }
+      if (key.ctrl && key.name === "a") { clearSelection(); setCursorBoth(lineStart(text0, cur0)); return; }
+      if (key.ctrl && key.name === "e") { clearSelection(); setCursorBoth(lineEnd(text0, cur0)); return; }
       // Deletes push an undo snapshot first.
       if (key.ctrl && key.name === "k") { pushUndo(); applyDraft(text0.slice(0, cur0), cur0); return; }
       if (key.ctrl && key.name === "u") { pushUndo(); const ls = lineStart(text0, cur0); applyDraft(text0.slice(0, ls) + text0.slice(cur0), ls); return; }
@@ -2468,6 +2590,7 @@ export function App({
         // Multiline drafts move the cursor across lines; single-line drafts
         // walk the prompt history.
         if (multilineNow) {
+          clearSelection();
           const cur = cursorRef.current ?? draftRef.current.length;
           const starts = [0, ...[...draftRef.current].reduce<number[]>((acc, ch, i) => ch === "\n" ? [...acc, i + 1] : acc, [])];
           const lineIdx = starts.reduce((acc, start, i) => cur >= start ? i : acc, 0);
@@ -2479,6 +2602,7 @@ export function App({
           return;
         }
         if (history.length === 0) return;
+        clearSelection();
         const next = key.name === "up"
           ? Math.min(historyIdx.current + 1, history.length - 1)
           : Math.max(historyIdx.current - 1, -1);
@@ -2491,6 +2615,7 @@ export function App({
         return;
       }
       if (key.name === "return") {
+        clearSelection();
         // A PTY can deliver a fast text burst and the Enter stroke before
         // React has committed the previous setState. The ref is the immediate
         // keyboard truth; it keeps `/sessions\r` equivalent to two human
@@ -2879,6 +3004,7 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["ctrl+p → stash", "stash · pop · list the draft"],
     ["ctrl+p → toggles", "animations · file context · diff wrapping"],
     ["ctrl+p → messages", "next / previous (user) message jump"],
+    ["shift+arrows · alt+shift+b/f", "select text · typing replaces it"],
   ];
   return (
     <ModalBackdrop C={C} width={width} height={height}>
@@ -3235,7 +3361,7 @@ footerHints={[
           <box style={{ height: 1, flexShrink: 0 }} />
           <box style={{ width: promptWidth, flexShrink: 0 }}>
             {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
-            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
+            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
           </box>
           <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
             <text content={`${cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
@@ -3378,7 +3504,7 @@ footerHints={[
       ) : null}
       {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} /> : null}
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-        <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
+        <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
       </box>
       <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
         {running ? (

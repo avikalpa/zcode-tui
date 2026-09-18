@@ -22,8 +22,8 @@
    "note": "0.6.20 — the full viewer route"
   },
   "input.select.": {
-   "status": "partial",
-   "note": "cursor is char-mode; shift selections still partial"
+   "status": "covered",
+   "note": "0.6.25 — anchor selection: shift+arrows/visual rows (wrapRows math), ctrl+shift+a/e logical, alt+shift+a/e visual home/end, shift+home/end buffer, alt+shift words, super+a all (soft: no PTY super); typing replaces, backspace deletes"
   },
   "input.": {
    "status": "covered",

@@ -7,10 +7,10 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 | class | binds |
 |---|---|
 | blocked-host | 9 |
-| covered | 132 |
+| covered | 145 |
 | law | 7 |
 | none | 77 |
-| partial | 15 |
+| partial | 2 |
 
 Open surfaces (partial / none / blocked-host):
 
@@ -47,19 +47,6 @@ Open surfaces (partial / none / blocked-host):
 - `prompt.editor_context.clear` (none) [none]
 - `prompt.images.view` (<leader>i) [none] — image preview
 - `prompt.clear` (ctrl+c) [none]
-- `input.select.left` (shift+left) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.right` (shift+right) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.up` (shift+up) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.down` (shift+down) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.line.home` (ctrl+shift+a) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.line.end` (ctrl+shift+e) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.visual.line.home` (alt+shift+a) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.visual.line.end` (alt+shift+e) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.buffer.home` (shift+home) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.buffer.end` (shift+end) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.word.forward` (alt+shift+f,alt+shift+right) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.word.backward` (alt+shift+b,alt+shift+left) [partial] — cursor is char-mode; shift selections still partial
-- `input.select.all` (super+a) [partial] — cursor is char-mode; shift selections still partial
 - `prompt.history.previous` (up) [none]
 - `prompt.history.next` (down) [none]
 - `composer.subagent.up` (up) [none] — subagent prompt switcher

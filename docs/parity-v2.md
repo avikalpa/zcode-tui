@@ -151,6 +151,18 @@ when both runs share the harness VERSION.
 
 ## Remaining (v2.0.6 → us)
 
+- ~~input.select.* (13 partials)~~ SHIPPED 0.6.25 — anchor-based selection
+  on the hand-rolled composer: shift+left/right chars, shift+up/down VISUAL
+  rows and alt+shift+a/e visual home/end over a new offset-carrying
+  wrapRows() (byte-identical to wrapText), ctrl+shift+a/e logical line,
+  shift+home/end buffer, alt+shift+b/f/left/right words, super+a all (v2's
+  own default; PTY cannot send super — soft). Typed text/bursts/pastes
+  REPLACE the selection (single funnel = insertAtCursor), backspace deletes
+  it, pushUndo wired, any plain motion collapses. The Composer now renders
+  cursor and highlight from the same mapped rows (fixing the old
+  before/after-rewrap drift). PTY-proven by consumption (SL-series):
+  highlight colours are invisible to the pyte text dump.
+
 - ~~diff.* family (19 binds)~~ SHIPPED 0.6.20 (the last-turn SOURCE stays
   blocked below).
 - ~~session.tab.* (16 binds)~~ SHIPPED 0.6.22. Residuals: the horizontal

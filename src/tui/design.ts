@@ -176,6 +176,37 @@ export function wrapText(text: string, width: number): string[] {
   return out;
 }
 
+// wrapText with source offsets: byte-identical display rows, each carrying
+// the draft index of its first character. The composer's cursor AND
+// selection both render from these rows so a highlighted slice lands
+// exactly where its characters do (input.select.* family, 0.6.25).
+export function wrapRows(text: string, width: number): { text: string; start: number }[] {
+  const width_ = Math.max(10, width);
+  const out: { text: string; start: number }[] = [];
+  let pos = 0;
+  for (const paragraph of text.split("\n")) {
+    if (paragraph === "") { out.push({ text: "", start: pos }); pos += 1; continue; }
+    let line = "";
+    let lineStart = pos;
+    let wpos = pos;
+    for (const word of paragraph.split(" ")) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (candidate.length <= width_) { if (!line) lineStart = wpos; line = candidate; wpos += word.length + 1; continue; }
+      if (line) { out.push({ text: line, start: lineStart }); line = ""; }
+      if (word.length <= width_) { line = word; lineStart = wpos; wpos += word.length + 1; continue; }
+      let rest = word;
+      let rstart = wpos;
+      while (rest.length > width_) { out.push({ text: rest.slice(0, width_), start: rstart }); rest = rest.slice(width_); rstart += width_; }
+      line = rest;
+      lineStart = rstart;
+      wpos = rstart + rest.length + 1;
+    }
+    out.push({ text: line, start: lineStart });
+    pos += paragraph.length + 1;
+  }
+  return out;
+}
+
 export function formatDateHeading(epochMs: number): string {
   // Date#toDateString is the compact grouping voice used by the reference
   // picker: "Fri Sep 04 2026" rather than a locale-dependent long date.
