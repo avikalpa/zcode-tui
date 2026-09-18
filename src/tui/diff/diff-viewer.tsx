@@ -47,7 +47,13 @@ const FILE_TREE_MAX_WIDTH = 40;
 const FILE_HEADER_HEIGHT = 2;
 export type DiffView = "split" | "unified";
 
-export type DiffPreferences = { tree?: boolean; single?: boolean; view?: "auto" | DiffView };
+export type DiffPreferences = {
+  tree?: boolean;
+  single?: boolean;
+  view?: "auto" | DiffView;
+  /** app.toggle.diffwrap: word-ish wrapping vs hard truncate (v2 config.diffs.wrap). */
+  wrap?: "char" | "none";
+};
 
 // The imperative surface the App's keyboard dispatcher drives — the command
 // ids mirror the reference keymap layer (diff.*).
@@ -63,6 +69,7 @@ export type DiffViewerApi = {
   toggleFileTree: () => void;
   toggleSinglePatch: () => void;
   toggleView: () => void;
+  toggleWrap: () => void;
 };
 
 export function diffSourceLabel(mode: DiffMode) {
@@ -94,6 +101,9 @@ export function DiffViewer(props: {
 
   const [fileTreeEnabled, setFileTreeEnabled] = useState(props.preferences?.tree ?? true);
   const [singlePatch, setSinglePatch] = useState(props.preferences?.single ?? false);
+  const [wrapMode, setWrapMode] = useState<"char" | "none">(
+    props.preferences?.wrap === "none" ? "none" : "char",
+  );
   const [viewOverride, setViewOverride] = useState<DiffView | undefined>(
     props.preferences?.view && props.preferences.view !== "auto" ? props.preferences.view : undefined,
   );
@@ -388,6 +398,11 @@ export function DiffViewer(props: {
         setViewOverride(next);
         props.onPreferencesChange?.({ view: next });
       },
+      toggleWrap: () => {
+        const next: "char" | "none" = wrapMode === "char" ? "none" : "char";
+        setWrapMode(next);
+        props.onPreferencesChange?.({ wrap: next });
+      },
     });
     return () => props.apiRef?.(null);
   });
@@ -508,7 +523,7 @@ export function DiffViewer(props: {
                             filetype={filetypeOf(entry.file.file)}
                             syntaxStyle={props.syntaxStyle}
                             showLineNumbers
-                            wrapMode="char"
+                            wrapMode={wrapMode}
                             fg={C.fg}
                             addedBg={D.diffAddedBg}
                             removedBg={D.diffRemovedBg}

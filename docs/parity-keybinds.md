@@ -6,21 +6,18 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 
 | class | binds |
 |---|---|
-| blocked-host | 3 |
-| covered | 122 |
+| blocked-host | 9 |
+| covered | 132 |
 | law | 7 |
-| none | 89 |
-| partial | 19 |
+| none | 77 |
+| partial | 15 |
 
 Open surfaces (partial / none / blocked-host):
 
 - `app.debug` (none) [none] — dev-facing
 - `app.console` (none) [none] — dev-facing
 - `app.scrap` (none) [none] — dev-facing
-- `app.toggle.animations` (none) [none] — display toggles (P2)
-- `app.toggle.file_context` (none) [none] — display toggles (P2)
-- `app.toggle.diffwrap` (none) [none] — display toggles (P2)
-- `app.toggle.paste_summary` (none) [none] — display toggles (P2)
+- `app.toggle.paste_summary` (none) [none] — deviation: v2 compact-paste rendering needs composer paste spans; our draft is plain text
 - `docs.open` (none) [none]
 - `opencode.settings` (none) [none]
 - `server.pair` (none) [none]
@@ -34,22 +31,15 @@ Open surfaces (partial / none / blocked-host):
 - `terminal.close` (<leader>up) [none] — embedded terminal surface
 - `opencode.status` (<leader>s) [partial] — leader s status view — field parity unverified
 - `opencode.debug` (none) [none] — dev-facing
-- `session.move` (none) [none] — dialog-move-session
+- `session.move` (none) [blocked-host] — no workspace-move verb; dialog.move_session.* with it (0.6.24)
 - `open.menu` (ctrl+o) [none]
-- `session.share` (none) [none] — share/unshare
-- `queued_prompt.delete` (ctrl+d) [none]
-- `session.child.first` (down) [none] — child/parent navigation
-- `session.child.next` (right) [none] — child/parent navigation
-- `session.child.previous` (left) [none] — child/parent navigation
-- `session.parent` (up) [none] — child/parent navigation
+- `session.share` (none) [blocked-host] — no share verb in the zcode protocol (0.6.24)
+- `session.child.first` (down) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
+- `session.child.next` (right) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
+- `session.child.previous` (left) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
+- `session.parent` (up) [blocked-host] — same: no parent linkage in the protocol
 - `mcp.list` (none) [partial] — 0.6.23 /mcps list + status grammar; toggle and error-detail are host gaps (no mcp connect/disconnect verbs, no error payload)
 - `provider.connect` (none) [none]
-- `variant.cycle` (ctrl+t) [none]
-- `variant.list` (none) [none]
-- `session.message.next` (none) [partial] — user walking 0.6.18; all-message walking open
-- `session.message.previous` (none) [partial] — user walking 0.6.18; all-message walking open
-- `session.message.user.next` (none) [partial] — user walking 0.6.18; all-message walking open
-- `session.message.user.previous` (none) [partial] — user walking 0.6.18; all-message walking open
 - `session.undo` (<leader>u) [blocked-host] — needs session/revert in the app-server
 - `session.redo` (<leader>r) [blocked-host] — needs session/revert in the app-server
 - `prompt.submit` (none) [none]

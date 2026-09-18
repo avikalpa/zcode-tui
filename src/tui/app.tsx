@@ -281,7 +281,14 @@ function normalizeSession(value: Record<string, unknown>): SessionRow {
 // the model/effort voice. Writes are atomic (temp + rename), same as
 // writeJsonAtomic upstream.
 type ModelKey = { providerId: string; modelId: string };
-type UiState = { recent: ModelKey[]; favorite: ModelKey[]; variant: Record<string, string>; diff: DiffPreferences };
+type UiState = {
+  recent: ModelKey[];
+  favorite: ModelKey[];
+  variant: Record<string, string>;
+  diff: DiffPreferences;
+  animations: boolean;
+  fileContext: boolean;
+};
 const uiStatePath = `${process.env.HOME}/.config/zcode-tui/state.json`;
 function modelKey(model: ModelKey): string {
   return `${model.providerId}/${model.modelId}`;
@@ -310,9 +317,11 @@ function readUiState(): UiState {
         })
       : [];
     const diff: DiffPreferences = raw.diff && typeof raw.diff === "object" ? (raw.diff as DiffPreferences) : {};
-    return { recent, favorite, variant, diff };
+    const animations = typeof raw.animations === "boolean" ? raw.animations : true;
+    const fileContext = typeof raw.fileContext === "boolean" ? raw.fileContext : true;
+    return { recent, favorite, variant, diff, animations, fileContext };
   } catch {
-    return { recent: [], favorite: [], variant: {}, diff: {} };
+    return { recent: [], favorite: [], variant: {}, diff: {}, animations: true, fileContext: true };
   }
 }
 function writeUiState(next: UiState): void {
@@ -917,11 +926,6 @@ export function App({
     setCursorBoth(Math.max(0, Math.min(draftRef.current.length, cur + delta)));
   };
   const [typing, setTyping] = useState(true);
-  useEffect(() => {
-    if (!typing) return;
-    const timer = setInterval(() => setCursorBlink((b) => !b), 530);
-    return () => clearInterval(timer);
-  }, [typing]);
 
   // Transient status toast — the OpenCode toast overlay (top right, split
   // variant-tinted borders, single slot, 5s / 7s for errors).
@@ -1017,6 +1021,20 @@ export function App({
   // The UX-state store (opencode model.json pattern) — loaded once, saved on
   // every model/effort choice.
   const uiState = useRef<UiState>(readUiState());
+  // opencode app.toggle.* surfaces (0.6.24): animations (ours = the cursor
+  // blink — the only animation the TUI runs) and the @file context popup.
+  // Persisted in state.json; diff wrapping rides DiffPreferences.wrap.
+  const [animations, setAnimations] = useState(uiState.current.animations);
+  const [fileContext, setFileContext] = useState(uiState.current.fileContext);
+  useEffect(() => {
+    if (!typing || !animations) {
+      setCursorBlink(true);
+      return;
+    }
+    const timer = setInterval(() => setCursorBlink((b) => !b), 530);
+    return () => clearInterval(timer);
+  }, [typing, animations]);
+
   const rememberModel = (choice: ModelChoice) => {
     uiState.current.recent = recentModels({ providerId: choice.providerId, modelId: choice.modelId }, uiState.current.recent);
     writeUiState(uiState.current);
@@ -1192,7 +1210,7 @@ export function App({
   const sugMatches: SlashCommandSpec[] = slashToken !== null
     ? matchSlashCommands(slashToken)
     : [];
-  const fileMatches: string[] = atToken !== null
+  const fileMatches: string[] = atToken !== null && fileContext
     ? cwdFileMatches(atToken)
     : [];
   const sugOpen = (sugMatches.length > 0 || fileMatches.length > 0) && !sugDismissed.current;
@@ -1476,6 +1494,7 @@ export function App({
       if (command === "commands") { setDialog("palette"); return; }
       if (command === "skills") { setDialog("skills"); return; }
       if (command === "mcps") { setDialog("mcp"); return; }
+      if (command === "variants") { setDialog("effort"); return; }
       if (command === "help") { setDialog("help"); return; }
       if (command === "diff") { openDiff(); return; }
       if (command === "timeline") { openTimeline(); return; }
@@ -1551,6 +1570,38 @@ export function App({
   const persistDiffPrefs = (value: DiffPreferences) => {
     uiState.current.diff = { ...uiState.current.diff, ...value };
     writeUiState(uiState.current);
+  };
+
+  // opencode app.toggle.animations (0.6.24): the cursor blink is the TUI's
+  // one animation; disabling holds the cursor steady.
+  const toggleAnimations = () => {
+    const next = !animations;
+    setAnimations(next);
+    uiState.current.animations = next;
+    writeUiState(uiState.current);
+    flashStatus(next ? "animations enabled" : "animations disabled");
+  };
+
+  // opencode app.toggle.file_context (v2 config.prompt.editor): gates the
+  // @files popup.
+  const toggleFileContext = () => {
+    const next = !fileContext;
+    setFileContext(next);
+    uiState.current.fileContext = next;
+    writeUiState(uiState.current);
+    flashStatus(next ? "file context enabled" : "file context disabled");
+  };
+
+  // opencode app.toggle.diffwrap (v2 config.diffs.wrap word|none): the
+  // viewer owns the live state and persists through onPreferencesChange.
+  const toggleDiffWrap = () => {
+    const api = diffApiRef.current;
+    if (!api) {
+      flashStatus("no diff viewer open", "warning");
+      return;
+    }
+    api.toggleWrap();
+    flashStatus((uiState.current.diff.wrap ?? "char") === "char" ? "diff wrapping disabled" : "diff wrapping enabled");
   };
 
   // opencode v2 session.tab.select.N: leader 1..9/0 select the Nth OPEN
@@ -1642,26 +1693,31 @@ export function App({
   // opencode session.message.user.* + messages_last_user: jump between the
   // session's USER prompts (alt+up / alt+down walk, alt+end last). The
   // anchor is the last jumped-to row; jump-to-latest clears it.
-  const userJump = (dir: 1 | -1 | "last") => {
+  // opencode session.message.next/previous (+ user.*): the walk generalized
+  // to ALL messages (0.6.24) — the reference ships these as palette-only
+  // commands; ours keeps alt+end (last user message) from 0.6.18.
+  const messageJump = (dir: 1 | -1 | "last", usersOnly: boolean) => {
     const msgs = msgsRef.current;
-    const users: number[] = [];
-    msgs.forEach((m, i) => { if (m.role === "user") users.push(i); });
-    if (users.length === 0) return;
+    const rows: number[] = [];
+    msgs.forEach((m, i) => { if (!usersOnly || m.role === "user") rows.push(i); });
+    if (rows.length === 0) return;
     const at = userJumpIdxRef.current;
     let target: number;
-    if (dir === "last" || at === null) target = users[users.length - 1];
+    if (dir === "last" || at === null) target = rows[rows.length - 1];
     else if (dir === -1) {
-      const below = users.filter((u) => u < at);
-      target = below.length > 0 ? below[below.length - 1] : users[0];
+      const below = rows.filter((u) => u < at);
+      target = below.length > 0 ? below[below.length - 1] : rows[0];
     } else {
-      const above = users.filter((u) => u > at);
+      const above = rows.filter((u) => u > at);
       if (above.length === 0) { jumpToLatest(); userJumpIdxRef.current = null; syncAtBottom(); return; }
       target = above[0];
     }
     userJumpIdxRef.current = target;
     jumpToMessage(target);
-    flashStatus(`user message ${users.indexOf(target) + 1}/${users.length}`);
+    flashStatus(`${usersOnly ? "user message" : "message"} ${rows.indexOf(target) + 1}/${rows.length}`);
   };
+
+  const userJump = (dir: 1 | -1 | "last") => messageJump(dir, true);
 
   const jumpToMessage = (idx: number) => {
     const box = scrollRef.current as unknown as { getChildren?: () => unknown[]; viewport?: { y: number }; scrollBy?: (d: { y: number }) => void } | null;
@@ -2821,6 +2877,8 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["ctrl+x then 1-9 / 0", "select session tab"],
     ["/skills · /mcps", "insert a skill · MCP server status"],
     ["ctrl+p → stash", "stash · pop · list the draft"],
+    ["ctrl+p → toggles", "animations · file context · diff wrapping"],
+    ["ctrl+p → messages", "next / previous (user) message jump"],
   ];
   return (
     <ModalBackdrop C={C} width={width} height={height}>
@@ -2934,10 +2992,21 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
         theme={C}
         footerHints={[
           { key: "enter", label: "remove" },
+          { key: "ctrl+d", label: "delete" },
           { key: "esc", label: "close" },
         ]}
         onSelect={(i) => {
           const next = queue.filter((_, j) => j !== i);
+          queueRef.current = next;
+          setQueue(next);
+          if (next.length === 0) closeDialog();
+        }}
+        onAction={(action, option) => {
+          // queued_prompt.delete (v2 ctrl+d). v2's enter=steer needs a
+          // mid-turn injection verb the zcode protocol lacks (-32010 on
+          // send-while-running) — recorded host gap; enter stays remove.
+          if (action !== "delete" || !option) return;
+          const next = queue.filter((_, j) => j !== option.value);
           queueRef.current = next;
           setQueue(next);
           if (next.length === 0) closeDialog();
@@ -3101,6 +3170,13 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "stash-list", label: "stash list…", description: "restore or delete stashed drafts", value: () => { setStashArm(undefined); setDialog("stash"); } },
       { id: "skills", label: "skills…", description: "insert a skill mention · /skills", value: () => setDialog("skills") },
       { id: "mcp", label: "MCP servers", description: "connection status · /mcps", value: () => setDialog("mcp") },
+      { id: "msg-next", label: "next message", description: "jump the transcript · v2 session.message.next", value: () => messageJump(1, false) },
+      { id: "msg-prev", label: "previous message", value: () => messageJump(-1, false) },
+      { id: "msg-user-next", label: "next user message", value: () => messageJump(1, true) },
+      { id: "msg-user-prev", label: "previous user message", value: () => messageJump(-1, true) },
+      { id: "toggle-animations", label: animations ? "disable animations" : "enable animations", description: "cursor blink · v2 app.toggle.animations", value: toggleAnimations },
+      { id: "toggle-file-context", label: fileContext ? "disable file context" : "enable file context", description: "the @files popup", value: toggleFileContext },
+      { id: "toggle-diffwrap", label: (uiState.current.diff.wrap ?? "char") === "char" ? "disable diff wrapping" : "enable diff wrapping", description: "in the diff viewer", value: toggleDiffWrap },
       { id: "themes", label: "themes…", description: "the full OpenCode palette set", value: () => openThemes() },
       { id: "sidebar", label: "toggle sidebar", description: "leader b", value: () => { if (view === "session") setSidebarOpen((s) => !s); } },
       { id: "refresh", label: "refresh sessions", value: () => void refresh() },

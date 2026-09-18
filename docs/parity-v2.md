@@ -137,6 +137,18 @@ ports AROUND the logo, never over it).
    markdown SyntaxStyle (the tree-sitter filetype→language map was not
    ported, so per-language highlight fidelity may differ).
 
+## Harness law (0.6.24 correction)
+
+pty-proof stages that open dialogs (palette/slash flows) must NOT run
+between the D-series' sessions-dialog reopen and the C-series'
+enter-to-open — a staged dialog closes that dialog, the C-series enter then
+hits the composer, and every downstream session stage fails. The 0.6.23
+sitting mis-read exactly this as "environmental" (its control run shared
+the same broken harness — circular evidence). The S/K/M + V/TG block now
+lives after the session flow, just before kill(pid), where the whole
+battery ran green (0.6.24). LAW: a control run only controls the BINARY
+when both runs share the harness VERSION.
+
 ## Remaining (v2.0.6 → us)
 
 - ~~diff.* family (19 binds)~~ SHIPPED 0.6.20 (the last-turn SOURCE stays
@@ -146,8 +158,10 @@ ports AROUND the logo, never over it).
   springs/marquee/shimmer — are opentui-stack-bound), mouse drag reorder
   and the " + " add button are mouse-only upstream (no mouse plane here);
   ctrl+shift+t delivery is terminal-dependent.
-- **session.message.next/previous** (binds "none" — palette commands;
-  user-message walking shipped 0.6.18, all-message walking still open).
+- ~~**session.message.next/previous**~~ SHIPPED 0.6.24 — the walk
+  generalized to all messages (`messageJump`), shipped as the four palette
+  commands the reference uses (they are palette-only upstream too);
+  alt+end last-user kept from 0.6.18.
 - **messages.copy (extended)** — copy selected/all messages (we copy the
   last assistant message only).
 - ~~**stash family** — prompt_stash/pop/list + stash.delete dialog~~ SHIPPED
@@ -170,10 +184,19 @@ ports AROUND the logo, never over it).
   carries no error text (the enter-to-error detail view has no data
   source). skills/referenceCatalog measured live same sitting:
   {authority, skills:[{id,name,description,path,scope,enabled}]}.
-- **session.ops deep** — share/unshare, session.move (dialog-move-session),
-  child/parent navigation (session.child.first/next/previous, session.parent).
-- **display toggles (P2)** — thinking visibility toggle, timestamps,
-  diffwrap, paste_summary, file_context, scrollbar, exploration_grouping.
+- **session.ops deep** — BLOCKED-ON-HOST (measured 0.6.24): session/list
+  carries no parentSessionId (child/parent navigation has no data source),
+  and the protocol has no share or workspace-move verbs
+  (dialog.move_session.* with it). queued_prompt.delete SHIPPED 0.6.24
+  (ctrl+d in the queue dialog; v2's enter=steer needs a mid-turn injection
+  verb the protocol lacks — `-32010` on send-while-running — so our
+  enter=remove stays).
+- ~~**display toggles** (the v2.0.7 app.toggle.* surface)~~ SHIPPED 0.6.24:
+  animations (ours = the cursor blink, the TUI's one animation),
+  file_context (gates the @files popup), diffwrap (PatchDiff wrapMode
+  char|none via DiffPreferences.wrap) — all persisted in state.json.
+  paste_summary is a DEVIATION, not a port: v2 renders compact paste
+  summaries through composer paste spans; our draft is plain text.
 - **theme mode** — light/dark switch + mode lock (we ship the dark arms).
 - **panes + embedded terminal** — pane.focus.left/right, terminal.select/
   toggle/close, composer.terminal.*, dialog-shell-output. New v2 surface.

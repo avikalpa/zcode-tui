@@ -187,85 +187,6 @@ else:
                 "D4 escape closes the dialog"):
         check(pid, lbl, False)
 
-# ---- S/K/M-series: the stash family, skills selector, MCP list (v2 ports) ----
-# The stash store is exercised from EMPTY so the proof cannot see or leave
-# the owner's real stashed drafts; S0-S4 are deterministic (no backend).
-# K/M need the live catalog (workspace-scoped methods), hence the alive guard.
-try:
-    os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
-except FileNotFoundError:
-    pass
-
-def _palette_run(filter_text):
-    os.write(master, b"\x10")                            # ctrl+p: palette
-    read_for(master, stream, 0.8)
-    for ch in filter_text:
-        os.write(master, ch.encode()); time.sleep(0.04)
-    read_for(master, stream, 0.6)
-    os.write(master, b"\r")
-    read_for(master, stream, 1.0)
-
-if alive(pid):
-    os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear any draft
-    os.write(master, b"STASH-PROOF-DRAFT-1")
-    read_for(master, stream, 0.8)
-    _palette_run("stash prompt")
-    s0 = "\n".join(screen.display)
-    check(pid, "S0 stash prompt parks the draft (composer empties)", "STASH-PROOF-DRAFT-1" not in s0 and "Ask anything" in s0)
-
-    _palette_run("stash list")
-    s1 = "\n".join(screen.display)
-    check(pid, "S1 stash list dialog shows the preview + age", "Stash" in s1 and "STASH-PROOF-DRAFT-1" in s1 and "just now" in s1)
-
-    os.write(master, b"\r"); read_for(master, stream, 1.0)   # enter: restore (take)
-    s2 = "\n".join(screen.display)
-    check(pid, "S2 restore returns the draft to the composer", "STASH-PROOF-DRAFT-1" in s2 and "Search" not in s2)
-
-    _palette_run("stash prompt")                              # stash it again for the delete proof
-    _palette_run("stash list")
-    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: arm delete
-    s3 = "\n".join(screen.display)
-    check(pid, "S3 two-stroke delete arms with the confirm label", "Press ctrl+d again to confirm" in s3)
-    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: delete
-    s4 = "\n".join(screen.display)
-    check(pid, "S4 second ctrl+d empties the stash list", "No matching items" in s4)
-    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
-    try:
-        os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
-    except FileNotFoundError:
-        pass
-else:
-    for lbl in ("S0 stash prompt parks the draft (composer empties)",
-                "S1 stash list dialog shows the preview + age",
-                "S2 restore returns the draft to the composer",
-                "S3 two-stroke delete arms with the confirm label",
-                "S4 second ctrl+d empties the stash list"):
-        check(pid, lbl, False)
-
-if alive(pid):
-    os.write(master, b"/skills\r"); read_for(master, stream, 1.5)
-    k0 = False
-    for _ in range(12):                                        # poll: catalog fetch under load
-        read_for(master, stream, 0.8)
-        if "autoplan" in "\n".join(screen.display):
-            k0 = True
-            break
-    check(pid, "K0 /skills opens the Skills dialog", "Skills" in "\n".join(screen.display) and "Search" in "\n".join(screen.display))
-    check(pid, "K1 catalog rows render (a user skill is listed)", k0)
-    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
-else:
-    check(pid, "K0 /skills opens the Skills dialog", False)
-    check(pid, "K1 catalog rows render (a user skill is listed)", False)
-
-if alive(pid):
-    os.write(master, b"/mcps\r"); read_for(master, stream, 3.0)
-    m0 = "\n".join(screen.display)
-    check(pid, "M0 /mcps opens the MCP servers dialog", "MCP servers" in m0)
-    check(pid, "M1 status grammar renders", "Connected \u2713" in m0 or "Connecting \u2026" in m0)
-    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
-else:
-    check(pid, "M0 /mcps opens the MCP servers dialog", False)
-    check(pid, "M1 status grammar renders", False)
 
 if b0 and alive(pid):
     os.write(master, b"\r"); read_for(master, stream, 5.5)   # let open() settle fully
@@ -279,6 +200,44 @@ if b0 and alive(pid):
             c0 = True
             break
     check(pid, "C0 typing after open() paints — THE bug", c0)
+
+    # W-series: the message walk (v2 session.message.* palette commands; the
+    # session opened by C-1 carries a real turn).
+    os.write(master, b"\x10"); read_for(master, stream, 0.8)
+    for ch in "previous user message":
+        os.write(master, ch.encode()); time.sleep(0.03)
+    read_for(master, stream, 0.5)
+    os.write(master, b"\r")
+    w0 = False
+    for _ in range(6):                                         # poll: toast paint
+        read_for(master, stream, 0.6)
+        if "user message" in "\n".join(screen.display):
+            w0 = True
+            break
+    if not w0:
+        print("---- W0 FAIL SCREEN ----")
+        for i, line in enumerate(screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    check(pid, "W0 previous-user-message jump reports the walk", w0)
+    os.write(master, b"\x10"); read_for(master, stream, 0.8)
+    for ch in "next message":
+        os.write(master, ch.encode()); time.sleep(0.03)
+    read_for(master, stream, 0.5)
+    os.write(master, b"\r")
+    w1 = False
+    for _ in range(6):                                         # poll: toast paint
+        read_for(master, stream, 0.6)
+        d = "\n".join(screen.display)
+        if "message " in d and "user message" not in d:
+            w1 = True
+            break
+    if not w1:
+        print("---- W1 FAIL SCREEN ----")
+        for i, line in enumerate(screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    check(pid, "W1 next-message jump reports the walk", w1)
     os.write(master, b"\x03"); time.sleep(0.3)
 
     # G-series: input editing grammar (screen truth)
@@ -433,6 +392,140 @@ else:
     for lbl in ("S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
         check(pid, lbl, False)
 
+# ---- S/K/M-series: the stash family, skills selector, MCP list (v2 ports) ----
+# The stash store is exercised from EMPTY so the proof cannot see or leave
+# the owner's real stashed drafts; S0-S4 are deterministic (no backend).
+# K/M need the live catalog (workspace-scoped methods), hence the alive guard.
+try:
+    os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
+except FileNotFoundError:
+    pass
+
+def _palette_run(filter_text):
+    os.write(master, b"\x10")                            # ctrl+p: palette
+    read_for(master, stream, 0.8)
+    for ch in filter_text:
+        os.write(master, ch.encode()); time.sleep(0.04)
+    read_for(master, stream, 0.6)
+    os.write(master, b"\r")
+    read_for(master, stream, 1.0)
+
+if alive(pid):
+    os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear any draft
+    os.write(master, b"STASH-PROOF-DRAFT-1")
+    read_for(master, stream, 0.8)
+    _palette_run("stash prompt")
+    s0 = "\n".join(screen.display)
+    check(pid, "S0 stash prompt parks the draft (composer empties)", "STASH-PROOF-DRAFT-1" not in s0 and "Ask anything" in s0)
+
+    _palette_run("stash list")
+    s1 = "\n".join(screen.display)
+    check(pid, "S1 stash list dialog shows the preview + age", "Stash" in s1 and "STASH-PROOF-DRAFT-1" in s1 and "just now" in s1)
+
+    os.write(master, b"\r"); read_for(master, stream, 1.0)   # enter: restore (take)
+    s2 = "\n".join(screen.display)
+    check(pid, "S2 restore returns the draft to the composer", "STASH-PROOF-DRAFT-1" in s2 and "Search" not in s2)
+
+    _palette_run("stash prompt")                              # stash it again for the delete proof
+    _palette_run("stash list")
+    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: arm delete
+    s3 = "\n".join(screen.display)
+    check(pid, "S3 two-stroke delete arms with the confirm label", "Press ctrl+d again to confirm" in s3)
+    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: delete
+    s4 = "\n".join(screen.display)
+    check(pid, "S4 second ctrl+d empties the stash list", "No matching items" in s4)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+    try:
+        os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
+    except FileNotFoundError:
+        pass
+else:
+    for lbl in ("S0 stash prompt parks the draft (composer empties)",
+                "S1 stash list dialog shows the preview + age",
+                "S2 restore returns the draft to the composer",
+                "S3 two-stroke delete arms with the confirm label",
+                "S4 second ctrl+d empties the stash list"):
+        check(pid, lbl, False)
+
+if alive(pid):
+    os.write(master, b"/skills\r"); read_for(master, stream, 1.5)
+    k0 = False
+    for _ in range(12):                                        # poll: catalog fetch under load
+        read_for(master, stream, 0.8)
+        if "autoplan" in "\n".join(screen.display):
+            k0 = True
+            break
+    check(pid, "K0 /skills opens the Skills dialog", "Skills" in "\n".join(screen.display) and "Search" in "\n".join(screen.display))
+    check(pid, "K1 catalog rows render (a user skill is listed)", k0)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+else:
+    check(pid, "K0 /skills opens the Skills dialog", False)
+    check(pid, "K1 catalog rows render (a user skill is listed)", False)
+
+if alive(pid):
+    os.write(master, b"/mcps\r"); read_for(master, stream, 3.0)
+    m0 = "\n".join(screen.display)
+    check(pid, "M0 /mcps opens the MCP servers dialog", "MCP servers" in m0)
+    check(pid, "M1 status grammar renders", "Connected \u2713" in m0 or "Connecting \u2026" in m0)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+else:
+    check(pid, "M0 /mcps opens the MCP servers dialog", False)
+    check(pid, "M1 status grammar renders", False)
+
+# ---- V/TG-series: /variants alias + the file-context toggle (v2 ports). ----
+# The toggles persist into the real state.json, so the pre-toggle bytes are
+# captured and restored after the series.
+st_file = os.path.expanduser("~/.config/zcode-tui/state.json")
+st_backup = None
+try:
+    st_backup = open(st_file, "rb").read()
+except FileNotFoundError:
+    pass
+
+if alive(pid):
+    os.write(master, b"/variants\r"); read_for(master, stream, 1.5)
+    v0 = "\n".join(screen.display)
+    check(pid, "V0 /variants opens the effort dialog (v2 slash alias)", "Reasoning effort" in v0)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+
+    os.write(master, b"\x03"); time.sleep(0.3)           # clear draft
+    os.write(master, b"@"); read_for(master, stream, 1.0)
+    tg0 = "\n".join(screen.display)
+    check(pid, "TG0 @ pops the file-context rows", "base.txt" in tg0)
+    os.write(master, b"\x03"); time.sleep(0.3)
+
+    os.write(master, b"\x10"); read_for(master, stream, 0.8)   # ctrl+p
+    for ch in "disable file context":
+        os.write(master, ch.encode()); time.sleep(0.03)
+    read_for(master, stream, 0.5)
+    os.write(master, b"\r"); read_for(master, stream, 1.0)
+    os.write(master, b"@"); read_for(master, stream, 1.0)
+    tg1 = "\n".join(screen.display)
+    check(pid, "TG1 file context off suppresses the @ popup", "base.txt" not in tg1)
+    os.write(master, b"\x03"); time.sleep(0.3)
+
+    os.write(master, b"\x10"); read_for(master, stream, 0.8)
+    for ch in "enable file context":
+        os.write(master, ch.encode()); time.sleep(0.03)
+    read_for(master, stream, 0.5)
+    os.write(master, b"\r"); read_for(master, stream, 1.0)
+    os.write(master, b"@"); read_for(master, stream, 1.0)
+    tg2 = "\n".join(screen.display)
+    check(pid, "TG2 re-enabling restores the @ popup", "base.txt" in tg2)
+    os.write(master, b"\x03"); time.sleep(0.3)
+
+    if st_backup is not None:
+        open(st_file, "wb").write(st_backup)
+    else:
+        try:
+            os.remove(st_file)
+        except FileNotFoundError:
+            pass
+else:
+    check(pid, "V0 /variants opens the effort dialog (v2 slash alias)", False)
+    check(pid, "TG0 @ pops the file-context rows", False)
+    check(pid, "TG1 file context off suppresses the @ popup", False)
+    check(pid, "TG2 re-enabling restores the @ popup", False)
 kill(pid)
 
 # ---- boot 2: persisted effort advertised ----

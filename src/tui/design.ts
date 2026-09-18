@@ -210,6 +210,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "skills", aliases: [], description: "insert a skill mention" },
   { name: "mcps", aliases: ["mcp"], description: "MCP server status" },
   { name: "effort", aliases: [], description: "choose reasoning effort · low high max" },
+  { name: "variants", aliases: ["thinking", "effort"], description: "switch model variant" },
   { name: "thinking", aliases: [], description: "toggle thinking" },
   { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
   { name: "compact", aliases: [], description: "compact the session context" },
@@ -230,6 +231,7 @@ export type SlashCommand =
   | "diff"
   | "skills"
   | "mcps"
+  | "variants"
   | null;
 
 export function parseSlashCommand(input: string): SlashCommand {
