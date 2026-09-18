@@ -350,7 +350,7 @@ export function Prompt(props: PromptProps) {
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    input.cursorColor = disabled() ? theme.background.surface.offset : theme.text.default
+    input.cursorColor = disabled() ? theme.background.raised.base : theme.text.default
     if (config.cursor) input.cursorStyle = config.cursor
   })
 
@@ -1114,7 +1114,17 @@ export function Prompt(props: PromptProps) {
     if (!trimmed && (!props.sessionID || store.mode === "shell" || delivery === "queue"))
       return delivery === "steer" ? (await props.onEmptySubmit?.()) === true : false
     const exitWord = trimmed === "exit" || trimmed === "quit" || trimmed === ":q"
-    const slash = argumentSlash(store.prompt.text, keymapCommands())
+    const inputText = expandTrackedPastedText(
+      store.prompt.text,
+      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+        const ref = store.extmarkToPart.get(extmark.id)
+        if (ref?.type !== "pasted") return []
+        const part = store.prompt.pasted[ref.index]
+        if (!part) return []
+        return [{ start: extmark.start, end: extmark.end, text: part.text }]
+      }),
+    )
+    const slash = argumentSlash(inputText, keymapCommands())
     if (delivery === "queue" && (store.mode === "shell" || exitWord || slash)) {
       toast.show({ message: "This prompt cannot be queued", variant: "warning" })
       return false
@@ -1128,16 +1138,6 @@ export function Prompt(props: PromptProps) {
       await slash.command.run(slash.input)
       return true
     }
-    const inputText = expandTrackedPastedText(
-      store.prompt.text,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const ref = store.extmarkToPart.get(extmark.id)
-        if (ref?.type !== "pasted") return []
-        const part = store.prompt.pasted[ref.index]
-        if (!part) return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
     const slashHead = parseSlashHead(inputText, /\s/)
     const isCommand =
       slashHead !== undefined &&
@@ -1642,7 +1642,7 @@ export function Prompt(props: PromptProps) {
   })
   const maxHeight = createMemo(() => Math.max(6, Math.floor(dimensions().height / 3)))
 
-  const promptBg = createMemo(() => theme.raise(theme.background.surface.offset))
+  const promptBg = createMemo(() => theme.raise(theme.background.raised.base))
 
   return (
     <>
@@ -1799,7 +1799,7 @@ export function Prompt(props: PromptProps) {
                 setTimeout(() => {
                   // setTimeout is a workaround and needs to be addressed properly
                   if (!input || input.isDestroyed) return
-                  input.cursorColor = disabled() ? theme.background.surface.offset : theme.text.default
+                  input.cursorColor = disabled() ? theme.background.raised.base : theme.text.default
                   if (config.cursor) input.cursorStyle = config.cursor
                 }, 0)
               }}
@@ -1818,7 +1818,7 @@ export function Prompt(props: PromptProps) {
                 r.stopPropagation()
               }}
               focusedBackgroundColor="transparent"
-              cursorColor={disabled() ? theme.background.surface.offset : theme.text.default}
+              cursorColor={disabled() ? theme.background.raised.base : theme.text.default}
               syntaxStyle={syntax()}
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">

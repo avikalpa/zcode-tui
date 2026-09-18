@@ -19,8 +19,8 @@
 // plane (right-click file menu + hover states omitted), no renderer
 // lifecycle passes (the dynamically-tinted top edge renders static context
 // colour and the file header does not float while scrolling), rAF becomes
-// setTimeout, reviewed cards tint to the panel step (no surface.overlay
-// token in the 33-theme port).
+// setTimeout, reviewed cards tint to the panel step (no surface.overlay —
+// raised.high since the v2.0.8 rename — token in the 33-theme port).
 
 import { TextAttributes, type BoxRenderable, type ScrollBoxRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";

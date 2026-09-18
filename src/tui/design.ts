@@ -137,18 +137,21 @@ export function formatContextLabel(used: number, window: number): string {
 
 // The per-turn footer under a completed assistant message. The head carries
 // the mode word (rendered in the mode accent), the rest rides muted:
-// head `Build`, rest `GLM-5.3-Flash · 4.2s · 19.8 tok/s`.
+// head `Build`, rest `GLM-5.3-Flash · 4.2s · 19.8 tok/s`. The throughput
+// numerator counts output + reasoning tokens (v2.0.8, upstream rows.ts).
 export function formatTurnFooter(
   mode: string,
   model: string | undefined,
   durationMs: number | undefined,
   outputTokens: number | undefined,
+  reasoningTokens?: number,
 ): { head: string; rest: string } {
   const parts: string[] = [];
   const seconds = durationMs && durationMs > 0 ? durationMs / 1000 : undefined;
   if (seconds !== undefined) parts.push(`${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`);
-  if (outputTokens !== undefined && outputTokens > 0 && seconds !== undefined && seconds > 0) {
-    parts.push(`${(outputTokens / seconds).toFixed(1)} tok/s`);
+  const generated = (outputTokens ?? 0) + (reasoningTokens ?? 0);
+  if (generated > 0 && seconds !== undefined && seconds > 0) {
+    parts.push(`${(generated / seconds).toFixed(1)} tok/s`);
   }
   const tail = [model, ...parts].filter(Boolean).join(" · ");
   return { head: modeLabel(mode).label, rest: tail };

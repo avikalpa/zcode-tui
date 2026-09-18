@@ -1,16 +1,16 @@
 # Parity keybind coverage (GENERATED — do not edit by hand)
 
-Upstream reference: **v2.0.7** — 240 keybind definitions
+Upstream reference: **v2.0.8** — 241 keybind definitions
 (packages/tui/src/config/keybind.ts). Classes from
 tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 
 | class | binds |
 |---|---|
-| blocked-host | 9 |
-| covered | 145 |
+| blocked-host | 14 |
+| covered | 165 |
 | law | 7 |
-| none | 77 |
-| partial | 2 |
+| none | 54 |
+| partial | 1 |
 
 Open surfaces (partial / none / blocked-host):
 
@@ -18,22 +18,20 @@ Open surfaces (partial / none / blocked-host):
 - `app.console` (none) [none] — dev-facing
 - `app.scrap` (none) [none] — dev-facing
 - `app.toggle.paste_summary` (none) [none] — deviation: v2 compact-paste rendering needs composer paste spans; our draft is plain text
-- `docs.open` (none) [none]
-- `opencode.settings` (none) [none]
-- `server.pair` (none) [none]
-- `service.restart` (none) [none]
-- `location.reload` (none) [none]
-- `prompt.editor` (<leader>e) [none]
+- `docs.open` (none) [blocked-host] — opens an external browser
+- `server.pair` (none) [blocked-host] — desktop-shell verb
+- `service.restart` (none) [blocked-host] — desktop-shell verb
+- `location.reload` (none) [blocked-host] — desktop-shell verb
 - `pane.focus.left` (<leader>left) [none] — panes surface
 - `pane.focus.right` (<leader>right) [none] — panes surface
 - `terminal.select` (<leader>down) [none] — embedded terminal surface
 - `terminal.toggle` (<leader>t) [none] — embedded terminal surface
 - `terminal.close` (<leader>up) [none] — embedded terminal surface
-- `opencode.status` (<leader>s) [partial] — leader s status view — field parity unverified
 - `opencode.debug` (none) [none] — dev-facing
 - `session.move` (none) [blocked-host] — no workspace-move verb; dialog.move_session.* with it (0.6.24)
 - `open.menu` (ctrl+o) [none]
 - `session.share` (none) [blocked-host] — no share verb in the zcode protocol (0.6.24)
+- `session.aside` (none) [blocked-host] — v2.0.8 /btw side question — rides a one-shot session.generate (no tool loop); zcode has workspace/generateText only. Filed with the host 0.6.29.
 - `session.child.first` (down) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
 - `session.child.next` (right) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
 - `session.child.previous` (left) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
@@ -42,13 +40,8 @@ Open surfaces (partial / none / blocked-host):
 - `provider.connect` (none) [none]
 - `session.undo` (<leader>u) [blocked-host] — needs session/revert in the app-server
 - `session.redo` (<leader>r) [blocked-host] — needs session/revert in the app-server
-- `prompt.submit` (none) [none]
-- `prompt.queue` (<leader>return) [none]
-- `prompt.editor_context.clear` (none) [none]
-- `prompt.images.view` (<leader>i) [none] — image preview
-- `prompt.clear` (ctrl+c) [none]
-- `prompt.history.previous` (up) [none]
-- `prompt.history.next` (down) [none]
+- `prompt.editor_context.clear` (none) [none] — n/a to the plain-text draft
+- `prompt.images.view` (<leader>i) [none] — no attachments plane in this TUI
 - `composer.subagent.up` (up) [none] — subagent prompt switcher
 - `composer.subagent.down` (down) [none] — subagent prompt switcher
 - `composer.subagent.select` (return) [none] — subagent prompt switcher
@@ -60,13 +53,6 @@ Open surfaces (partial / none / blocked-host):
 - `composer.terminal.up` (up,k) [none] — embedded terminal
 - `composer.terminal.down` (down,j) [none] — embedded terminal
 - `composer.terminal.select` (return) [none] — embedded terminal
-- `dialog.select.prev` (up,ctrl+p) [none]
-- `dialog.select.next` (down,ctrl+n) [none]
-- `dialog.select.page_up` (pageup) [none]
-- `dialog.select.page_down` (pagedown) [none]
-- `dialog.select.home` (home) [none]
-- `dialog.select.end` (end) [none]
-- `dialog.select.submit` (return) [none]
 - `dialog.prompt.submit` (return) [none]
 - `dialog.integration.rename` (ctrl+r) [none]
 - `dialog.integration.delete` (ctrl+d) [none]
@@ -75,11 +61,6 @@ Open surfaces (partial / none / blocked-host):
 - `dialog.move_session.move` (ctrl+m) [none]
 - `dialog.move_session.delete` (ctrl+d) [none]
 - `dialog.move_session.refresh` (ctrl+r) [none]
-- `prompt.autocomplete.prev` (up,ctrl+p) [none]
-- `prompt.autocomplete.next` (down,ctrl+n) [none]
-- `prompt.autocomplete.hide` (escape) [none]
-- `prompt.autocomplete.select` (return) [none]
-- `prompt.autocomplete.complete` (tab) [none]
 - `permission.prompt.fullscreen` (ctrl+f) [none] — fullscreen permission prompt
 - `plugins.toggle` (return) [none]
 - `dialog.mcp.toggle` (space) [blocked-host] — zcode protocol has no mcp connect/disconnect verbs (0.6.23 finding)

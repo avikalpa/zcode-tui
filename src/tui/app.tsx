@@ -36,6 +36,7 @@ import {
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
 import { DiffViewer, diffSourceLabel, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
 import { ToolPart } from "./session/tool-parts";
+import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
 import {
   closeSessionTab,
@@ -50,7 +51,7 @@ import {
 } from "./session/session-tabs-model";
 import { getRelativeTime, getStashPreview, promptStash, type StashEntry } from "./session/prompt-stash";
 import { listBranches, type DiffMode } from "./diff/git";
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import pkgJson from "../../package.json";
 
@@ -195,6 +196,9 @@ export interface TurnMessage {
   turnStart?: number;
   durationMs?: number;
   outputTokens?: number;
+  // v2.0.8 counts reasoning tokens in the throughput numerator (upstream
+  // rows.ts); our payload takes the field when one ever carries it.
+  reasoningTokens?: number;
   // Reasoning is collapsed once the turn completes; the streaming tail shows
   // it live until then.
   thinking?: string;
@@ -275,78 +279,12 @@ function normalizeSession(value: Record<string, unknown>): SessionRow {
   };
 }
 
-// The UX-state store, copied from the OpenCode reference (packages/tui
-// context/local.tsx model.json): recent models (most recent first, capped at
-// 10) and the reasoning variant (effort) keyed per provider/model survive
-// restarts. Theme and pinned sessions keep their dedicated files; this file is
-// the model/effort voice. Writes are atomic (temp + rename), same as
-// writeJsonAtomic upstream.
-type ModelKey = { providerId: string; modelId: string };
-type UiState = {
-  recent: ModelKey[];
-  favorite: ModelKey[];
-  variant: Record<string, string>;
-  diff: DiffPreferences;
-  animations: boolean;
-  fileContext: boolean;
-};
+// The UX-state store rides the v2.0.8 preference repository (see
+// ./session/model-preference): recent/favorite/variant survive restarts and
+// now sync live across concurrent zcode-tui processes. Theme and pinned
+// sessions keep their dedicated files; state.json is the model/effort voice.
 const uiStatePath = `${process.env.HOME}/.config/zcode-tui/state.json`;
-function modelKey(model: ModelKey): string {
-  return `${model.providerId}/${model.modelId}`;
-}
-function readUiState(): UiState {
-  try {
-    const raw = JSON.parse(readFileSync(uiStatePath, "utf8")) as Record<string, unknown>;
-    const recent: ModelKey[] = Array.isArray(raw.recent)
-      ? raw.recent.filter((x): x is ModelKey => {
-          if (!x || typeof x !== "object") return false;
-          const m = x as Record<string, unknown>;
-          return typeof m.providerId === "string" && typeof m.modelId === "string";
-        })
-      : [];
-    const variant: Record<string, string> = {};
-    if (raw.variant && typeof raw.variant === "object") {
-      for (const [k, v] of Object.entries(raw.variant as Record<string, unknown>)) {
-        if (typeof v === "string") variant[k] = v;
-      }
-    }
-    const favorite: ModelKey[] = Array.isArray(raw.favorite)
-      ? raw.favorite.filter((x): x is ModelKey => {
-          if (!x || typeof x !== "object") return false;
-          const m = x as Record<string, unknown>;
-          return typeof m.providerId === "string" && typeof m.modelId === "string";
-        })
-      : [];
-    const diff: DiffPreferences = raw.diff && typeof raw.diff === "object" ? (raw.diff as DiffPreferences) : {};
-    const animations = typeof raw.animations === "boolean" ? raw.animations : true;
-    const fileContext = typeof raw.fileContext === "boolean" ? raw.fileContext : true;
-    return { recent, favorite, variant, diff, animations, fileContext };
-  } catch {
-    return { recent: [], favorite: [], variant: {}, diff: {}, animations: true, fileContext: true };
-  }
-}
-function writeUiState(next: UiState): void {
-  try {
-    mkdirSync(`${process.env.HOME}/.config/zcode-tui`, { recursive: true });
-    const temporary = `${uiStatePath}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify(next));
-    renameSync(temporary, uiStatePath);
-  } catch {
-    /* best effort — a dead state file must never take the TUI down */
-  }
-}
-function recentModels(model: ModelKey, recent: ModelKey[]): ModelKey[] {
-  const seen = new Set<string>();
-  return [model, ...recent]
-    .filter((item) => {
-      const key = modelKey(item);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 10)
-    .map((item) => ({ providerId: item.providerId, modelId: item.modelId }));
-}
+const uiStateRepository = createModelPreferenceRepository(uiStatePath);
 // Word-motion helpers for the input editing grammar (opencode input_*):
 // a word is a run of non-whitespace; motions skip the whitespace gap first.
 function wordBackward(text: string, pos: number): number {
@@ -549,7 +487,7 @@ const MessageView = memo(function MessageView({
 
   const streaming = running && isTail;
   const footer = m.durationMs !== undefined && !streaming
-    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens)
+    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens)
     : null;
   return (
     <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
@@ -1089,8 +1027,21 @@ export function App({
     modelsRef.current = models;
   }, [models]);
   // The UX-state store (opencode model.json pattern) — loaded once, saved on
-  // every model/effort choice.
-  const uiState = useRef<UiState>(readUiState());
+  // every model/effort choice through the v2.0.8 repository (lock-merged
+  // writes + live cross-client subscribe).
+  const uiState = useRef<UiState>(uiStateRepository.load());
+  const [, setUiSyncTick] = useState(0);
+  // v2.0.8 client-sync port (upstream #49611): a state.json write from
+  // ANOTHER zcode-tui process surfaces here live; our own write re-reads the
+  // same content and costs one no-op re-render.
+  useEffect(
+    () =>
+      uiStateRepository.subscribe((next) => {
+        uiState.current = next;
+        setUiSyncTick((t) => t + 1);
+      }),
+    [],
+  );
   // opencode app.toggle.* surfaces (0.6.24): animations (ours = the cursor
   // blink — the only animation the TUI runs) and the @file context popup.
   // Persisted in state.json; diff wrapping rides DiffPreferences.wrap.
@@ -1130,16 +1081,12 @@ export function App({
   }, [typing, animations]);
 
   const rememberModel = (choice: ModelChoice) => {
-    uiState.current.recent = recentModels({ providerId: choice.providerId, modelId: choice.modelId }, uiState.current.recent);
-    writeUiState(uiState.current);
+    uiState.current = uiStateRepository.addRecent({ providerId: choice.providerId, modelId: choice.modelId });
   };
   const toggleFavoriteModel = (choice: ModelChoice) => {
     const key = modelKey(choice);
     const isFav = uiState.current.favorite.some((f) => modelKey(f) === key);
-    uiState.current.favorite = isFav
-      ? uiState.current.favorite.filter((f) => modelKey(f) !== key)
-      : [{ providerId: choice.providerId, modelId: choice.modelId }, ...uiState.current.favorite];
-    writeUiState(uiState.current);
+    uiState.current = uiStateRepository.setFavorite(choice, !isFav);
     flashStatus(`${isFav ? "unfavorited" : "favorited"} ${modelLabel(choice)}`);
   };
   // opencode model_cycle_recent: f2 / shift+f2 walk the recent list.
@@ -1662,8 +1609,7 @@ export function App({
     setTyping(false);
   };
   const persistDiffPrefs = (value: DiffPreferences) => {
-    uiState.current.diff = { ...uiState.current.diff, ...value };
-    writeUiState(uiState.current);
+    uiState.current = uiStateRepository.update((cur) => ({ diff: { ...cur.diff, ...value } }));
   };
 
   // opencode app.toggle.animations (0.6.24): the cursor blink is the TUI's
@@ -1671,8 +1617,7 @@ export function App({
   const toggleAnimations = () => {
     const next = !animations;
     setAnimations(next);
-    uiState.current.animations = next;
-    writeUiState(uiState.current);
+    uiState.current = uiStateRepository.update(() => ({ animations: next }));
     flashStatus(next ? "animations enabled" : "animations disabled");
   };
 
@@ -1681,8 +1626,7 @@ export function App({
   const toggleFileContext = () => {
     const next = !fileContext;
     setFileContext(next);
-    uiState.current.fileContext = next;
-    writeUiState(uiState.current);
+    uiState.current = uiStateRepository.update(() => ({ fileContext: next }));
     flashStatus(next ? "file context enabled" : "file context disabled");
   };
 
@@ -1855,8 +1799,7 @@ export function App({
   // 2026-09-16) and the backend persists it as workspace last-used.
   const applyEffort = (e: (typeof EFFORTS)[number]) => {
     setEffort(e);
-    uiState.current.variant[modelKey(activeModel)] = e;
-    writeUiState(uiState.current);
+    uiState.current = uiStateRepository.update((cur) => ({ variant: { ...cur.variant, [modelKey(activeModel)]: e } }));
     if (!activeId) { flashStatus(`effort → ${e}`); return; }
     void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
       .then(() => flashStatus(`effort → ${e}`))
@@ -2063,6 +2006,7 @@ export function App({
             setCtx({ used: usage.inputTokens, window: payload.contextWindow });
           }
           const outputTokens = Number(usage?.outputTokens ?? usage?.totalTokens ?? 0) || undefined;
+          const reasoningTokens = Number(usage?.reasoningTokens ?? 0) || undefined;
           setMsgs((current) => {
             if (current.length === 0) return current;
             const last = current[current.length - 1];
@@ -2072,6 +2016,7 @@ export function App({
               text: payload.content as string,
               durationMs: last.turnStart ? Date.now() - last.turnStart : undefined,
               outputTokens,
+              reasoningTokens,
               thinking: thinkingRef.current || undefined,
               thinkingMs: thinkingRef.current && last.turnStart ? Date.now() - last.turnStart : undefined,
             }];

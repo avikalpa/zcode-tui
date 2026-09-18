@@ -61,6 +61,10 @@
       "status": "covered",
       "note": "0.6.24 palette walk over all/user messages; alt+end last-user kept"
     },
+    "session.aside": {
+      "status": "blocked-host",
+      "note": "v2.0.8 /btw side question — rides a one-shot session.generate (no tool loop); zcode has workspace/generateText only. Filed with the host 0.6.29."
+    },
     "session.undo": {
       "status": "blocked-host",
       "note": "needs session/revert in the app-server"
