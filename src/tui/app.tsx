@@ -163,7 +163,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "settings" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "status" | "settings" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -894,7 +894,7 @@ type SkillsDialogState =
 type McpDialogState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "ready"; servers: { name: string; status: string }[] };
+  | { kind: "ready"; servers: { name: string; status: string; error?: string }[] };
 
 export function App({
   client,
@@ -1003,8 +1003,7 @@ export function App({
   const [toast, setToast] = useState<{ message: string; variant: "info" | "success" | "warning" | "error" } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Deviation queue 3 closed: confirmations ride the v2 toast overlay
-  // ONLY — no transient status-line text (the slot was invisible anyway;
-  // lifecycle state still feeds statusSummary via setStatus call sites).
+  // ONLY — no transient status-line text (the slot was invisible anyway).
   const flashStatus = (message: string, variant: "info" | "success" | "warning" | "error" = "info") => {
     setToast({ message, variant });
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1054,7 +1053,7 @@ export function App({
         live = false;
       };
     }
-    if (dialog === "mcp") {
+    if (dialog === "mcp" || dialog === "status") {
       setMcpState({ kind: "loading" });
       let live = true;
       void client
@@ -1065,7 +1064,7 @@ export function App({
           setMcpState({
             kind: "ready",
             servers: Object.entries(statuses)
-              .map(([name, s]) => ({ name, status: s.status ?? "" }))
+              .map(([name, s]) => ({ name, status: s.status ?? "", error: (s as { error?: string }).error }))
               .sort((a, b) => a.name.localeCompare(b.name)),
           });
         })
@@ -1599,7 +1598,7 @@ export function App({
       if (command === "diff") { openDiff(); return; }
       if (command === "timeline") { openTimeline(); return; }
       if (command === "agents") { setDialog("mode"); return; }
-      if (command === "status") { flashStatus(statusSummary()); return; }
+      if (command === "status") { setDialog("status"); return; }
       if (command === "effort") { setDialog("effort"); return; }
       if (command === "thinking") { await toggleThinking(); return; }
       if (command === "fork") { await forkActive(); return; }
@@ -1633,11 +1632,6 @@ export function App({
     setTyping(true);
   };
 
-  const statusSummary = () => {
-    const backend = lost ? "backend LOST" : running ? "working" : "idle";
-    const ctxBit = ctx ? ` · ctx ${formatContextLabel(ctx.used, ctx.window)}` : "";
-    return `${backend} · ${mode} · ${modelLabel(activeModel)} · effort ${effort}${ctxBit} · ${sessions.length} sessions`;
-  };
 
   // opencode v2 diff viewer (/diff): a full-screen route over the app with
   // its own key grammar; the return view is remembered like v2's
@@ -2370,7 +2364,7 @@ export function App({
       if (key.name === "l") { openSessions(); return; }
       if (key.name === "n") { void newSession(); return; }
         if (key.name === "c") { void compactActive(); return; }
-        if (key.name === "s") { flashStatus(statusSummary()); return; }
+        if (key.name === "s") { setDialog("status"); return; }
         if (key.name === "w") { tabClose(); return; }
         if (/^[0-9]$/.test(key.name ?? "")) { quickSwitch(key.name === "0" ? 10 : Number(key.name)); return; }
         if (key.name === "q") { onQuit(); return; }
@@ -2999,6 +2993,72 @@ footerHints={[
 // The keybind help overlay (opencode help_show): a flat panel of the
 // implemented grammar. Owns its keyboard — escape/enter close — because the
 // App-level hook goes silent while a dialog is open.
+// Ported from opencode v2.0.7 component/dialog-status.tsx: leader s — the
+// status view. Title row "Status" + the subdued esc hint (v2 verbatim; esc
+// only — enter does nothing in the reference dialog), then the MCP server
+// list on the same mcp/list payload the /mcps dialog reads: the "No MCP
+// servers" empty state, the "{n} MCP server(s)" header, rows
+// "• <name> <status>" with v2's status→colour map. v2 prints the payload's
+// error text on failed/needs_auth rows — the zcode protocol carries no
+// error text (host gap recorded 0.6.23), so the suffix renders only when a
+// payload ever provides one.
+function StatusDialog({ C, onClose, mcpState, width, height }: { C: ThemeTokens; onClose: () => void; mcpState: McpDialogState; width: number; height: number }) {
+  useKeyboard((key) => {
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
+  });
+  const statusColor = (status: string) =>
+    status === "connected" ? C.success
+    : status === "failed" ? C.error
+    : status === "needs_auth" ? C.warning
+    : C.subtle;
+  const statusText = (server: { status: string; error?: string }) => {
+    if (server.status === "connected") return "Connected";
+    if (server.status === "failed") return server.error ? `Failed: ${server.error}` : "Failed";
+    if (server.status === "disabled") return "Disabled in configuration";
+    if (server.status === "needs_auth") return server.error ? `Needs authentication: ${server.error}` : "Needs authentication";
+    return server.status;
+  };
+  const servers = mcpState.kind === "ready" ? mcpState.servers : null;
+  return (
+    <ModalBackdrop C={C} width={width} height={height}>
+      <box
+        style={{
+          width: Math.min(72, Math.max(30, width - 4)),
+          flexDirection: "column",
+          flexShrink: 0,
+          backgroundColor: C.panel,
+          paddingTop: 1,
+          paddingBottom: 1,
+          paddingLeft: 2,
+          paddingRight: 2,
+        }}
+      >
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content="Status" fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content="esc" fg={C.faint} />
+        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        {servers === null ? (
+          <text content="Connecting …" fg={C.subtle} />
+        ) : servers.length === 0 ? (
+          <text content="No MCP servers" fg={C.fg} />
+        ) : (
+          <box style={{ flexDirection: "column", flexShrink: 0 }}>
+            <text content={`${servers.length} MCP server${servers.length === 1 ? "" : "s"}`} fg={C.fg} />
+            {servers.map((server) => (
+              <box key={server.name} style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+                <text content="• " fg={statusColor(server.status)} />
+                <text content={server.name} fg={C.fg} attributes={TextAttributes.BOLD} />
+                <text content={" " + statusText(server)} fg={C.subtle} />
+              </box>
+            ))}
+          </box>
+        )}
+      </box>
+    </ModalBackdrop>
+  );
+}
+
 function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: () => void; width: number; height: number }) {
   useKeyboard((key) => {
     if (key.name === "escape" || key.name === "return" || (key.ctrl && key.name === "c")) { onClose(); return; }
@@ -3025,7 +3085,7 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["alt+up/down · ctrl+tab", "previous / next session tab (shift = unread)"],
     ["ctrl+x then w / ctrl+shift+t", "close tab · reopen closed tab"],
     ["ctrl+x then 1-9 / 0", "select session tab"],
-    ["/skills · /mcps", "insert a skill · MCP server status"],
+    ["/skills · /mcps · /status", "insert a skill · MCP server dialogs"],
     ["ctrl+p → stash", "stash · pop · list the draft"],
     ["ctrl+p → toggles", "animations · file context · diff wrapping"],
     ["ctrl+p → messages", "next / previous (user) message jump"],
@@ -3381,6 +3441,9 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       />
     );
   }
+  if (dialog === "status") {
+    return <StatusDialog C={C} mcpState={mcpState} onClose={closeDialog} width={dims.width} height={dims.height} />;
+  }
   if (dialog === "help") {
     return <HelpDialog C={C} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
@@ -3400,6 +3463,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "stash-list", label: "stash list…", description: "restore or delete stashed drafts", value: () => { setStashArm(undefined); setDialog("stash"); } },
       { id: "skills", label: "skills…", description: "insert a skill mention · /skills", value: () => setDialog("skills") },
       { id: "mcp", label: "MCP servers", description: "connection status · /mcps", value: () => setDialog("mcp") },
+      { id: "status", label: "View status", description: "MCP server status · leader s", value: () => setDialog("status") },
       { id: "msg-next", label: "next message", description: "jump the transcript · v2 session.message.next", value: () => messageJump(1, false) },
       { id: "msg-prev", label: "previous message", value: () => messageJump(-1, false) },
       { id: "msg-user-next", label: "next user message", value: () => messageJump(1, true) },

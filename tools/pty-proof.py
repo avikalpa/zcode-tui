@@ -212,6 +212,33 @@ except FileNotFoundError:
     l2 = False
 check(pid, "L2 ctrl+t cycles the reasoning effort (state.json)", l2)
 
+# ST-series: the status dialog (v2 DialogStatus port, 0.6.28). leader s
+# opens the real v2 status view — the invented statusSummary toast is gone.
+# The mcp/list fetch resolves late on a cold daemon (the HF0 boot-fetch
+# lesson), so the ready paint is POLLED, not assumed after a fixed settle.
+os.write(master, b"\x18s")
+st0 = False
+for _ in range(16):                                        # poll: fetch + paint
+    read_for(master, stream, 0.6)
+    d = "\n".join(screen.display)
+    if "Status" in d and ("No MCP servers" in d or "MCP server" in d):
+        st0 = True
+        break
+if not st0:
+    print("---- ST0 FAIL SCREEN ----")
+    for i, line in enumerate(screen.display):
+        if line.strip():
+            print(f"{i:2}|{line.rstrip()}")
+check(pid, "ST0 leader s opens the status dialog", st0)
+os.write(master, b"\x1b")
+st1 = False
+for _ in range(6):                                         # poll: the close repaint
+    read_for(master, stream, 0.4)
+    if "Status" not in "\n".join(screen.display):
+        st1 = True
+        break
+check(pid, "ST1 esc closes the status dialog", st1)
+
 # W-series: model dialog depth (favorites + recent select + f2 cycle)
 os.write(master, b"\x18m"); read_for(master, stream, 1.2)
 os.write(master, b"\x06"); time.sleep(0.3)                    # ctrl+f: favorite

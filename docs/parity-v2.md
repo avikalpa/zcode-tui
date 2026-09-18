@@ -53,6 +53,17 @@ ports AROUND the logo, never over it).
   1-9, running-status adoption on open (0.6.17).
 - Agents: list (leader a), cycle (tab), modes (shift+tab), status view
   (leader s).
+- **Status view** — opencode.status SHIPPED 0.6.28: the v2 DialogStatus
+  port — title row "Status" + the subdued esc hint (esc only, v2
+  verbatim), the "No MCP servers" empty state, the "{n} MCP server(s)"
+  header, rows "• <name> <status>" with v2's status→colour map
+  (connected success · failed error · needs_auth warning · else subdued)
+  and v2's status grammar (Connected / error / Disabled in configuration
+  / Needs authentication). leader s, /status and a palette row open it —
+  the invented statusSummary toast is retired (deviation queue). Host gap
+  carried: the mcp/list payload has no error text (0.6.23), so
+  failed/needs_auth render without v2's error suffix; the code takes the
+  error field when a payload ever carries one.
 - **Session tabs** — the session.tab.* family (0.6.22): the open-session
   strip above the transcript (adaptive widths 8/22/32 with ‹N / N› overflow
   markers, number gutter, running spinner / • unread / ! ? attention,
@@ -232,8 +243,8 @@ when both runs share the harness VERSION.
 - **misc dialogs** — experiments, integration, pair, update, workspaces,
   worktree-name, open, config, debug, error-details; plugins.* family;
   server.pair; service.restart; session.cd; session.background;
-  permission.prompt.fullscreen; opencode.status/debug (we have leader s
-  status view — verify field parity).
+  permission.prompt.fullscreen; opencode.debug (a dev-facing view —
+  nothing to port).
 - **selection grammar** — input.select.* (shift selections), visual line
   ops, buffer home/end, select.all, delete.line (our cursor is char-mode;
   selection still partial — ledger note from 0.6.10).
