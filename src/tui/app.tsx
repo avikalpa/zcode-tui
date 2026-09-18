@@ -15,6 +15,7 @@ import { probe } from "./probes";
 import {
   formatDateHeading,
   formatContextLabel,
+  formatTimeShort,
   formatTokens,
   formatTurnFooter,
   matchSlashCommands,
@@ -165,7 +166,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "status" | "settings" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "status" | "settings" | "msgactions" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -192,6 +193,9 @@ export interface TurnMessage {
   toolMeta?: Record<string, unknown>;
   toolError?: string;
   messageId?: string;
+  // v2 timeline/fork rows carry the message creation time (Locale.time
+  // footer); our payload takes it when one carries it.
+  createdAt?: number;
   // Turn metrics for the per-message footer (OpenCode's
   // `Build · model · 4.2s · 19.8 tok/s` line).
   turnStart?: number;
@@ -546,6 +550,7 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
   const info = (m.info ?? {}) as Record<string, unknown>;
   const role = String(info.role ?? "?");
   const model = (info.model as Record<string, unknown> | undefined)?.modelId;
+  const infoTime = (info.time ?? {}) as Record<string, unknown>;
   const parts = Array.isArray(m.parts) ? (m.parts as Record<string, unknown>[]) : [];
   let text = "";
   let thinkingText = "";
@@ -588,6 +593,7 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
     text,
     model: String(model ?? "") || undefined,
     messageId: String(info.id ?? info.messageId ?? "") || undefined,
+    createdAt: Number(infoTime.created ?? info.createdAt ?? info.updatedAt ?? 0) || undefined,
     thinking: thinkingText || undefined,
   }];
   out.push(...toolRows);
@@ -1547,7 +1553,7 @@ export function App({
       if (command === "status") { setDialog("status"); return; }
       if (command === "effort") { setDialog("effort"); return; }
       if (command === "thinking") { await toggleThinking(); return; }
-      if (command === "fork") { await forkActive(); return; }
+      if (command === "fork") { openForkDialog(); return; }
       if (command === "compact") { await compactActive(); return; }
       if (command === "quit") { onQuit(); return; }
       return;
@@ -1860,14 +1866,19 @@ export function App({
   // session's USER prompts, newest first; selecting one forks the session at
   // that message.
   const [timelineMode, setTimelineMode] = useState(false);
+  const [actionMessageId, setActionMessageId] = useState<string | null>(null);
   const openTimeline = () => {
     if (!activeId || running || msgsRef.current.length === 0) { flashStatus("timeline: nothing to show yet"); return; }
+    // v2 DialogTimeline: the session's user prompts, newest first, full text
+    // with newlines flattened, Locale.time footer; cursor moves live-jump the
+    // transcript (onMove → jumpToMessage), enter opens Message Actions.
     const opts = msgsRef.current
       .filter((m) => m.role === "user" && m.messageId)
       .map((m) => ({
         id: m.messageId ?? "",
         value: m.messageId ?? "",
-        label: m.text.replace(/\s+/g, " ").slice(0, 70) || "(empty)",
+        label: m.text.replace(/\n/g, " "),
+        status: m.createdAt ? { text: formatTimeShort(m.createdAt) } : undefined,
       }))
       .reverse();
     if (opts.length === 0) { flashStatus("timeline: no user messages with checkpoints yet"); return; }
@@ -1877,33 +1888,70 @@ export function App({
   };
 
   const openForkDialog = () => {
-    if (!activeId || running || msgs.length === 0) return;
-    const opts = msgs
-      .map((m) => ({ id: m.messageId ?? "", value: m.messageId ?? "", label: `${m.role}: ${m.text.replace(/\s+/g, " ").slice(0, 70)}` }))
-      .filter((o) => o.id.length > 0);
-    if (opts.length === 0) {
-      flashStatus("no message ids available for fork target");
-      return;
-    }
+    if (!activeId || running || msgsRef.current.length === 0) return;
+    // v2 DialogFork ("Fork session"): a Full session row, then the user
+    // prompts newest-first; selecting forks before that message.
+    const opts: DialogOption<string>[] = [
+      { id: "full", value: "", label: "Full session" },
+      ...msgsRef.current
+        .filter((m) => m.role === "user" && m.messageId)
+        .map((m) => ({
+          id: m.messageId ?? "",
+          value: m.messageId ?? "",
+          label: m.text.replace(/\n/g, " "),
+          status: m.createdAt ? { text: formatTimeShort(m.createdAt) } : undefined,
+        }))
+        .reverse(),
+    ];
     setForkOptions(opts);
+    setTimelineMode(false);
     setDialog("fork");
   };
 
-  const forkActive = async () => {
+  // v2 DialogFork.fork: fork before the given message (or at the session
+  // tail) and navigate with the forked-at user prompt restored into the
+  // composer (upstream projectedPromptInput; our drafts are plain text).
+  const forkSessionAt = async (messageId?: string) => {
     if (!activeId || running) return;
     setStatus("forking…");
     try {
-      const res = (await client.request("session/fork", { sessionId: activeId, target: { kind: "latestCheckpoint" } })) as { forkedSessionId?: string };
+      const res = (await client.request("session/fork", {
+        sessionId: activeId,
+        target: messageId ? { kind: "message", messageId } : { kind: "latestCheckpoint" },
+      })) as { forkedSessionId?: string };
       const fid = res.forkedSessionId;
       if (!fid) throw new Error("no forkedSessionId in response");
+      const src = messageId
+        ? msgsRef.current.find((m) => m.messageId === messageId && m.role === "user")
+        : undefined;
       setMsgs([]);
       setActiveId(fid);
       await subscribe(fid);
+      if (src?.text) setDraft(src.text);
       flashStatus(`fork ${fid.slice(0, 13)} · ready`);
       void refresh();
     } catch (e) {
       flashStatus(`fork failed: ${e instanceof Error ? e.message : e}`);
     }
+  };
+  const forkActive = () => forkSessionAt();
+
+  // v2 DialogTimeline onMove preview: live-jump the transcript to the row
+  // under the dialog cursor.
+  const previewMessage = (messageId: string) => {
+    if (!messageId) return;
+    const at = msgsRef.current.findIndex((m) => m.messageId === messageId);
+    if (at >= 0) jumpToMessage(at);
+  };
+
+  // v2 DialogMessage Copy: user message text; an assistant message is its
+  // text contents joined with \n (tool/reasoning rows excluded).
+  const messageTextById = (messageId: string | null) => {
+    if (!messageId) return "";
+    return msgsRef.current
+      .filter((m) => m.messageId === messageId && (m.role === "user" || m.role === "assistant") && m.text)
+      .map((m) => m.text)
+      .join("\n");
   };
 
   const compactActive = async () => {
@@ -2903,32 +2951,54 @@ footerHints={[
   if (dialog === "fork") {
     return (
       <SelectDialog
-        title={timelineMode ? "Timeline — fork at message" : "Fork at message"}
+        title={timelineMode ? "Timeline" : "Fork session"}
         options={forkOptions}
         theme={C}
+        currentId={timelineMode ? (actionMessageId ?? undefined) : undefined}
         footerHints={[
-          { key: "enter", label: "fork here" },
+          { key: "enter", label: "select" },
           { key: "esc", label: "close" },
         ]}
         countLabel="message"
+        onHighlight={(option) => { if (option) previewMessage(String(option.value)); }}
         onSelect={(messageId) => {
+          if (timelineMode) { setActionMessageId(String(messageId)); setDialog("msgactions"); return; }
           closeDialog();
-          setTimelineMode(false);
-          if (!activeId) return;
-          setStatus("forking…");
-          void client.request("session/fork", { sessionId: activeId, target: { kind: "message", messageId } })
-            .then(async (res) => {
-              const fid = (res as { forkedSessionId?: string }).forkedSessionId;
-              if (!fid) throw new Error("no forkedSessionId");
-              setMsgs([]);
-              setActiveId(fid);
-              await subscribe(fid);
-              flashStatus(`fork ${fid.slice(0, 13)} · ready`);
-              void refresh();
-            })
-            .catch((e) => flashStatus(`fork failed: ${e instanceof Error ? e.message : e}`));
+          void forkSessionAt(messageId || undefined);
         }}
-        onClose={closeDialog}
+        onClose={() => { setTimelineMode(false); setActionMessageId(null); closeDialog(); }}
+      />
+    );
+  }
+  if (dialog === "msgactions") {
+    // v2 DialogMessage ("Message Actions") opened from the timeline's enter:
+    // Jump to / Revert / Copy / Fork. Revert needs the session/revert host
+    // verb (filed blocked-on-host) — its row is omitted here, like the mcp
+    // connect/disconnect gap.
+    const text = messageTextById(actionMessageId);
+    return (
+      <SelectDialog
+        title="Message Actions"
+        theme={C}
+        options={[
+          { id: "jump", label: "Jump to", description: "view message in session", value: "jump" },
+          { id: "copy", label: "Copy", description: "message text to clipboard", value: "copy" },
+          { id: "fork", label: "Fork", description: "create a new session", value: "fork" },
+        ]}
+        footerHints={[
+          { key: "enter", label: "select" },
+          { key: "esc", label: "back" },
+        ]}
+        onSelect={(action) => {
+          if (action === "jump") { setTimelineMode(false); setActionMessageId(null); closeDialog(); if (actionMessageId) previewMessage(actionMessageId); return; }
+          if (action === "copy") {
+            setTimelineMode(false); setActionMessageId(null); closeDialog();
+            flashStatus(osc52Copy(text) ? `copied ${text.length} chars` : "copy failed (terminal)");
+            return;
+          }
+          if (action === "fork") { setTimelineMode(false); const mid = actionMessageId; setActionMessageId(null); closeDialog(); void forkSessionAt(mid ?? undefined); return; }
+        }}
+        onClose={() => { setDialog("fork"); }}
       />
     );
   }

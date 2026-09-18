@@ -230,6 +230,24 @@ flock ENOENT defect (above) shows the flip side: an environment ACCIDENT
 CHANGE (the dir cleaned) can manufacture fake failures — the control run
 on the clean lane is what separates them.
 
+- **Timeline / Fork / Message Actions** — SHIPPED 0.6.31: the v2.0.8
+  routes/session/dialog-{timeline,message,fork}.tsx port. The timeline
+  (leader g, `/timeline` — v2 "Jump to message") is the DialogSelect titled
+  "Timeline": user prompts newest-first, full text with newlines flattened,
+  Locale.time footer when the payload carries a created time; cursor moves
+  live-jump the transcript (v2 onMove → jumpToMessage); enter opens
+  DialogMessage ("Message Actions": Jump to / Copy / Fork — v2's Revert row
+  omitted, it needs the session/revert host verb filed below). Copy is
+  per-message OSC 52 (user text | assistant text parts joined with 
+) —
+  the partial drain of messages.copy (extended). `/fork` now opens v2's
+  DialogFork ("Fork session": Full session row + user prompts, same live
+  preview; fork-before then the forked-at prompt restores into the
+  composer, upstream projectedPromptInput ≈ our plain-text draft); leader f
+  keeps the immediate fork-at-tail (our chrome, pending owner like
+  leader-q). Locale.time ported (toLocaleTimeString timeStyle short — Bun
+  ICU renders `8:23 AM` verbatim).
+
 ## Remaining (v2.0.8 → us)
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
@@ -267,8 +285,10 @@ on the clean lane is what separates them.
   generalized to all messages (`messageJump`), shipped as the four palette
   commands the reference uses (they are palette-only upstream too);
   alt+end last-user kept from 0.6.18.
-- **messages.copy (extended)** — copy selected/all messages (we copy the
-  last assistant message only).
+- **messages.copy (residual)** — copy selected/all messages; the
+  per-message Copy row SHIPPED 0.6.31 (Message Actions; the old
+  last-assistant-only leader y stays), the transcript-selection copy is
+  the remaining piece.
 - ~~**stash family** — prompt_stash/pop/list + stash.delete dialog~~ SHIPPED
   0.6.23 (jsonl store `~/.config/zcode-tui/prompt-stash.jsonl`, MAX 50 with
   oldest-drop and sanitize-on-load; palette commands prompt.stash/.pop/.list
@@ -313,15 +333,17 @@ on the clean lane is what separates them.
   server.pair; service.restart; session.cd; session.background;
   permission.prompt.fullscreen; opencode.debug (a dev-facing view —
   nothing to port).
-- **selection grammar** — input.select.* (shift selections), visual line
-  ops, buffer home/end, select.all, delete.line (our cursor is char-mode;
-  selection still partial — ledger note from 0.6.10).
+- ~~selection grammar~~ — STALE BULLET RETIRED 0.6.31: the input.select.*
+  scope (shift selections, visual line ops, buffer home/end, select.all)
+  SHIPPED 0.6.25 (see its entry above); this 0.6.10 note survived its own
+  supersession and pointed backwards.
 
 ## Blocked on a zcode HOST VERB (file with the zcode host, not the TUI)
 
 - **session.undo / session.redo** — v2 = server-side session.revert
   stage/clear; zcode has fork-at-message only (timeline). Needs
-  `session/revert` (stage/clear) in the app-server.
+  `session/revert` (stage/clear) in the app-server. The 0.6.31 Message
+  Actions dialog omits v2's Revert row for this same gap.
 - **diff last-turn source** — needs a session-diff verb (v2: client.session.
   diff). Git/branch sources ship TUI-side.
 - **session.rename** — needs session/title update verb (long-standing).

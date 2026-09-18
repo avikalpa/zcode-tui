@@ -135,6 +135,11 @@ export function formatNumberCompact(n: number): string {
   return String(n);
 }
 
+// v2 Locale.time (util/locale.ts): the locale short-time form — `8:23 AM`.
+export function formatTimeShort(input: number): string {
+  return new Date(input).toLocaleTimeString(undefined, { timeStyle: "short" });
+}
+
 // v2 Locale.duration (util/locale.ts): `900ms` under a second, one decimal
 // under a minute, then `1m 5s` / `1h 0m` / `1d 3h` scales.
 export function formatDuration(ms: number): string {

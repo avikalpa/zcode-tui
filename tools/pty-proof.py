@@ -409,13 +409,54 @@ if b0 and alive(pid):
     os.write(master, b"\x18y"); read_for(master, stream, 1.2)    # leader y: copy
     check(pid, "X2 leader y copies via OSC 52", b"\x1b]52;c;" in bytes(RAW[mark_raw:]))
 
-    # TL-series: timeline dialog, fork at a prompt (wrapper closes the fork)
-    os.write(master, b"\x18g"); read_for(master, stream, 1.2)
-    disp = "\n".join(screen.display)
-    check(pid, "TL0 leader g opens the timeline", "Timeline — fork at message" in disp)
-    os.write(master, b"\r"); read_for(master, stream, 3.5)
-    disp = "\n".join(screen.display)
-    check(pid, "TL1 enter forks at the prompt", "fork" in disp.lower())
+    # TL-series: the v2 dialog-timeline port — timeline rows, enter opens
+    # Message Actions, esc returns, Fork row forks at the prompt (wrapper
+    # closes the fork). Poll the ready paint each step (0.6.30 B0 lesson:
+    # a fixed settle manufactures failures on a cold daemon).
+    os.write(master, b"\x18g")
+    tl0 = False
+    for _ in range(12):                                        # poll: dialog paint
+        read_for(master, stream, 0.5)
+        if "Timeline" in "\n".join(screen.display):
+            tl0 = True
+            break
+    check(pid, "TL0 leader g opens the timeline", tl0)
+    os.write(master, b"\r")
+    tl1 = False
+    for _ in range(12):                                        # poll: actions paint
+        read_for(master, stream, 0.5)
+        if "Message Actions" in "\n".join(screen.display):
+            tl1 = True
+            break
+    check(pid, "TL1 enter opens Message Actions", tl1)
+    os.write(master, b"\x1b")
+    tl2 = False
+    for _ in range(10):                                        # poll: back repaint
+        read_for(master, stream, 0.5)
+        d_tl = "\n".join(screen.display)
+        if "Timeline" in d_tl and "Message Actions" not in d_tl:
+            tl2 = True
+            break
+    check(pid, "TL2 esc returns to the timeline", tl2)
+    os.write(master, b"\r")
+    tl3 = False
+    for _ in range(12):                                        # poll: actions again
+        read_for(master, stream, 0.5)
+        if "Message Actions" in "\n".join(screen.display):
+            tl3 = True
+            break
+    if tl3:
+        os.write(master, b"\x1b[B"); read_for(master, stream, 0.4)   # down: Copy
+        os.write(master, b"\x1b[B"); read_for(master, stream, 0.4)   # down: Fork
+        os.write(master, b"\r")
+    tl4 = False
+    for _ in range(20):                                        # poll: fork + reload
+        read_for(master, stream, 0.5)
+        d_tl = "\n".join(screen.display)
+        if "fork" in d_tl.lower() and "Message Actions" not in d_tl:
+            tl4 = True
+            break
+    check(pid, "TL3 Message Actions fork forks at the prompt", tl3 and tl4)
     # I-series: escape interrupts the RUNNING turn (minimal real turn, throwaway)
     interrupted = False
     for attempt in range(3):

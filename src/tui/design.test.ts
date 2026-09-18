@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   formatContextLabel,
+  formatTimeShort,
   formatTokens,
   formatTurnFooter,
   formatDateHeading,
@@ -82,6 +83,12 @@ describe("OpenCode-shaped zcode-tui design model", () => {
     expect(formatContextLabel(900, 1000)).toBe("900 (90%)");
     expect(formatContextLabel(1_234_567, 2_000_000)).toBe("1.2M (62%)");
     expect(formatTokens(29214)).toBe("29,214");
+  });
+
+  test("formats the timeline row footer like the reference (v2 Locale.time)", () => {
+    // The locale short-time form (`8:23 AM`); shape-asserted because the
+    // meridiem/width ride the runtime locale, exactly as upstream leaves it.
+    expect(formatTimeShort(1789700000000)).toMatch(/^\d{1,2}:\d{2}\s?(AM|PM)?$/);
   });
 
   test("recognizes the slash commands used by the front page", () => {
