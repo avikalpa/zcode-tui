@@ -11,12 +11,15 @@ feature to keep. Audit pass 2026-09-17 filed the known deviations below
 (Deviation queue). The non-parities (model allowlist, provider_connect)
 remain the only exceptions.
 
-**Reference:** opencode **v2.0.6** (stable) — dev `~/gh/opencode` branch
-`v2ref` (tag `v2.0.6`). The v2 TUI surface is **239 keybind definitions**
-(`packages/tui/src/config/keybind.ts`) + the component set under
-`packages/tui/src/component/`. Re-pull and re-inventory this file whenever
-upstream releases; update the ledger AFTER EVERY WAVE — a line moves from
-Remaining to Shipped only with the wave version that shipped it.
+**Reference:** opencode **v2.0.7** (stable) — VENDORED in-repo at
+`tools/opencode-reference/` (pinned by `tools/sync-opencode.sh <tag>`;
+MIT, never compiled into our binary). The sync toolchain makes a parity
+wave a diff job: `parity-report.py --map/--stale/--gaps`,
+`gen-keybinds.py` (the 240-bind registry + machine-refreshed gap report in
+`docs/parity-keybinds.md`), `gen-themes.py` (reads the pin). Ported files
+carry a grep-able header (`Ported from opencode <version> <ref path>`) —
+the port map IS the headers. Update the ledger AFTER EVERY WAVE — a line
+moves from Remaining to Shipped only with the wave version that shipped it.
 
 Non-parities BY OWNER LAW (never copy): model allowlist, provider_connect /
 console_org, and the zcodetui wordmark on the home screen (owner 2026-09-18:
@@ -50,6 +53,17 @@ ports AROUND the logo, never over it).
   1-9, running-status adoption on open (0.6.17).
 - Agents: list (leader a), cycle (tab), modes (shift+tab), status view
   (leader s).
+- **Tool-call rows** — the v2 per-tool grammar (0.6.21): ToolPart
+  dispatches on the display class (shell/glob/read/grep/webfetch/websearch/
+  write/edit/subagent/patch/question/skill/generic) with the reference
+  icons + titles + pending lines ("Reading file…", "Finding files…"…),
+  block shells (command + tail-collapsed output, 10-line budget) and block
+  edits ("← Edit path" with the inline PatchDiff when the part carries a
+  patch), Read's "↳ Loaded" lines, match counts from metadata, the generic
+  row as `tool [key=value, …]` with expandable input/output. The invented
+  "● Tool summary ✓ms" row is DEAD. Adapter: upstream expands rows by
+  MOUSE — this binding has no mouse plane, so ctrl+o toggles the expanded
+  set (registered in the help overlay + coverage notes).
 - **diff.* family (19 binds)** — the diff viewer route (`/diff` + ctrl+p
   palette): full-screen route over the app, source header grammar
   (All/Committed/Uncommitted `· vs <base>` + n/m reviewed count), file-tree
@@ -69,16 +83,17 @@ ports AROUND the logo, never over it).
 
 ## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
 
-1. **Tool-call rendering** — ours: one invented "● Tool summary ✓ms" line
-   with truncated inline output (the TodoWrite raw-JSON row in the owner's
-   screenshot). v2: per-tool title formatters + collapsible details rows
-   (`routes/session/index.tsx` message parts + `component/patch-diff.tsx`).
+1. ~~Tool-call rendering~~ RE-PORTED 0.6.21 (see Shipped) — the row now
+   traces to routes/session/index.tsx; residuals: upstream mouse expansion
+   adapted to ctrl+o (no mouse plane), background-shell output polling
+   needs the zcode shell verb (renders from the part instead).
 2. **Permission card** — header/labels ported 0.6.19 (△ Permission
    required / Allow once / Always allow / Reject, esc=Reject); residual:
    hidden y/a/n accelerators (invisible; keep) + the v2 body variants
    (EditBody diff view, PatchDiff) not ported.
-3. **Flash status line** — ours invented (transient hint-slot text). v2 uses
-   toasts only. Re-point confirmations to toast variants.
+3. ~~Flash status line~~ CLOSED 0.6.21 — flashStatus is toast-only (the
+   transient status-slot text was already invisible; lifecycle state still
+   feeds the leader-s status summary).
 4. **Home screen** — ours is logo+composer; v2 home = session-destination
    (recent sessions, frecency) + tips. Ledger P2 line upgraded to deviation.
    ⚠ owner 2026-09-18: the zcodetui LOGO STAYS — port the

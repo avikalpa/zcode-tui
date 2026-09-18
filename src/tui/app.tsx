@@ -34,6 +34,7 @@ import {
 } from "./design";
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
 import { DiffViewer, diffSourceLabel, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
+import { ToolPart } from "./session/tool-parts";
 import { listBranches, type DiffMode } from "./diff/git";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -168,6 +169,12 @@ export interface TurnMessage {
   toolOk?: boolean;
   toolMs?: number;
   toolOut?: string;
+  // The v2 tool rows render from the structured part (per-tool titles,
+  // collapse arithmetic, expandable detail) — deviation queue 1.
+  toolInput?: Record<string, unknown>;
+  toolStatus?: string;
+  toolMeta?: Record<string, unknown>;
+  toolError?: string;
   messageId?: string;
   // Turn metrics for the per-message footer (OpenCode's
   // `Build · model · 4.2s · 19.8 tok/s` line).
@@ -466,6 +473,8 @@ const MessageView = memo(function MessageView({
   mdStyle,
   isTail,
   width,
+  toolsExpanded,
+  spinnerChar,
 }: {
   m: TurnMessage;
   running: boolean;
@@ -474,22 +483,29 @@ const MessageView = memo(function MessageView({
   mdStyle: SyntaxStyle;
   isTail: boolean;
   width: number;
+  toolsExpanded: boolean;
+  spinnerChar: string;
 }) {
   if (m.role === "tool") {
-    const name = `● ${m.toolName ?? "tool"} `;
-    const output = (m.toolOut ?? m.text).replace(/\s+/g, " ");
-    const result = m.toolOk === undefined ? " …" : m.toolOk ? ` ✓${m.toolMs ? ` ${m.toolMs}ms` : ""}` : " ✗";
-    const budget = Math.max(16, width - 8 - name.length - result.length);
+    // The v2 tool row (deviation queue 1 re-port): per-tool icon + title
+    // grammar, block shells/edits, collapsible output, expandable detail.
     return (
-      <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
-        <box style={{ flexDirection: "row", flexShrink: 0 }}>
-          <text content={name} fg={C.tool} />
-          <text content={wrapText(output, budget)[0] ?? ""} fg={C.subtle} />
-          <text content={result} fg={m.toolOk === false ? C.error : C.success} />
-        </box>
-        {wrapText(output, budget).length > 1 ? (
-          <text content={wrapText(output, budget).slice(1).join("\n")} fg={C.subtle} />
-        ) : null}
+      <box style={{ flexDirection: "column", paddingLeft: 0, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+        <ToolPart
+          C={C}
+          syntaxStyle={mdStyle}
+          width={width}
+          expanded={toolsExpanded}
+          spinnerChar={spinnerChar}
+          m={{
+            tool: m.toolName ?? "tool",
+            status: m.toolStatus || (m.toolOk === false ? "error" : m.toolOk === true ? "completed" : "running"),
+            input: m.toolInput ?? {},
+            output: m.toolOut,
+            error: m.toolError,
+            metadata: m.toolMeta,
+          }}
+        />
       </box>
     );
   }
@@ -585,13 +601,23 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
         input.command ?? input.description ?? input.file_path ?? input.url ?? input.pattern ?? JSON.stringify(input).slice(0, 60),
       );
       const status = String(state.status ?? "");
+      const rawError = state.error;
       toolRows.push({
         role: "tool",
         text: summary,
         toolName: String(p.tool ?? "tool"),
         toolCallId: String(p.callID ?? ""),
         toolOk: status === "completed" ? true : status === "error" ? false : undefined,
-        toolOut: String(state.output ?? state.result ?? "").replace(/\s+/g, " ").slice(0, 220) || undefined,
+        toolOut: String(state.output ?? state.result ?? ""),
+        toolInput: input && typeof input === "object" ? input : {},
+        toolStatus: status,
+        toolMeta: state.metadata && typeof state.metadata === "object" ? (state.metadata as Record<string, unknown>) : {},
+        toolError:
+          rawError && typeof rawError === "object"
+            ? String((rawError as Record<string, unknown>).message ?? "")
+            : typeof rawError === "string"
+              ? rawError
+              : undefined,
       });
     } else if (typeof p.text === "string") {
       text += p.text;
@@ -875,8 +901,10 @@ export function App({
   // variant-tinted borders, single slot, 5s / 7s for errors).
   const [toast, setToast] = useState<{ message: string; variant: "info" | "success" | "warning" | "error" } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Deviation queue 3 closed: confirmations ride the v2 toast overlay
+  // ONLY — no transient status-line text (the slot was invisible anyway;
+  // lifecycle state still feeds statusSummary via setStatus call sites).
   const flashStatus = (message: string, variant: "info" | "success" | "warning" | "error" = "info") => {
-    setStatus(message);
     setToast({ message, variant });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), variant === "error" ? 7000 : 5000);
@@ -1029,6 +1057,9 @@ export function App({
   const C = THEMES[theme];
   const mdStyle = useMemo(() => mdStyleFor(theme), [theme]);
   const spinner = useSpinner(running && view === "session");
+  // ctrl+o: the keyboard adapter for upstream's mouse-only tool-row
+  // expansion (no mouse plane here) — toggles every expandable row.
+  const [toolsExpanded, setToolsExpanded] = useState(false);
 
   const orderedSessions = [...sessions].sort((a, b) => {
     const ap = pinned.includes(a.sessionId) ? 1 : 0;
@@ -2062,6 +2093,9 @@ export function App({
       openSessions();
       return;
     }
+    // ctrl+o: expand/collapse the tool rows (the adapter for upstream's
+    // mouse-only expand; ledger deviation queue 1).
+    if (key.ctrl && key.name === "o") { setToolsExpanded((v) => !v); return; }
     // The OpenCode messages_* scroll grammar (pageup/pagedown, half-page,
     // line, first/last) — these keys can never be composer input, so they are
     // handled before the typing branch and work mid-draft.
@@ -2620,6 +2654,7 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["pageup / pagedown / ctrl+alt+u,d,y,e", "scroll transcript"],
     ["ctrl+g / ctrl+alt+g", "first message / jump to latest"],
     ["alt+up / alt+down / alt+end", "previous / next / last user message"],
+    ["ctrl+o", "expand / collapse tool output"],
   ];
   return (
     <ModalBackdrop C={C} width={width} height={height}>
@@ -2864,6 +2899,8 @@ footerHints={[
                 mdStyle={mdStyle}
                 isTail={index === visibleMsgs.length - 1}
                 width={dims.width}
+                toolsExpanded={toolsExpanded}
+                spinnerChar={spinner}
               />
             ))}
           </scrollbox>
