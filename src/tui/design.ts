@@ -327,6 +327,8 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "settings", aliases: [], description: "open settings" },
   { name: "thinking", aliases: [], description: "toggle thinking" },
   { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
+  { name: "copy", aliases: [], description: "copy the session transcript to the clipboard" },
+  { name: "export", aliases: [], description: "export the session transcript as markdown" },
   { name: "compact", aliases: [], description: "compact the session context" },
   { name: "quit", aliases: ["exit"], description: "exit zcode-tui" },
 ];
@@ -342,6 +344,7 @@ export function matchSlashCommands(prefix: string): SlashCommandSpec[] {
 export type SlashCommand =
   | "agents" | "sessions" | "new" | "home" | "model" | "themes" | "commands"
   | "status" | "effort" | "thinking" | "fork" | "compact" | "quit" | "help" | "timeline"
+  | "copy" | "export"
   | "diff"
   | "skills"
   | "mcps"

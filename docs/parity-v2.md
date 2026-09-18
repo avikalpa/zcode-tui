@@ -146,6 +146,23 @@ ports AROUND the logo, never over it).
   isolated-home settings drive + state.json pin proof + restart-restore.
   BLOCKED residuals recorded below (terminal-follow half).
 
+- **session copy/export family (0.6.33)** — the "messages.copy residual"
+  decoded against the pin: leader y already WAS the v2 semantic (Copy last
+  assistant message — the residual was mislabeled). Shipped instead:
+  session.copy (/copy + palette: the v2 formatSessionTranscript markdown —
+  ## User / ## Shell / ## Assistant bodies, _Thinking:_ block behind the
+  toggle, **Tool:** blocks with fenced json input, # title header with
+  **Session ID:**/**Created:**/**Updated:** and --- separators — into the
+  clipboard via OSC 52; the ported formatter + withTimestampedFallback live
+  in src/tui/session/transcript.ts), session.copy.id (palette, keys none
+  upstream), and session.export upgraded from the v1 editor-export to the
+  v2 DialogExportOptions flow (leader x kept + /export: markdown radio,
+  thinking/tools [x]/[ ] toggles, tab walk, Copy or tmp-file export and
+  the DialogExportResult path dialog). json/sanitize arms BLOCKED-ON-HOST
+  (no session/export verb; rows omitted, 0.6.31 Revert-row precedent).
+  The keybind ledger carried a batch covered-lie on copy/copy.id — retired
+  with per-row truth.
+
 ## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
 
 1. ~~Tool-call rendering~~ RE-PORTED 0.6.21 (see Shipped) — the row now
@@ -297,10 +314,11 @@ on the clean lane is what separates them.
   generalized to all messages (`messageJump`), shipped as the four palette
   commands the reference uses (they are palette-only upstream too);
   alt+end last-user kept from 0.6.18.
-- **messages.copy (residual)** — copy selected/all messages; the
-  per-message Copy row SHIPPED 0.6.31 (Message Actions; the old
-  last-assistant-only leader y stays), the transcript-selection copy is
-  the remaining piece.
+- ~~**messages.copy (residual)**~~ RETIRED 0.6.33 — the bullet was a
+  mislabel: v2 leader y copies the LAST ASSISTANT message (measured at
+  routes/session/index.tsx:1043), which ours has done all along; the
+  per-message Copy row shipped 0.6.31; what actually remained was the
+  session copy/export family — SHIPPED 0.6.33 (see Shipped).
 - ~~**stash family** — prompt_stash/pop/list + stash.delete dialog~~ SHIPPED
   0.6.23 (jsonl store `~/.config/zcode-tui/prompt-stash.jsonl`, MAX 50 with
   oldest-drop and sanitize-on-load; palette commands prompt.stash/.pop/.list
@@ -376,6 +394,11 @@ on the clean lane is what separates them.
 - **diff last-turn source** — needs a session-diff verb (v2: client.session.
   diff). Git/branch sources ship TUI-side.
 - **session.rename** — needs session/title update verb (long-standing).
+- **session.export JSON arm** — v2 json/sanitize export rides
+  client.api.session.export({sessionID, sanitize}); the zcode protocol has
+  no session/export verb (measured against the types.ts verb table,
+  0.6.33). The export dialog omits the json radio and its sanitize toggle
+  until the verb exists; the markdown arm is local and shipped.
 - **/btw side question (session.aside, v2.0.8)** — needs a one-shot
   session-scoped generate verb (v2: client.session.generate — runs no tool
   loop, answers from session context in a dialog; our protocol has

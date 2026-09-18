@@ -11,6 +11,11 @@ import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
 import { SelectDialog, TextPromptDialog, ModalBackdrop, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
+import { formatSessionTranscript } from "./session/transcript";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { probe } from "./probes";
 import {
   formatDateHeading,
@@ -168,7 +173,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "status" | "settings" | "msgactions" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "status" | "settings" | "msgactions" | "export" | "exportresult" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -176,6 +181,7 @@ export interface SessionRow {
   status: string;
   mode?: string;
   updatedAt: number;
+  createdAt?: number;
   modelId?: string;
 }
 
@@ -279,12 +285,14 @@ function statusMeta(row: SessionRow): string {
 function normalizeSession(value: Record<string, unknown>): SessionRow {
   const time = value.time as Record<string, unknown> | undefined;
   const updatedAt = Number(value.updatedAt ?? value.lastActivityAt ?? time?.updated ?? Date.now());
+  const createdAt = Number(time?.created ?? 0);
   return {
     sessionId: String(value.sessionId ?? value.id ?? ""),
     title: String(value.title ?? ""),
     status: String(value.status ?? value.phase ?? "idle"),
     mode: typeof value.mode === "string" ? value.mode : undefined,
     updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now(),
+    createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : undefined,
     modelId: typeof value.modelId === "string" ? value.modelId : undefined,
   };
 }
@@ -367,6 +375,115 @@ const isEffort = (value: unknown): value is (typeof EFFORTS)[number] =>
 // STATIC block char while busy (`▪`, mono fallback `*`; footer.width.ts +
 // footer.view.tsx). Our animated braille was an invention; prime doctrine
 // retires it (0.6.30).
+// Ported from opencode v2.0.8 ui/dialog-export-options.tsx: the export
+// form — format radio, the toggles the format carries, tab walks (v2's
+// step order), return activates, Copy/Export confirm, esc cancels. OUR
+// host gap: the zcode protocol has no session/export verb, so the json
+// radio and its sanitize toggle have no data source and stay out (the
+// 0.6.31 Revert-row precedent) — the tab order shortens accordingly.
+function ExportDialog({ C, onClose, onConfirm, width, height }: {
+  C: ThemeTokens;
+  onClose: () => void;
+  onConfirm: (opts: { action: "copy" | "export"; thinking: boolean; tools: boolean }) => void;
+  width: number;
+  height: number;
+}) {
+  type Active = "markdown" | "thinking" | "tools" | "copy" | "export";
+  const [active, setActive] = useState<Active>("markdown");
+  const [thinking, setThinking] = useState(true);
+  const [tools, setTools] = useState(true);
+  // The keyboard closure reads the mirror, not the render state — the
+  // dialog must behave identically however useKeyboard registers handlers
+  // across re-renders (the CX2 lesson: return read a stale `active` and
+  // the toggle never fired).
+  const mirror = useRef({ active: "markdown" as Active, thinking: true, tools: true });
+  const move = (next: Active) => { mirror.current.active = next; setActive(next); };
+  useKeyboard((key) => {
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
+    if (key.name === "tab" || key.sequence === "\t") {
+      const order: Active[] = ["markdown", "thinking", "tools", "copy", "export"];
+      move(order[(order.indexOf(mirror.current.active) + 1) % order.length]);
+      return;
+    }
+    if (key.name === "return") {
+      // v2: a format row's return only selects it — the flow stays open.
+      const s = mirror.current;
+      if (s.active === "markdown") return;
+      if (s.active === "thinking") { s.thinking = !s.thinking; setThinking(s.thinking); }
+      else if (s.active === "tools") { s.tools = !s.tools; setTools(s.tools); }
+      else onConfirm({ action: s.active, thinking: s.thinking, tools: s.tools });
+    }
+  });
+  return (
+    <ModalBackdrop C={C} width={width} height={height}>
+      <box style={{ width: Math.min(64, Math.max(44, width - 4)), flexDirection: "column", flexShrink: 0, backgroundColor: C.panel, paddingTop: 1, paddingBottom: 1, paddingLeft: 2, paddingRight: 2 }}>
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content="Export session" fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content="esc" fg={C.faint} />
+        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+          <text content="Export as: " fg={C.fg} />
+          <box style={{ paddingLeft: 1, paddingRight: 1, backgroundColor: active === "markdown" ? C.selected : C.panel }}>
+            <text content="◉ Markdown" fg={active === "markdown" ? C.bg : C.accent} />
+          </box>
+        </box>
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: active === "thinking" ? C.selected : C.panel }}>
+          <text content={thinking ? "[x] " : "[ ] "} fg={active === "thinking" ? C.bg : C.fg} />
+          <text content="Include thinking" fg={active === "thinking" ? C.bg : C.subtle} />
+        </box>
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: active === "tools" ? C.selected : C.panel }}>
+          <text content={tools ? "[x] " : "[ ] "} fg={active === "tools" ? C.bg : C.fg} />
+          <text content="Include tools" fg={active === "tools" ? C.bg : C.subtle} />
+        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "flex-end", flexShrink: 0 }}>
+          <box style={{ paddingLeft: 4, paddingRight: 4, backgroundColor: active === "copy" ? C.selected : C.surface }}>
+            <text content="Copy" fg={active === "copy" ? C.bg : C.fg} />
+          </box>
+          <box style={{ paddingLeft: 4, paddingRight: 4, backgroundColor: active === "export" ? C.accent : C.surface }}>
+            <text content="Export" fg={active === "export" ? C.accentText : C.fg} />
+          </box>
+        </box>
+      </box>
+    </ModalBackdrop>
+  );
+}
+
+// Ported from opencode v2.0.8 ui/dialog-export-result.tsx: the written
+// export's path; enter/esc closes.
+function ExportResultDialog({ C, path, onClose, width, height }: {
+  C: ThemeTokens;
+  path: string;
+  onClose: () => void;
+  width: number;
+  height: number;
+}) {
+  useKeyboard((key) => {
+    if (key.name === "escape" || key.name === "return" || (key.ctrl && key.name === "c")) { onClose(); return; }
+  });
+  return (
+    <ModalBackdrop C={C} width={width} height={height}>
+      <box style={{ width: Math.min(72, Math.max(44, width - 4)), flexDirection: "column", flexShrink: 0, backgroundColor: C.panel, paddingTop: 1, paddingBottom: 1, paddingLeft: 2, paddingRight: 2 }}>
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content="Session exported" fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content="esc" fg={C.faint} />
+        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+          <text content={path} fg={C.fg} wrapMode="none" />
+        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "flex-end", flexShrink: 0 }}>
+          <box style={{ paddingLeft: 3, paddingRight: 3, backgroundColor: C.accent }}>
+            <text content="Close" fg={C.accentText} />
+          </box>
+        </box>
+      </box>
+    </ModalBackdrop>
+  );
+}
+
 function runningMarker(active: boolean): string {
   return active ? "▪" : "";
 }
@@ -1585,6 +1702,8 @@ export function App({
       if (command === "thinking") { await toggleThinking(); return; }
       if (command === "fork") { openForkDialog(); return; }
       if (command === "compact") { await compactActive(); return; }
+      if (command === "copy") { copyTranscript(); return; }
+      if (command === "export") { setDialog("export"); return; }
       if (command === "quit") { onQuit(); return; }
       return;
     }
@@ -1775,6 +1894,55 @@ export function App({
     }
   };
 
+  // v2 session.copy.id ("Copy session ID") — palette-only upstream, keys none.
+  const [exportResultPath, setExportResultPath] = useState<string | null>(null);
+  const copySessionId = () => {
+    if (!activeId) return;
+    const ok = osc52Copy(activeId);
+    flashStatus(ok ? "Session ID copied to clipboard!" : "Failed to copy session ID", ok ? "success" : "error");
+  };
+  // v2 session.copy ("/copy"): the full transcript as markdown —
+  // formatSessionTranscript(session, messages, thinking=true), the
+  // reference call's own arguments — into the clipboard.
+  const copyTranscript = () => {
+    const row = sessions.find((s) => s.sessionId === activeId);
+    if (!activeId || !row) return; // v2: if (!sessionData) return
+    const content = formatSessionTranscript(
+      { id: activeId, title: row.title || undefined, createdAt: row.createdAt, updatedAt: row.updatedAt },
+      msgsRef.current, true,
+    );
+    const ok = osc52Copy(content);
+    flashStatus(ok ? "Session transcript copied to clipboard!" : "Failed to copy session transcript", ok ? "success" : "error");
+  };
+  // v2 session.export (leader x + /export): the DialogExportOptions flow.
+  // The JSON arm (client.api.session.export) has no zcode verb, so the
+  // dialog never offers json/sanitize until the host grows one (the 0.6.31
+  // Revert-row precedent); the markdown arm is fully local.
+  const runExport = async (opts: { action: "copy" | "export"; thinking: boolean; tools: boolean }) => {
+    const row = sessions.find((s) => s.sessionId === activeId);
+    if (!activeId || !row) return; // v2: if (!sessionData) return
+    try {
+      const content = formatSessionTranscript(
+        { id: activeId, title: row.title || undefined, createdAt: row.createdAt, updatedAt: row.updatedAt },
+        msgsRef.current, opts.thinking, opts.tools,
+      );
+      if (opts.action === "copy") {
+        if (!osc52Copy(content)) throw new Error("clipboard unavailable");
+        closeDialog();
+        flashStatus("Copied to clipboard", "success");
+        return;
+      }
+      // Upstream writeExport: mkdir -p then write.
+      const filepath = `${tmpdir()}/session-${randomUUID()}.md`;
+      await mkdir(dirname(filepath), { recursive: true });
+      await writeFile(filepath, content, "utf8");
+      setExportResultPath(filepath);
+      setDialog("exportresult");
+    } catch {
+      closeDialog();
+      flashStatus("Failed to export session", "error");
+    }
+  };
   // opencode session.message.user.* + messages_last_user: jump between the
   // session's USER prompts (alt+up / alt+down walk, alt+end last). The
   // anchor is the last jumped-to row; jump-to-latest clears it.
@@ -2392,14 +2560,12 @@ export function App({
         });
         return;
       }
-      // opencode session_export: the transcript as markdown, into the editor.
-      if (key.name === "x" && view === "session") {
-        const text = [`# ${activeTitle || "zcode-tui session"}`, ...msgsRef.current.map((m) => `## ${m.role === "tool" ? `tool: ${m.toolName ?? "tool"}` : m.role}\n\n${m.text}`)].join("\n\n");
-        void suspendForEditor(text).then((out) => {
-          flashStatus(out === null ? (process.env.VISUAL || process.env.EDITOR ? "export failed" : "no $EDITOR set") : "session exported to editor", out === null ? "warning" : "info");
-        });
-        return;
-      }
+      // opencode session.export (v2.0.8): leader x opens the
+      // DialogExportOptions flow (markdown + thinking/tools toggles, Copy or
+      // tmp-file export and the DialogExportResult path dialog). v2 kept the
+      // "to editor" description from v1 but the flow never touches an
+      // editor — the v1 editor-export retires with this.
+      if (key.name === "x" && view === "session") { setDialog("export"); return; }
       // opencode messages_copy: the last assistant message, via OSC 52.
       // opencode session_queued_prompts: manage the prompts queued behind a
       // running turn (enter removes the selected entry).
@@ -3536,6 +3702,12 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
   if (dialog === "status") {
     return <StatusDialog C={C} mcpState={mcpState} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
+  if (dialog === "export") {
+    return <ExportDialog C={C} onClose={closeDialog} onConfirm={(opts) => void runExport(opts)} width={dims.width} height={dims.height} />;
+  }
+  if (dialog === "exportresult") {
+    return <ExportResultDialog C={C} path={exportResultPath ?? ""} onClose={closeDialog} width={dims.width} height={dims.height} />;
+  }
   if (dialog === "help") {
     return <HelpDialog C={C} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
@@ -3550,6 +3722,9 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "fork", label: "fork session", description: "latest checkpoint", value: () => void forkActive() },
       { id: "fork-message", label: "fork at message…", value: openForkDialog },
       { id: "compact", label: "compact session", value: () => void compactActive() },
+      { id: "copy-transcript", label: "Copy session transcript", description: "markdown · v2 session.copy · /copy", value: copyTranscript },
+      { id: "copy-session-id", label: "Copy session ID", description: "v2 session.copy.id", value: copySessionId },
+      { id: "export", label: "Export session transcript…", description: "markdown · leader x · /export", value: () => setDialog("export") },
       { id: "stash", label: "stash prompt", description: "park the draft · v2 prompt.stash", value: () => { if (!draft) return; promptStash.push({ prompt: { text: draft } }); setDraft(""); setCursorBoth(null); stashChanged(); } },
       { id: "stash-pop", label: "stash pop", description: "restore the newest stashed draft", value: () => { const e = promptStash.pop(); if (!e) return; setDraft(e.prompt.text); setCursorBoth(null); stashChanged(); } },
       { id: "stash-list", label: "stash list…", description: "restore or delete stashed drafts", value: () => { setStashArm(undefined); setDialog("stash"); } },

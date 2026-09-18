@@ -392,19 +392,21 @@ if b0 and alive(pid):
     check(pid, "G3 input undo restores the line", "beta" in disp or "alpha" in disp)
     os.write(master, b"\x03"); time.sleep(0.3)
 
-    # X1/X2: export transcript to $EDITOR; copy last message via OSC 52
+    # X1: leader x opens the v2.0.8 export dialog (0.6.33 retired the v1
+    # editor-export — the flow never touches an editor now). X2: leader y
+    # copies the last assistant message via OSC 52 (the v2 messages.copy
+    # semantic). Poll the ready paint (dialog-open law).
     os.write(master, b"\x03"); time.sleep(0.4)   # settle: clear any draft
-    try:
-        os.remove("/tmp/zct-export-latest.md")
-    except FileNotFoundError:
-        pass
-    os.write(master, b"\x18x"); read_for(master, stream, 2.5)    # leader x: export
-    try:
-        export = open("/tmp/zct-export-latest.md").read()
-        x1 = "## " in export and len(export) > 50
-    except FileNotFoundError:
-        x1 = False
-    check(pid, "X1 leader x exports the transcript to $EDITOR", x1)
+    os.write(master, b"\x18x"); read_for(master, stream, 2.5)    # leader x: export dialog
+    x1 = False
+    for _ in range(8):
+        read_for(master, stream, 0.5)
+        d = "\n".join(screen.display)
+        if "Export session" in d and "Include thinking" in d:
+            x1 = True
+            break
+    check(pid, "X1 leader x opens the v2 export dialog", x1)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)     # esc: close
     mark_raw = len(RAW)
     os.write(master, b"\x18y"); read_for(master, stream, 1.2)    # leader y: copy
     check(pid, "X2 leader y copies via OSC 52", b"\x1b]52;c;" in bytes(RAW[mark_raw:]))
@@ -494,12 +496,101 @@ if b0 and alive(pid):
             break
     check(pid, "I0 escape interrupts the running turn", interrupted)
 
+    # CX-series: the session copy/export family (0.6.33) — a session is
+    # active here (the I-series throwaway). OSC 52 output is invisible to
+    # the emulator, so the copy proofs read the v2 toast grammar; the
+    # export proof reads the dialog flow and the result path.
+    cx_clear = False
+    for _ in range(6):
+        read_for(master, stream, 0.5)
+        if "Ask anything" in "\n".join(screen.display):
+            cx_clear = True
+            break
+    check(pid, "CX-pre composer verified empty", cx_clear)
+    os.write(master, b"/copy")
+    cx_popup = False
+    for _ in range(6):
+        read_for(master, stream, 0.5)
+        d = "\n".join(screen.display)
+        if "/copy" in d and "Ask anything" not in d:
+            cx_popup = True
+            break
+    check(pid, "CX-pre /copy popup verified before enter", cx_popup)
+    os.write(master, b"\r")
+    cx0 = False
+    for _ in range(8):
+        read_for(master, stream, 0.6)
+        if "Session transcript copied to clipboard!" in "\n".join(screen.display):
+            cx0 = True
+            break
+    check(pid, "CX0 /copy flashes the v2 success toast", cx0)
+
+    os.write(master, b"\x18x")                                # leader x: export dialog
+    cx1 = False
+    for _ in range(8):
+        read_for(master, stream, 0.6)
+        d = "\n".join(screen.display)
+        if "Export session" in d and "Include thinking" in d and "Export as:" in d:
+            cx1 = True
+            break
+    if not cx1:
+        print("---- CX1 FAIL SCREEN ----")
+        for i, line in enumerate(screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    check(pid, "CX1 leader x opens the export dialog (radio + toggles)", cx1)
+    os.write(master, b"\t"); read_for(master, stream, 0.5)    # tab: thinking row
+    os.write(master, b"\r"); read_for(master, stream, 0.5)    # toggle thinking off
+    check(pid, "CX2 tab+return toggles Include thinking", "[ ] Include thinking" in "\n".join(screen.display))
+    os.write(master, b"\t"); read_for(master, stream, 0.4)    # tools
+    os.write(master, b"\t"); read_for(master, stream, 0.4)    # copy
+    os.write(master, b"\t"); read_for(master, stream, 0.4)    # export
+    os.write(master, b"\r")
+    cx3 = False
+    for _ in range(8):
+        read_for(master, stream, 0.6)
+        d = "\n".join(screen.display)
+        if "Session exported" in d and "/tmp/session-" in d:
+            cx3 = True
+            break
+    check(pid, "CX3 export writes the tmp file and shows the result dialog", cx3)
+    os.write(master, b"\r"); read_for(master, stream, 0.6)
+    check(pid, "CX4 return closes the result dialog", "Session exported" not in "\n".join(screen.display))
+
+    os.write(master, b"/export")
+    cx_popup2 = False
+    for _ in range(6):
+        read_for(master, stream, 0.5)
+        d = "\n".join(screen.display)
+        if "/export" in d and "Ask anything" not in d:
+            cx_popup2 = True
+            break
+    check(pid, "CX-pre /export popup verified before enter", cx_popup2)
+    os.write(master, b"\r")
+    cx5 = False
+    for _ in range(8):
+        read_for(master, stream, 0.6)
+        if "Export session" in "\n".join(screen.display):
+            cx5 = True
+            break
+    check(pid, "CX5 /export opens the same dialog", cx5)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+    check(pid, "CX6 esc closes the export dialog", "Export session" not in "\n".join(screen.display))
+    os.write(master, b"\x03"); time.sleep(0.3)
 
 else:
     for lbl in ("C-1 open() completed (messages witness)", "C0 typing after open() paints — THE bug",
                 "G0 ctrl+w deletes the previous word", "G1 ctrl+a + alt+d delete the first word",
                 "G2 ctrl+u clears the line", "G3 input undo restores the line",
-                "I0 escape interrupts the running turn"):
+                "I0 escape interrupts the running turn",
+                "CX-pre composer verified empty", "CX-pre /copy popup verified before enter",
+                "CX0 /copy flashes the v2 success toast",
+                "CX1 leader x opens the export dialog (radio + toggles)",
+                "CX2 tab+return toggles Include thinking",
+                "CX3 export writes the tmp file and shows the result dialog",
+                "CX4 return closes the result dialog",
+                "CX-pre /export popup verified before enter", "CX5 /export opens the same dialog",
+                "CX6 esc closes the export dialog"):
         check(pid, lbl, False)
 
 # S-series on the long /themes transcript
