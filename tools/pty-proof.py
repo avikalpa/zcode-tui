@@ -831,5 +831,101 @@ for _ in range(4):
 check(pid, "DF12 composer alive after closing the diff route", token)
 kill(pid)
 
+# TH-series: the theme-mode machine (v2 context/theme.tsx — 0.6.32). Runs in
+# an ISOLATED HOME so the persistence proof reads its own state.json and a
+# runner account never sees a mode flip. Colour itself is invisible to the
+# pyte text dump, so the asserts read the CONSUMPTION: the settings row's
+# value meta, and the state file the pin persists.
+TH_HOME = "/tmp/zct-proof-home"
+subprocess.run(["rm", "-rf", TH_HOME])
+subprocess.run(["mkdir", "-p", TH_HOME])
+
+def spawn_th():
+    m, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 34, 110, 0, 0))
+    scr = pyte.Screen(110, 34)
+    strm = pyte.ByteStream(scr)
+    p = subprocess.Popen([binary], stdin=slave, stdout=slave, stderr=subprocess.DEVNULL,
+                         cwd="/tmp/zct-proof-cwd",
+                         env=dict(os.environ, TERM="xterm-256color", HOME=TH_HOME),
+                         close_fds=True).pid
+    os.close(slave)
+    return p, m, scr, strm
+
+def poll_paint(m, st, scr, needles, rounds=16):
+    for _ in range(rounds):
+        read_for(m, st, 0.6)
+        d = "\n".join(scr.display)
+        if all(n in d for n in needles):
+            return True
+    return False
+
+def color_mode_seg(scr):
+    d = "\n".join(scr.display)
+    return d.split("Color mode")[1][:60] if "Color mode" in d else ""
+
+th_pid, th_m, th_scr, th_st = spawn_th()
+th_open = poll_paint(th_m, th_st, th_scr, ["Ask anything"])
+check(th_pid, "TH0 isolated-home boot renders", th_open)
+
+if th_open:
+    os.write(th_m, b"/settings")
+    set_pop = False
+    for _ in range(10):
+        read_for(th_m, th_st, 0.5)
+        if "settings" in "\n".join(th_scr.display):
+            set_pop = True
+            break
+    check(th_pid, "TH1 /settings popup visible before enter", set_pop)   # the blind-enter law
+    os.write(th_m, b"\r")
+    set_open = poll_paint(th_m, th_st, th_scr, ["Settings", "Color mode"])
+    check(th_pid, "TH2 settings dialog shows the Color mode row", set_open)
+    check(th_pid, "TH3 fresh home: Color mode reads system (unlocked)", set_open and "system" in color_mode_seg(th_scr))
+
+    # walk: row 0 Theme -> row 1 Color mode, then right: system -> dark -> light
+    os.write(th_m, b"\x1b[B"); read_for(th_m, th_st, 0.8)
+    os.write(th_m, b"\x1b[C"); read_for(th_m, th_st, 1.0)
+    check(th_pid, "TH4 right cycles system -> dark", set_open and "dark" in color_mode_seg(th_scr) and "light" not in color_mode_seg(th_scr))
+    os.write(th_m, b"\x1b[C"); read_for(th_m, th_st, 1.0)
+    check(th_pid, "TH5 right cycles dark -> light", set_open and "light" in color_mode_seg(th_scr))
+    os.write(th_m, b"\x1b"); read_for(th_m, th_st, 0.8)
+
+    # read the pin while the writer is still alive (check() vetoes a dead pid)
+    persisted = False
+    try:
+        import json as _json
+        state = _json.loads(open(f"{TH_HOME}/.config/zcode-tui/state.json").read())
+        persisted = state.get("theme", {}).get("mode") == "light"
+    except Exception:
+        pass
+    check(th_pid, "TH6 the pin persisted: state.json theme.mode == light", persisted)
+    kill(th_pid)
+
+    # restart on the SAME home: the boot read must restore the lock
+    th_pid2, th_m2, th_scr2, th_st2 = spawn_th()
+    boot2 = poll_paint(th_m2, th_st2, th_scr2, ["Ask anything"])
+    os.write(th_m2, b"/settings")
+    poll_paint(th_m2, th_st2, th_scr2, ["settings"])
+    os.write(th_m2, b"\r")
+    set2 = poll_paint(th_m2, th_st2, th_scr2, ["Settings", "Color mode"])
+    if not (set2 and "light" in color_mode_seg(th_scr2)):
+        print("---- TH7 FAIL SCREEN ----")
+        for i, line in enumerate(th_scr2.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    check(th_pid2, "TH7 restart restores the lock (Color mode reads light)", set2 and "light" in color_mode_seg(th_scr2))
+    if alive(th_pid2):
+        os.write(th_m2, b"\x1b"); read_for(th_m2, th_st2, 0.5)
+    kill(th_pid2)
+else:
+    for lbl in ("TH1 /settings popup visible before enter",
+                "TH2 settings dialog shows the Color mode row",
+                "TH3 fresh home: Color mode reads system (unlocked)",
+                "TH4 right cycles system -> dark",
+                "TH5 right cycles dark -> light",
+                "TH6 the pin persisted: state.json theme.mode == light",
+                "TH7 restart restores the lock (Color mode reads light)"):
+        check(th_pid, lbl, False)
+
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")
 sys.exit(0 if all(ok for _, ok in verdicts) else 1)

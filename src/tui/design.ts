@@ -3,10 +3,13 @@
 // language as OpenCode without taking a dependency on its private components.
 //
 // Theme sources, in order of authority:
-//   1. OFFICIAL_THEMES (themes-generated.ts) — the 33 official OpenCode TUI
-//      palettes, ported verbatim (dark arm) from the upstream repo.
-//   2. The two zai arms below — ZCode brand colours that have no OpenCode twin.
-import { OFFICIAL_DIFF, OFFICIAL_MD, OFFICIAL_THEMES } from "./themes-generated";
+//   1. OFFICIAL_THEMES / OFFICIAL_THEMES_LIGHT (themes-generated.ts) — the 33
+//      official OpenCode TUI palettes, ported verbatim (both arms, the
+//      upstream theme:{token:{dark,light}} documents) from the vendored
+//      reference.
+//   2. The two zai arms below — ZCode brand colours that have no OpenCode
+//      twin (single-mode documents: zai-dark is dark-only, zai-light light).
+import { OFFICIAL_DIFF, OFFICIAL_MD, OFFICIAL_THEMES, OFFICIAL_DIFF_LIGHT, OFFICIAL_MD_LIGHT, OFFICIAL_THEMES_LIGHT } from "./themes-generated";
 
 export interface ThemeTokens {
   bg: string;
@@ -85,11 +88,40 @@ export const THEMES: Record<string, ThemeTokens> = {
 export type ThemeName = string;
 export const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
 
+// The color arms (v2 context/theme.tsx): a theme document carries the modes
+// it defines; the active mode resolves only within those (v2 loadTheme keeps
+// the document's first mode when the request is outside it).
+export type ThemeMode = "dark" | "light";
+export const THEME_MODES: readonly ThemeMode[] = ["dark", "light"];
+
+// v2 themeModes(document): official documents define both arms; the zai
+// brand arms are single-mode.
+export function themeModes(theme: ThemeName): readonly ThemeMode[] {
+  if (theme in OFFICIAL_THEMES_LIGHT) return THEME_MODES;
+  if (theme === "zai-light") return ["light"];
+  if (theme === "zai-dark") return ["dark"];
+  return THEME_MODES;
+}
+
 export function isOfficialTheme(name: ThemeName): boolean {
   return name in OFFICIAL_THEMES;
 }
 
-export function mdFor(theme: ThemeName): MdTokens {
+export function tokensFor(theme: ThemeName, requested: ThemeMode = "dark"): ThemeTokens {
+  const modes = themeModes(theme);
+  const mode = modes.includes(requested) ? requested : (modes[0] ?? "dark");
+  if (mode === "light") {
+    const light = (OFFICIAL_THEMES_LIGHT as Record<string, ThemeTokens>)[theme];
+    if (light) return light;
+  }
+  return THEMES[theme] ?? THEMES.opencode;
+}
+
+export function mdFor(theme: ThemeName, requested: ThemeMode = "dark"): MdTokens {
+  if (requested === "light" && themeModes(theme).includes("light")) {
+    const light = (OFFICIAL_MD_LIGHT as Record<string, MdTokens>)[theme];
+    if (light) return light;
+  }
   return OFFICIAL_MD[theme] ?? OFFICIAL_MD.opencode;
 }
 
@@ -97,7 +129,11 @@ export function mdFor(theme: ThemeName): MdTokens {
 // the diff viewer's card backgrounds, signs, counts and hunk headers read
 // these, exactly as the reference theme module exposes them.
 export type DiffTokens = typeof OFFICIAL_DIFF[string];
-export function diffFor(theme: ThemeName): DiffTokens {
+export function diffFor(theme: ThemeName, requested: ThemeMode = "dark"): DiffTokens {
+  if (requested === "light" && themeModes(theme).includes("light")) {
+    const light = (OFFICIAL_DIFF_LIGHT as Record<string, DiffTokens>)[theme];
+    if (light) return light;
+  }
   return OFFICIAL_DIFF[theme] ?? OFFICIAL_DIFF.opencode;
 }
 

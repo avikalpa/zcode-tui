@@ -5,6 +5,10 @@ The JSONs come from the vendored reference tree
 (tools/opencode-reference/tui/theme/assets/, pinned by
 tools/sync-opencode.sh) so the theme arms re-sync with every reference pin.
 
+Emits BOTH arms (dark + light) per theme — upstream theme JSONs carry
+theme:{token:{dark,light}}. A token that upstream only defines for one arm
+resolves to that value for both (arm cascade, never invented).
+
 Usage: python3 tools/gen-themes.py
 """
 import json
@@ -75,6 +79,8 @@ MD_MAP = [
     ("synPunct", "syntaxPunctuation", ["text"]),
 ]
 
+ARMS = [("dark", ""), ("light", "_LIGHT")]
+
 
 def resolve(value, defs, depth=0):
     if depth > 8:
@@ -84,24 +90,22 @@ def resolve(value, defs, depth=0):
     return value
 
 
-def pick(theme, key, fallbacks, defs):
-    entry = theme.get(key)
-    if isinstance(entry, dict):
-        raw = entry.get("dark", entry.get("light"))
-    elif entry is None:
-        raw = None
-    else:
-        raw = entry
+def pick(theme, key, fallbacks, defs, arm, crossed):
+    def entry_raw(entry):
+        if isinstance(entry, dict):
+            v = entry.get(arm)
+            if v is None:
+                v = entry.get("dark" if arm == "light" else "light")
+                if v is not None:
+                    crossed.append(key)
+            return v
+        return entry
+
+    raw = entry_raw(theme.get(key))
     if raw is not None:
         return resolve(raw, defs)
     for fb in fallbacks:
-        entry = theme.get(fb)
-        if isinstance(entry, dict):
-            raw = entry.get("dark", entry.get("light"))
-        elif entry is not None:
-            raw = entry
-        else:
-            raw = None
+        raw = entry_raw(theme.get(fb))
         if raw is not None:
             return resolve(raw, defs)
     return None
@@ -130,60 +134,70 @@ def main():
         "// GENERATED FILE — do not hand-edit.",
         "// Source: anomalyco/opencode (mirror of sst/opencode) dev branch,",
         "// packages/tui/src/theme/assets/*.json, fetched 2026-09-10.",
+        "// Both arms per theme (theme:{token:{dark,light}}); a token upstream",
+        "// defines for only one arm resolves to that value for both.",
         "// Regenerate: python3 tools/gen-themes.py",
         "",
         "export interface MdTokens {",
         *[f"  {name}: string;" for name, _, _fb in MD_MAP],
         "}",
         "",
-        "// Exact OpenCode palettes (dark arm), one entry per official theme.",
-        "export const OFFICIAL_THEMES: Record<string, {",
-        *[f"  {name}: string;" for name, _, _fb in TOKEN_MAP],
-        "}> = {",
     ]
-    diff_lines = ["", "export const OFFICIAL_DIFF: Record<string, {", *[f"  {name}: string;" for name, _, _fb in DIFF_MAP], "}> = {"]
-    md_lines = ["", "export const OFFICIAL_MD: Record<string, MdTokens> = {"]
     problems = []
-    for name in names:
-        data = json.loads((SRC / f"{name}.json").read_text())
-        defs = data.get("defs", {})
-        theme = data.get("theme", {})
-        tokens = {}
-        for token, key, fallbacks in TOKEN_MAP:
-            v = pick(theme, key, fallbacks, defs)
-            if v is None or not is_hex(v):
-                problems.append(f"{name}: {token} ({key}) -> {v!r}")
-                v = "#000000"
-            tokens[token] = normalize(v).lower()
-        md = {}
-        for token, key, fallbacks in MD_MAP:
-            v = pick(theme, key, fallbacks, defs)
-            if v is None or not is_hex(v):
-                problems.append(f"{name}: md.{token} ({key}) -> {v!r}")
-                v = "#000000"
-            md[token] = normalize(v).lower()
-        body = ", ".join(f"{k}: \"{v}\"" for k, v in tokens.items())
-        lines.append(f"  \"{name}\": {{ {body} }},")
-        mdbody = ", ".join(f"{k}: \"{v}\"" for k, v in md.items())
-        md_lines.append(f"  \"{name}\": {{ {mdbody} }},")
-        dv = {}
-        for token, key, fallbacks in DIFF_MAP:
-            v = pick(theme, key, fallbacks, defs)
-            if v is None:
-                v = {"diffAdded": "#4fd6be", "diffRemoved": "#c53b53", "diffContext": "#828bb8",
-                     "diffAddedBg": "#20303b", "diffRemovedBg": "#37222c", "diffContextBg": "#1e1e1e",
-                     "diffHunkHeader": "#828bb8", "diffHighlightAdded": "#b8db87", "diffHighlightRemoved": "#e26a75",
-                     "diffLineNumber": "#8f8f8f", "diffAddedLineNumberBg": "#1b2b34", "diffRemovedLineNumberBg": "#2d1f26"}[token]
-            dv[token] = normalize(v).lower()
-        dbody = ", ".join(f"{k}: \"{v}\"" for k, v in dv.items())
-        diff_lines.append(f"  \"{name}\": {{ {dbody} }},")
-    lines.append("} as const;")
-    lines.extend(md_lines)
-    lines.append("} as const;")
-    lines.extend(diff_lines)
-    lines.append("} as const;")
-    OUT.write_text("\n".join(lines) + "\n")
-    print(f"wrote {OUT} with {len(names)} themes")
+    for arm, suffix in ARMS:
+        crossed = []
+        label = "dark arm" if arm == "dark" else "light arm (dark-cascaded where upstream omits light)"
+        lines.append(f"// Exact OpenCode palettes ({label}), one entry per official theme.")
+        lines.append(f"export const OFFICIAL_THEMES{suffix}: Record<string, {{")
+        lines.extend(f"  {name}: string;" for name, _, _fb in TOKEN_MAP)
+        lines.append("}> = {")
+        md_lines = ["", "export const OFFICIAL_MD" + suffix + ": Record<string, MdTokens> = {"]
+        diff_lines = ["", "export const OFFICIAL_DIFF" + suffix + ": Record<string, {", *[f"  {name}: string;" for name, _, _fb in DIFF_MAP], "}> = {"]
+        for name in names:
+            data = json.loads((SRC / f"{name}.json").read_text())
+            defs = data.get("defs", {})
+            theme = data.get("theme", {})
+            tokens = {}
+            for token, key, fallbacks in TOKEN_MAP:
+                v = pick(theme, key, fallbacks, defs, arm, crossed)
+                if v is None or not is_hex(v):
+                    problems.append(f"{arm}/{name}: {token} ({key}) -> {v!r}")
+                    v = "#000000"
+                tokens[token] = normalize(v).lower()
+            md = {}
+            for token, key, fallbacks in MD_MAP:
+                v = pick(theme, key, fallbacks, defs, arm, crossed)
+                if v is None or not is_hex(v):
+                    problems.append(f"{arm}/{name}: md.{token} ({key}) -> {v!r}")
+                    v = "#000000"
+                md[token] = normalize(v).lower()
+            body = ", ".join(f"{k}: \"{v}\"" for k, v in tokens.items())
+            lines.append(f"  \"{name}\": {{ {body} }},")
+            mdbody = ", ".join(f"{k}: \"{v}\"" for k, v in md.items())
+            md_lines.append(f"  \"{name}\": {{ {mdbody} }},")
+            dv = {}
+            for token, key, fallbacks in DIFF_MAP:
+                v = pick(theme, key, fallbacks, defs, arm, crossed)
+                if v is None:
+                    v = {"diffAdded": "#4fd6be", "diffRemoved": "#c53b53", "diffContext": "#828bb8",
+                         "diffAddedBg": "#20303b", "diffRemovedBg": "#37222c", "diffContextBg": "#1e1e1e",
+                         "diffHunkHeader": "#828bb8", "diffHighlightAdded": "#b8db87", "diffHighlightRemoved": "#e26a75",
+                         "diffLineNumber": "#8f8f8f", "diffAddedLineNumberBg": "#1b2b34", "diffRemovedLineNumberBg": "#2d1f26"}[token]
+                dv[token] = normalize(v).lower()
+            dbody = ", ".join(f"{k}: \"{v}\"" for k, v in dv.items())
+            diff_lines.append(f"  \"{name}\": {{ {dbody} }},")
+        lines.append("} as const;")
+        lines.extend(md_lines)
+        lines.append("} as const;")
+        lines.extend(diff_lines)
+        lines.append("} as const;")
+        lines.append("")
+        if crossed:
+            from collections import Counter
+            top = Counter(crossed).most_common(8)
+            print(f"{arm}: {len(crossed)} token(s) arm-cascaded; by key: {top}")
+    OUT.write_text("\n".join(lines).rstrip() + "\n")
+    print(f"wrote {OUT} with {len(names)} themes × {len(ARMS)} arms")
     if problems:
         print("NON-HEX RESOLUTIONS (check these):")
         for p in problems:

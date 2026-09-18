@@ -27,14 +27,15 @@ import {
   parseSlashCommand,
   shortCwd,
   SLASH_COMMANDS,
-  THEMES,
   THEME_NAMES,
+  themeModes,
+  tokensFor,
   type SlashCommandSpec,
+  type ThemeMode,
   type ThemeName,
   type ThemeTokens,
   diffFor,
 } from "./design";
-import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
 import { DiffViewer, diffSourceLabel, filetypeOf, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
 import { PatchDiff } from "./diff/patch-diff";
 import { ToolPart } from "./session/tool-parts";
@@ -65,14 +66,15 @@ const VERSION = pkgJson.version;
 // the active theme's markdown/syntax/diff arms. This is what turns fenced code
 // blocks into highlighted, numbered panels and gives headings/lists/diffs
 // their structure colours.
-const mdStyleCache = new Map<ThemeName, SyntaxStyle>();
+const mdStyleCache = new Map<string, SyntaxStyle>();
 type ThemeRule = { scope: string[]; style: { foreground?: string; background?: string; bold?: boolean; italic?: boolean; underline?: boolean } };
-function mdStyleFor(theme: ThemeName): SyntaxStyle {
-  const cached = mdStyleCache.get(theme);
+function mdStyleFor(theme: ThemeName, themeMode: ThemeMode): SyntaxStyle {
+  const cacheKey = `${theme}:${themeMode}`;
+  const cached = mdStyleCache.get(cacheKey);
   if (cached) return cached;
-  const C = THEMES[theme];
-  const md = mdFor(theme);
-  const diff = OFFICIAL_DIFF[theme] ?? OFFICIAL_DIFF.opencode;
+  const C = tokensFor(theme, themeMode);
+  const md = mdFor(theme, themeMode);
+  const diff = diffFor(theme, themeMode);
   const rules: ThemeRule[] = [
     { scope: ["default"], style: { foreground: C.fg } },
     { scope: ["comment", "comment.documentation"], style: { foreground: md.synComment, italic: true } },
@@ -149,7 +151,7 @@ function mdStyleFor(theme: ThemeName): SyntaxStyle {
       underline: r.style.underline,
     },
   })));
-  mdStyleCache.set(theme, style);
+  mdStyleCache.set(cacheKey, style);
   return style;
 }
 
@@ -289,8 +291,9 @@ function normalizeSession(value: Record<string, unknown>): SessionRow {
 
 // The UX-state store rides the v2.0.8 preference repository (see
 // ./session/model-preference): recent/favorite/variant survive restarts and
-// now sync live across concurrent zcode-tui processes. Theme and pinned
-// sessions keep their dedicated files; state.json is the model/effort voice.
+// now sync live across concurrent zcode-tui processes. Since 0.6.32 theme
+// {name,mode} rides here too (the v2 config.theme voice); only pinned
+// sessions keep a dedicated file.
 const uiStatePath = `${process.env.HOME}/.config/zcode-tui/state.json`;
 const uiStateRepository = createModelPreferenceRepository(uiStatePath);
 // Word-motion helpers for the input editing grammar (opencode input_*):
@@ -868,6 +871,13 @@ export function App({
   const [dialog, setDialog] = useState<DialogName>(null);
   const [forkOptions, setForkOptions] = useState<DialogOption<string>[]>([]);
   const [theme, setTheme] = useState<ThemeName>("opencode");
+  // v2 context/theme.tsx (0.6.32): themeMode is the active color arm,
+  // themeLock the config theme.mode pin ("dark"|"light"; null = unlocked —
+  // v2 then follows the terminal's reported mode; with no terminal palette
+  // plane on this stack the unlocked mode holds its current value, the
+  // renderer-less fallback their own init uses).
+  const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
+  const [themeLock, setThemeLock] = useState<ThemeMode | null>(null);
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string; diff?: string; patch?: string } | null>(null);
   const [askSel, setAskSel] = useState(0);
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
@@ -1197,8 +1207,8 @@ export function App({
   const userJumpIdxRef = useRef<number | null>(null);
   const openThemes = () => { themesOriginRef.current = theme; setDialog("themes"); };
   const dims = useTerminalDimensions();
-  const C = THEMES[theme];
-  const mdStyle = useMemo(() => mdStyleFor(theme), [theme]);
+  const C = tokensFor(theme, themeMode);
+  const mdStyle = useMemo(() => mdStyleFor(theme, themeMode), [theme, themeMode]);
   const spinner = runningMarker(running && view === "session");
   // ctrl+o: the keyboard adapter for upstream's mouse-only tool-row
   // expansion (no mouse plane here) — toggles every expandable row.
@@ -1348,12 +1358,32 @@ export function App({
     });
   };
 
+  // Theme state rides state.json's theme:{name,mode} — the v2 config.theme
+  // voice via the 0.6.29 preference repository (lock-merged writes + live
+  // cross-client sync). The legacy ~/.config/zcode-tui/theme flat file is a
+  // read-only fallback at boot and is no longer written.
   const persistTheme = (next: ThemeName) => {
-    try {
-      mkdirSync(`${process.env.HOME}/.config/zcode-tui`, { recursive: true });
-      writeFileSync(`${process.env.HOME}/.config/zcode-tui/theme`, next);
-    } catch { /* best effort */ }
+    uiStateRepository.update((current) => ({ theme: { ...current.theme, name: next } }));
     setTheme(next);
+  };
+  // v2 context/theme.tsx setMode/pin/free: setMode guards the active theme's
+  // modes, then pins — switching an arm LOCKS it and persists theme.mode;
+  // theme.mode.lock / unlock are pin(mode())/free(), and free persists
+  // "system". The terminal-follow half of free (renderer.themeMode, the
+  // palette probe) has no plane on this stack — recorded in parity-v2.md.
+  const pinThemeMode = (next: ThemeMode) => {
+    setThemeLock(next);
+    setThemeMode(next);
+    uiStateRepository.update((current) => ({ theme: { ...current.theme, mode: next } }));
+  };
+  const freeThemeMode = () => {
+    setThemeLock(null);
+    uiStateRepository.update((current) => ({ theme: { ...current.theme, mode: "system" } }));
+  };
+  const switchThemeMode = (requested: ThemeMode): boolean => {
+    if (!themeModes(theme).includes(requested)) return false;
+    pinThemeMode(requested);
+    return true;
   };
 
   const refresh = async () => {
@@ -2141,10 +2171,24 @@ export function App({
   }, [client]);
 
   useEffect(() => {
-    try {
-      const saved = readFileSync(`${process.env.HOME}/.config/zcode-tui/theme`, "utf8").trim() as ThemeName;
-      if (THEME_NAMES.includes(saved)) setTheme(saved);
-    } catch { /* first run */ }
+    // theme:{name,mode} from state.json (the v2 config.theme read — name and
+    // mode are INDEPENDENT reads upstream, and a mode-only pin with no name
+    // is a normal state); the legacy flat file is the pre-0.6.32 name
+    // fallback. An unlocked mode holds the dark default — the
+    // terminal-follow source has no plane here.
+    const savedTheme = uiState.current.theme;
+    if (savedTheme.name && THEME_NAMES.includes(savedTheme.name)) {
+      setTheme(savedTheme.name);
+    } else {
+      try {
+        const legacy = readFileSync(`${process.env.HOME}/.config/zcode-tui/theme`, "utf8").trim() as ThemeName;
+        if (THEME_NAMES.includes(legacy)) setTheme(legacy);
+      } catch { /* first run */ }
+    }
+    if (savedTheme.mode === "dark" || savedTheme.mode === "light") {
+      setThemeLock(savedTheme.mode);
+      setThemeMode(savedTheme.mode);
+    }
     try {
       const saved = JSON.parse(readFileSync(`${process.env.HOME}/.config/zcode-tui/pinned.json`, "utf8")) as unknown;
       if (Array.isArray(saved)) setPinned(saved.filter((x): x is string => typeof x === "string"));
@@ -2787,7 +2831,7 @@ export function App({
     return (
       <DiffViewer
         C={C}
-        D={diffFor(theme)}
+        D={diffFor(theme, themeMode)}
         syntaxStyle={mdStyle}
         cwd={process.cwd()}
         mode={diffMode}
@@ -3286,6 +3330,23 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
           flashStatus(`theme → ${next}`);
         },
       },
+      {
+        // v2 dialog-config "Color mode" row: values system/dark/light,
+        // ←/→ cycles, "system" = the unlock. dark/light pin and persist the
+        // lock (v2 setMode semantics).
+        id: "color-mode",
+        title: "Color mode",
+        group: "Appearance",
+        hint: "dark mode · light mode · system theme",
+        value: themeLock ?? "system",
+        change: (dir) => {
+          const values = ["system", "dark", "light"];
+          const next = values[(values.indexOf(themeLock ?? "system") + dir + values.length) % values.length];
+          if (next === "system") freeThemeMode();
+          else pinThemeMode(next as ThemeMode);
+          flashStatus(`color mode → ${next}`);
+        },
+      },
       { id: "animations", title: "Animations", group: "Appearance", hint: "cursor blink · motion", value: animations ? "on" : "off", change: () => toggleAnimations() },
       { id: "file-context", title: "Editor context", group: "Input", hint: "the @files popup", value: fileContext ? "on" : "off", change: () => toggleFileContext() },
       {
@@ -3688,22 +3749,22 @@ footerHints={[
               <box style={{ flexDirection: "column", flexShrink: 0, maxHeight: 10, marginTop: 1 }}>
                 <PatchDiff
                   diff={ask.diff}
-                  hunkFg={diffFor(theme).diffHunkHeader}
+                  hunkFg={diffFor(theme, themeMode).diffHunkHeader}
                   view="unified"
                   filetype={filetypeOf(ask.detail)}
                   syntaxStyle={mdStyle}
                   showLineNumbers
                   wrapMode="none"
                   fg={C.fg}
-                  addedBg={diffFor(theme).diffAddedBg}
-                  removedBg={diffFor(theme).diffRemovedBg}
-                  contextBg={diffFor(theme).diffContextBg}
-                  addedSignColor={diffFor(theme).diffHighlightAdded}
-                  removedSignColor={diffFor(theme).diffHighlightRemoved}
-                  lineNumberFg={diffFor(theme).diffLineNumber}
-                  lineNumberBg={diffFor(theme).diffContextBg}
-                  addedLineNumberBg={diffFor(theme).diffAddedLineNumberBg}
-                  removedLineNumberBg={diffFor(theme).diffRemovedLineNumberBg}
+                  addedBg={diffFor(theme, themeMode).diffAddedBg}
+                  removedBg={diffFor(theme, themeMode).diffRemovedBg}
+                  contextBg={diffFor(theme, themeMode).diffContextBg}
+                  addedSignColor={diffFor(theme, themeMode).diffHighlightAdded}
+                  removedSignColor={diffFor(theme, themeMode).diffHighlightRemoved}
+                  lineNumberFg={diffFor(theme, themeMode).diffLineNumber}
+                  lineNumberBg={diffFor(theme, themeMode).diffContextBg}
+                  addedLineNumberBg={diffFor(theme, themeMode).diffAddedLineNumberBg}
+                  removedLineNumberBg={diffFor(theme, themeMode).diffRemovedLineNumberBg}
                 />
               </box>
             ) : ask.patch ? (

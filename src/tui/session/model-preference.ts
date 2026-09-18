@@ -26,6 +26,10 @@ export type UiState = {
   diff: DiffPreferences;
   animations: boolean;
   fileContext: boolean;
+  // The v2 config.theme voice (0.6.32): name = active theme, mode = the
+  // color-mode lock ("dark"|"light"|"system"; null = never set — an unset
+  // or "system" mode is an unlocked mode).
+  theme: { name: string | null; mode: string | null };
 };
 
 const EMPTY: UiState = {
@@ -35,6 +39,7 @@ const EMPTY: UiState = {
   diff: {},
   animations: true,
   fileContext: true,
+  theme: { name: null, mode: null },
 };
 
 export function modelKey(model: ModelKey): string {
@@ -85,6 +90,13 @@ function decode(raw: unknown): UiState {
       diff: obj.diff && typeof obj.diff === "object" ? (obj.diff as DiffPreferences) : {},
       animations: typeof obj.animations === "boolean" ? obj.animations : true,
       fileContext: typeof obj.fileContext === "boolean" ? obj.fileContext : true,
+      theme: (() => {
+        const raw = (obj.theme && typeof obj.theme === "object" ? obj.theme : {}) as Record<string, unknown>;
+        return {
+          name: typeof raw.name === "string" ? raw.name : null,
+          mode: raw.mode === "dark" || raw.mode === "light" || raw.mode === "system" ? raw.mode : null,
+        };
+      })(),
     };
   } catch {
     return { ...EMPTY };

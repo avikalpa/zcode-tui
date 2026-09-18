@@ -10,10 +10,15 @@ import {
   modeAccent,
   modeLabel,
   parseSlashCommand,
+  diffFor,
   shortCwd,
   SLASH_COMMANDS,
   THEMES,
   THEME_NAMES,
+  themeModes,
+  THEME_MODES,
+  tokensFor,
+  type ThemeMode,
 } from "./design";
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/;
@@ -113,5 +118,33 @@ describe("OpenCode-shaped zcode-tui design model", () => {
     expect(formatDateHeading(Date.parse("2026-09-04T12:00:00Z"))).toBe("Fri Sep 04 2026");
     expect(shortCwd("/home/example/project", "/home/example")).toBe("~/project");
     expect(shortCwd("/workspace/project", "/home/example")).toBe("/workspace/project");
+  });
+
+  test("theme modes: official documents carry both arms, the zai arms are single-mode (v2 themeModes)", () => {
+    expect(THEME_MODES).toEqual(["dark", "light"]);
+    expect(themeModes("opencode")).toEqual(["dark", "light"]);
+    expect(themeModes("dracula")).toEqual(["dark", "light"]);
+    expect(themeModes("zai-dark")).toEqual(["dark"]);
+    expect(themeModes("zai-light")).toEqual(["light"]);
+  });
+
+  test("tokensFor resolves the requested arm and keeps the document mode outside it (v2 loadTheme)", () => {
+    // Upstream light arm, verbatim (opencode.json theme.background.light).
+    expect(tokensFor("opencode", "light").bg).toBe("#ffffff");
+    expect(tokensFor("opencode", "light").fg).toBe("#1a1a1a");
+    // The dark arm is unchanged by the dual-arm port.
+    expect(tokensFor("opencode", "dark").bg).toBe("#0a0a0a");
+    expect(tokensFor("opencode").bg).toBe("#0a0a0a");
+    // Requesting a mode the document does not carry keeps that document's arm.
+    expect(tokensFor("zai-dark", "light")).toEqual(THEMES["zai-dark"]);
+    expect(tokensFor("zai-light", "dark")).toEqual(THEMES["zai-light"]);
+  });
+
+  test("mdFor/diffFor follow the mode (both arms from the same upstream documents)", () => {
+    expect(mdFor("opencode", "light").mdHeading).toBe("#d68c27");
+    expect(mdFor("opencode", "dark").mdHeading).toBe("#9d7cd8");
+    expect(diffFor("opencode", "light").diffAdded).not.toBe(diffFor("opencode", "dark").diffAdded);
+    // Single-mode documents keep their only arm however asked.
+    expect(mdFor("zai-dark", "light")).toEqual(mdFor("zai-dark", "dark"));
   });
 });

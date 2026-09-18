@@ -134,6 +134,18 @@ ports AROUND the logo, never over it).
   lock dir itself still non-recursive so EEXIST keeps signalling
   contention.
 
+- **theme mode (0.6.32)** — the v2 context/theme.tsx machine ported:
+  dual-arm themes-generated.ts (33 themes × dark+light, arm-cascade when
+  upstream omits a light token — measured: zero cascades),
+  themeModes/tokensFor/mdFor/diffFor resolution (a mode outside the
+  document keeps the document's first mode, v2 loadTheme), mode+lock
+  state with setMode=pin+persist / lock-unlock=pin-free, settings
+  "Color mode" row (values system/dark/light, default system), theme
+  persistence moved onto the 0.6.29 preference repository as
+  state.json theme:{name,mode} with live cross-client sync. PTY TH-series:
+  isolated-home settings drive + state.json pin proof + restart-restore.
+  BLOCKED residuals recorded below (terminal-follow half).
+
 ## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
 
 1. ~~Tool-call rendering~~ RE-PORTED 0.6.21 (see Shipped) — the row now
@@ -322,7 +334,16 @@ on the clean lane is what separates them.
   char|none via DiffPreferences.wrap) — all persisted in state.json.
   paste_summary is a DEVIATION, not a port: v2 renders compact paste
   summaries through composer paste spans; our draft is plain text.
-- **theme mode** — light/dark switch + mode lock (we ship the dark arms).
+- ~~**theme mode**~~ SHIPPED 0.6.32 — both arms (the upstream
+  theme:{token:{dark,light}} documents, dual-arm generator regen; the
+  0.6.26 "assets carry no light/dark variants" note was true for v2.0.7
+  and false for this pin), the v2 mode machine (lock = config theme.mode
+  dark|light; mode = lock ?? dark — no terminal plane here), setMode
+  pins+persists, the settings "Color mode" row (system/dark/light,
+  v2 dialog-config verbatim), theme rides state.json theme:{name,mode}
+  (the config.theme voice; legacy flat file = read-only fallback).
+  theme.switch_mode / theme.mode.lock stay palette-hidden + keybind-none
+  exactly as upstream stocks them.
 - **panes + embedded terminal** — pane.focus.left/right, terminal.select/
   toggle/close, composer.terminal.*, dialog-shell-output. New v2 surface.
 - **composer.subagent.* / composer.shell.*** — subagent & shell prompt
@@ -338,6 +359,14 @@ on the clean lane is what separates them.
   SHIPPED 0.6.25 (see its entry above); this 0.6.10 note survived its own
   supersession and pointed backwards.
 
+- **theme terminal-follow (v2 renderer plane)** — unlocked modes in v2
+  follow the terminal: renderer.themeMode, the THEME_MODE render event,
+  the OSC palette probe (getPalette + the 997;1n/2n notification) and the
+  generated "system" pseudo-theme (generateSystem/tint math over
+  TerminalColors). Our PTY stack has no TerminalColors source, so an
+  unlocked mode holds its current value (their own renderer-less
+  fallback is dark). Needs a terminal-colors plane on the host or an
+  OSC 10/11 query+parse in our input loop.
 ## Blocked on a zcode HOST VERB (file with the zcode host, not the TUI)
 
 - **session.undo / session.redo** — v2 = server-side session.revert
