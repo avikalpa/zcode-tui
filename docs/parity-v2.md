@@ -11,11 +11,11 @@ feature to keep. Audit pass 2026-09-17 filed the known deviations below
 (Deviation queue). The non-parities (model allowlist, provider_connect)
 remain the only exceptions.
 
-**Reference:** opencode **v2.0.7** (stable) — VENDORED in-repo at
+**Reference:** opencode **v2.0.8** (stable) — VENDORED in-repo at
 `tools/opencode-reference/` (pinned by `tools/sync-opencode.sh <tag>`;
 MIT, never compiled into our binary). The sync toolchain makes a parity
 wave a diff job: `parity-report.py --map/--stale/--gaps`,
-`gen-keybinds.py` (the 240-bind registry + machine-refreshed gap report in
+`gen-keybinds.py` (the 241-bind registry + machine-refreshed gap report in
 `docs/parity-keybinds.md`), `gen-themes.py` (reads the pin). Ported files
 carry a grep-able header (`Ported from opencode <version> <ref path>`) —
 the port map IS the headers. Update the ledger AFTER EVERY WAVE — a line
@@ -101,6 +101,23 @@ ports AROUND the logo, never over it).
   working = `git diff HEAD` + untracked via `--no-index /dev/null`;
   branch/committed = merge-base against the default branch (origin HEAD
   symref, else main/master); `--unified=12 --no-renames --no-ext-diff`.
+- **Preference repository** — the v2.0.8 client-sync rework (0.6.29):
+  state.json writes merge from the DISK current under a lock
+  (addRecent/setFavorite/update own every write), and subscribe() watches
+  the file so a change made by one zcode-tui process surfaces live in the
+  others (fs.watch on state.json siblings, 50ms debounce, reference-counted
+  watcher — upstream #49611). The lock is the adapted Flock port
+  (src/tui/session/flock.ts): mkdir critical section with the reference's
+  breaker pattern + 60s mtime staleness; the effect/hash deps and heartbeat
+  writer are adapted out, and the wait is bounded (500ms) because our
+  callers are UI handlers — on budget exhaustion it falls back unlocked.
+  The turn footer's tok/s numerator counts reasoning tokens when a payload
+  carries them (v2.0.8 rows.ts); BlockToolContent's flexShrink={0} spacing
+  fix was already our 0.6.21 shape. The theme token rename
+  (surface.overlay→raised.high, surface.offset→raised.base) touches no
+  code here — our ports carry no upstream token layer; ledger wording
+  updated. /btw (session.aside) and the v2.0.8 subagent-notice click are
+  BLOCKED-ON-HOST (below).
 
 ## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
 
@@ -145,7 +162,8 @@ ports AROUND the logo, never over it).
    is partly mouse-driven) and no renderer lifecycle passes (the
    dynamically-tinted top edge renders static context colour; file headers
    do not float while scrolling). Reviewed cards tint to the panel step (no
-   surface.overlay token in the 33-theme port); image files show the
+   surface.overlay — raised.high since the v2.0.8 rename — token in the
+   33-theme port); image files show the
    no-patch notice (v2 previews image bytes); syntax highlighting rides the
    markdown SyntaxStyle (the tree-sitter filetype→language map was not
    ported, so per-language highlight fidelity may differ).
@@ -257,6 +275,13 @@ when both runs share the harness VERSION.
 - **diff last-turn source** — needs a session-diff verb (v2: client.session.
   diff). Git/branch sources ship TUI-side.
 - **session.rename** — needs session/title update verb (long-standing).
+- **/btw side question (session.aside, v2.0.8)** — needs a one-shot
+  session-scoped generate verb (v2: client.session.generate — runs no tool
+  loop, answers from session context in a dialog; our protocol has
+  workspace/generateText only, not session-context). The v2.0.8
+  subagent-notice click-to-open-child rides the SAME parent-linkage gap
+  already filed below (payload carries no childID), and upstream opens it
+  by mouse regardless (no mouse plane here).
 
 ## Maintenance law
 
