@@ -19,7 +19,9 @@ upstream releases; update the ledger AFTER EVERY WAVE — a line moves from
 Remaining to Shipped only with the wave version that shipped it.
 
 Non-parities BY OWNER LAW (never copy): model allowlist, provider_connect /
-console_org.
+console_org, and the zcodetui wordmark on the home screen (owner 2026-09-18:
+"Our home screen zcodetui logo stays btw" — a v2 session-destination home
+ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
@@ -79,6 +81,8 @@ console_org.
    toasts only. Re-point confirmations to toast variants.
 4. **Home screen** — ours is logo+composer; v2 home = session-destination
    (recent sessions, frecency) + tips. Ledger P2 line upgraded to deviation.
+   ⚠ owner 2026-09-18: the zcodetui LOGO STAYS — port the
+   session-destination surface around it.
 5. **Footer hint rows** — our "enter select esc close" bracket-less hints
    approximate v2's FooterAction pattern; diff the exact rendering.
 6. **Queue manager / timeline / sessions dialogs** — modeled on v2 but with

@@ -1,3 +1,4 @@
+// Ported from opencode v2.0.7 packages/tui/src/feature-plugins/system/diff-viewer.tsx
 // Port of the reference diff viewer route (opencode v2.0.6
 // feature-plugins/system/diff-viewer.tsx) onto our React binding.
 //

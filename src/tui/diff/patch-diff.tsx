@@ -1,3 +1,4 @@
+// Ported from opencode v2.0.7 packages/tui/src/component/patch-diff.tsx
 // Port of the reference PatchDiff (opencode v2.0.6
 // packages/tui/src/component/patch-diff.tsx) onto our React binding: each
 // hunk of a unified patch renders under its own `@@` header row through the

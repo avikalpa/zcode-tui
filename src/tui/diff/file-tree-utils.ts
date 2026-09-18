@@ -1,3 +1,4 @@
+// Ported from opencode v2.0.7 packages/tui/src/feature-plugins/system/diff-viewer-file-tree-utils.ts
 // Verbatim port of the reference tree utils (opencode v2.0.6
 // packages/tui/src/feature-plugins/system/diff-viewer-file-tree-utils.ts):
 // build the directory tree over changed files, flatten it with collapsed

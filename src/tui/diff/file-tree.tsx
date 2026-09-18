@@ -1,3 +1,4 @@
+// Ported from opencode v2.0.7 packages/tui/src/feature-plugins/system/diff-viewer-file-tree.tsx
 // Port of the reference DiffViewerFileTree (opencode v2.0.6
 // diff-viewer-file-tree.tsx): the left rail of the diff viewer — source
 // header, then the changed-file tree with directory rails, expand markers,

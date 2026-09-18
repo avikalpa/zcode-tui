@@ -1,3 +1,4 @@
+// Ported from opencode v2.0.7 packages/tui/src/util/diff.ts
 // Verbatim port of the reference util (opencode v2.0.6
 // packages/tui/src/util/diff.ts): split a unified patch into hunk sections so
 // each renders under its own `@@` header row, with the row budget the

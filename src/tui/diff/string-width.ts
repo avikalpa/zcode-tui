@@ -1,3 +1,4 @@
+// Ported from opencode v2.0.7 packages/tui/src/util/string-width.ts
 // Grapheme-aware terminal width. The reference pulls `string-width` from npm;
 // we carry a compact equivalent (Intl.Segmenter graphemes + the East Asian
 // Wide/Fullwidth ranges) so the diff viewer's path truncation math matches

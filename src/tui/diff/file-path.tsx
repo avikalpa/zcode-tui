@@ -1,3 +1,4 @@
+// Ported from opencode v2.0.7 packages/tui/src/ui/file-path.tsx
 // Port of the reference FilePath (opencode v2.0.6 packages/tui/src/ui/
 // file-path.tsx): render a path with the directories muted and the basename
 // bright, truncating middle segments first ("…/seg/name.ext") and keeping
