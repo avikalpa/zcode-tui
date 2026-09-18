@@ -187,6 +187,86 @@ else:
                 "D4 escape closes the dialog"):
         check(pid, lbl, False)
 
+# ---- S/K/M-series: the stash family, skills selector, MCP list (v2 ports) ----
+# The stash store is exercised from EMPTY so the proof cannot see or leave
+# the owner's real stashed drafts; S0-S4 are deterministic (no backend).
+# K/M need the live catalog (workspace-scoped methods), hence the alive guard.
+try:
+    os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
+except FileNotFoundError:
+    pass
+
+def _palette_run(filter_text):
+    os.write(master, b"\x10")                            # ctrl+p: palette
+    read_for(master, stream, 0.8)
+    for ch in filter_text:
+        os.write(master, ch.encode()); time.sleep(0.04)
+    read_for(master, stream, 0.6)
+    os.write(master, b"\r")
+    read_for(master, stream, 1.0)
+
+if alive(pid):
+    os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear any draft
+    os.write(master, b"STASH-PROOF-DRAFT-1")
+    read_for(master, stream, 0.8)
+    _palette_run("stash prompt")
+    s0 = "\n".join(screen.display)
+    check(pid, "S0 stash prompt parks the draft (composer empties)", "STASH-PROOF-DRAFT-1" not in s0 and "Ask anything" in s0)
+
+    _palette_run("stash list")
+    s1 = "\n".join(screen.display)
+    check(pid, "S1 stash list dialog shows the preview + age", "Stash" in s1 and "STASH-PROOF-DRAFT-1" in s1 and "just now" in s1)
+
+    os.write(master, b"\r"); read_for(master, stream, 1.0)   # enter: restore (take)
+    s2 = "\n".join(screen.display)
+    check(pid, "S2 restore returns the draft to the composer", "STASH-PROOF-DRAFT-1" in s2 and "Search" not in s2)
+
+    _palette_run("stash prompt")                              # stash it again for the delete proof
+    _palette_run("stash list")
+    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: arm delete
+    s3 = "\n".join(screen.display)
+    check(pid, "S3 two-stroke delete arms with the confirm label", "Press ctrl+d again to confirm" in s3)
+    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: delete
+    s4 = "\n".join(screen.display)
+    check(pid, "S4 second ctrl+d empties the stash list", "No matching items" in s4)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+    try:
+        os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
+    except FileNotFoundError:
+        pass
+else:
+    for lbl in ("S0 stash prompt parks the draft (composer empties)",
+                "S1 stash list dialog shows the preview + age",
+                "S2 restore returns the draft to the composer",
+                "S3 two-stroke delete arms with the confirm label",
+                "S4 second ctrl+d empties the stash list"):
+        check(pid, lbl, False)
+
+if alive(pid):
+    os.write(master, b"/skills\r"); read_for(master, stream, 1.5)
+    k0 = False
+    for _ in range(12):                                        # poll: catalog fetch under load
+        read_for(master, stream, 0.8)
+        if "autoplan" in "\n".join(screen.display):
+            k0 = True
+            break
+    check(pid, "K0 /skills opens the Skills dialog", "Skills" in "\n".join(screen.display) and "Search" in "\n".join(screen.display))
+    check(pid, "K1 catalog rows render (a user skill is listed)", k0)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+else:
+    check(pid, "K0 /skills opens the Skills dialog", False)
+    check(pid, "K1 catalog rows render (a user skill is listed)", False)
+
+if alive(pid):
+    os.write(master, b"/mcps\r"); read_for(master, stream, 3.0)
+    m0 = "\n".join(screen.display)
+    check(pid, "M0 /mcps opens the MCP servers dialog", "MCP servers" in m0)
+    check(pid, "M1 status grammar renders", "Connected \u2713" in m0 or "Connecting \u2026" in m0)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+else:
+    check(pid, "M0 /mcps opens the MCP servers dialog", False)
+    check(pid, "M1 status grammar renders", False)
+
 if b0 and alive(pid):
     os.write(master, b"\r"); read_for(master, stream, 5.5)   # let open() settle fully
     disp = "\n".join(screen.display)

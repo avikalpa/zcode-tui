@@ -114,6 +114,19 @@ ports AROUND the logo, never over it).
    our own chrome; re-diff each against v2's dialog-* source file by file.
 7. **Turn footers, context label, spinner** — verify token-for-token against
    v2 (formatTurnFooter was measured earlier; re-verify on v2.0.6).
+9. **OpenTUI reconciler remount (0.6.23 finding)** — a wrapper function
+   component around SelectDialog is REMOUNTED by the reconciler on every App
+   re-render (the 530ms cursor blink), resetting the wrapper's useState each
+   tick; a DIRECT `<SelectDialog>` branch with App-level state (the sessions
+   dialog shape) is stable. All three 0.6.23 dialogs render direct branches
+   with App-level state (stashArm / skillsState / mcpState + one fetch
+   effect keyed on `dialog`). Any future dialog MUST follow this shape.
+10. **Stash dialog binding gaps (0.6.23)** — the destructive-arm colours use
+    our C.error row bg (sessions-dialog precedent) rather than v2's
+    background/text.action.destructive.focused pair (no such tokens in the
+    33-theme port); disarm-on-move is approximated by arming at open and
+    disarming after a delete or dialog close (SelectDialog's onHighlight
+    re-fires per render, so it cannot carry move-edge semantics).
 8. **Diff viewer binding gaps (0.6.20)** — opentui 0.5.11 has no mouse plane
    (the right-click file menu and hover states are omitted; upstream's tree
    is partly mouse-driven) and no renderer lifecycle passes (the
@@ -137,9 +150,26 @@ ports AROUND the logo, never over it).
   user-message walking shipped 0.6.18, all-message walking still open).
 - **messages.copy (extended)** — copy selected/all messages (we copy the
   last assistant message only).
-- **stash family** — prompt_stash/pop/list + stash.delete dialog.
-- **prompt.skills** — skills selector dialog.
-- **mcp.list / dialog-mcp** — MCP server list dialog.
+- ~~**stash family** — prompt_stash/pop/list + stash.delete dialog~~ SHIPPED
+  0.6.23 (jsonl store `~/.config/zcode-tui/prompt-stash.jsonl`, MAX 50 with
+  oldest-drop and sanitize-on-load; palette commands prompt.stash/.pop/.list
+  verbatim; dialog-stash port with first-line preview, relative age, ~N
+  lines footer and the ctrl+d two-stroke delete; restore = take-on-select).
+- ~~**prompt.skills** — skills selector dialog~~ SHIPPED 0.6.23 (/skills +
+  palette; name-padded rows, collapsed descriptions, loading/error/empty
+  views verbatim; selecting inserts a plain `@name ` mention — the v2
+  extmark decoration is composer-internal and not portable). Disabled
+  catalog skills stay hidden (the runtime would not run them).
+- ~~**mcp.list / dialog-mcp** — MCP server list dialog~~ SHIPPED 0.6.23
+  (/mcps + palette; sorted by name, status grammar verbatim: Connecting … ·
+  Connected ✓ · Failed ! · Sign in required → · Disabled ○, reference
+  colours). HOST GAPS recorded: the zcode protocol exposes mcp/list
+  ({statuses:{name:{status,transport,toolCount,updatedAt,protocolEra}}},
+  measured live 0.6.23) but NO mcp connect/disconnect verbs (the v2 space
+  toggle → dialog.mcp.toggle is blocked-on-host) and the status payload
+  carries no error text (the enter-to-error detail view has no data
+  source). skills/referenceCatalog measured live same sitting:
+  {authority, skills:[{id,name,description,path,scope,enabled}]}.
 - **session.ops deep** — share/unshare, session.move (dialog-move-session),
   child/parent navigation (session.child.first/next/previous, session.parent).
 - **display toggles (P2)** — thinking visibility toggle, timestamps,

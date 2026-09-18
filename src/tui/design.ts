@@ -207,6 +207,8 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "help", aliases: [], description: "keybind help" },
   { name: "timeline", aliases: [], description: "session timeline · fork at a prompt" },
   { name: "status", aliases: [], description: "session and backend status" },
+  { name: "skills", aliases: [], description: "insert a skill mention" },
+  { name: "mcps", aliases: ["mcp"], description: "MCP server status" },
   { name: "effort", aliases: [], description: "choose reasoning effort · low high max" },
   { name: "thinking", aliases: [], description: "toggle thinking" },
   { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
@@ -226,6 +228,8 @@ export type SlashCommand =
   | "agents" | "sessions" | "new" | "home" | "model" | "themes" | "commands"
   | "status" | "effort" | "thinking" | "fork" | "compact" | "quit" | "help" | "timeline"
   | "diff"
+  | "skills"
+  | "mcps"
   | null;
 
 export function parseSlashCommand(input: string): SlashCommand {

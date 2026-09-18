@@ -1,209 +1,221 @@
 {
-  "unmatched-default": "none",
-  "prefixes": {
-    "model.": {
-      "status": "law",
-      "note": "paid-burn ruling: the allowlist is ours by law"
-    },
-    "provider_connect": {
-      "status": "law",
-      "note": "zai only"
-    },
-    "console_org": {
-      "status": "law",
-      "note": "zai only"
-    },
-    "console.": {
-      "status": "law",
-      "note": "zai only"
-    },
-    "diff.": {
-      "status": "covered",
-      "note": "0.6.20 \u2014 the full viewer route"
-    },
-    "input.select.": {
-      "status": "partial",
-      "note": "cursor is char-mode; shift selections still partial"
-    },
-    "input.": {
-      "status": "covered",
-      "note": "0.6.10 editing grammar"
-    },
-    "messages.": {
-      "status": "covered",
-      "note": "0.6.9 scroll grammar; 0.6.18 user-message walk"
-    },
-    "session_interrupt": {
-      "status": "covered",
-      "note": "0.6.10; 0.6.17 made it a full stop"
-    },
-    "session.tab.": {
-      "status": "covered",
-      "note": "0.6.22 \u2014 strip + close/reopen/history/unread/select; ctrl+shift+t delivery is terminal-dependent"
-    },
-    "session.child": {
-      "status": "none",
-      "note": "child/parent navigation"
-    },
-    "session.parent": {
-      "status": "none",
-      "note": "child/parent navigation"
-    },
-    "session.move": {
-      "status": "none",
-      "note": "dialog-move-session"
-    },
-    "session.share": {
-      "status": "none",
-      "note": "share/unshare"
-    },
-    "session.message.": {
-      "status": "partial",
-      "note": "user walking 0.6.18; all-message walking open"
-    },
-    "session.undo": {
-      "status": "blocked-host",
-      "note": "needs session/revert in the app-server"
-    },
-    "session.redo": {
-      "status": "blocked-host",
-      "note": "needs session/revert in the app-server"
-    },
-    "session.diff": {
-      "status": "blocked-host",
-      "note": "needs a session-diff verb (diff last-turn source)"
-    },
-    "session.rename": {
-      "status": "covered",
-      "note": "sessions dialog two-stroke rename"
-    },
-    "session.": {
-      "status": "covered",
-      "note": "core session ops (new/list/resume/delete/pin/quick-slots/fork/compact/export/copy/queue)"
-    },
-    "agent.": {
-      "status": "covered",
-      "note": "0.6.10 cycles + dialogs"
-    },
-    "theme_switch_mode": {
-      "status": "none",
-      "note": "light/dark mode switch"
-    },
-    "theme_mode_lock": {
-      "status": "none",
-      "note": "mode lock"
-    },
-    "theme.": {
-      "status": "covered",
-      "note": "33 themes verbatim; live preview 0.6.16"
-    },
-    "command.palette": {
-      "status": "covered",
-      "note": "ctrl+p"
-    },
-    "help.show": {
-      "status": "covered",
-      "note": "0.6.13 help overlay"
-    },
-    "editor.": {
-      "status": "covered",
-      "note": "0.6.12 external editor round-trip"
-    },
-    "leader": {
-      "status": "covered",
-      "note": "ctrl+x grammar"
-    },
-    "prompt.paste": {
-      "status": "covered",
-      "note": "atomic burst paste"
-    },
-    "prompt.skills": {
-      "status": "none",
-      "note": "skills selector dialog"
-    },
-    "prompt.stash": {
-      "status": "none",
-      "note": "stash family"
-    },
-    "prompt.images": {
-      "status": "none",
-      "note": "image preview"
-    },
-    "mcp.": {
-      "status": "none",
-      "note": "MCP server list dialog"
-    },
-    "pane.": {
-      "status": "none",
-      "note": "panes surface"
-    },
-    "terminal.": {
-      "status": "none",
-      "note": "embedded terminal surface"
-    },
-    "composer.terminal.": {
-      "status": "none",
-      "note": "embedded terminal"
-    },
-    "composer.subagent.": {
-      "status": "none",
-      "note": "subagent prompt switcher"
-    },
-    "composer.shell.": {
-      "status": "none",
-      "note": "shell prompt switcher"
-    },
-    "permission.prompt.fullscreen": {
-      "status": "none",
-      "note": "fullscreen permission prompt"
-    },
-    "permission.": {
-      "status": "covered",
-      "note": "0.6.19 reference card; body variants still deviation"
-    },
-    "app.toggle.": {
-      "status": "none",
-      "note": "display toggles (P2)"
-    },
-    "app.debug": {
-      "status": "none",
-      "note": "dev-facing"
-    },
-    "app.console": {
-      "status": "none",
-      "note": "dev-facing"
-    },
-    "app.scrap": {
-      "status": "none",
-      "note": "dev-facing"
-    },
-    "opencode.status": {
-      "status": "partial",
-      "note": "leader s status view \u2014 field parity unverified"
-    },
-    "opencode.debug": {
-      "status": "none",
-      "note": "dev-facing"
-    },
-    "plugins.": {
-      "status": "none"
-    },
-    "server.pair": {
-      "status": "none"
-    },
-    "service.restart": {
-      "status": "none"
-    },
-    "docs.open": {
-      "status": "none"
-    },
-    "app.exit": {
-      "status": "covered",
-      "note": "ctrl+c/ctrl+d quit"
-    },
-    "app.clear": {
-      "status": "covered",
-      "note": "ctrl+l clear (mini n/a)"
-    }
+ "unmatched-default": "none",
+ "prefixes": {
+  "model.": {
+   "status": "law",
+   "note": "paid-burn ruling: the allowlist is ours by law"
+  },
+  "provider_connect": {
+   "status": "law",
+   "note": "zai only"
+  },
+  "console_org": {
+   "status": "law",
+   "note": "zai only"
+  },
+  "console.": {
+   "status": "law",
+   "note": "zai only"
+  },
+  "diff.": {
+   "status": "covered",
+   "note": "0.6.20 — the full viewer route"
+  },
+  "input.select.": {
+   "status": "partial",
+   "note": "cursor is char-mode; shift selections still partial"
+  },
+  "input.": {
+   "status": "covered",
+   "note": "0.6.10 editing grammar"
+  },
+  "messages.": {
+   "status": "covered",
+   "note": "0.6.9 scroll grammar; 0.6.18 user-message walk"
+  },
+  "session_interrupt": {
+   "status": "covered",
+   "note": "0.6.10; 0.6.17 made it a full stop"
+  },
+  "session.tab.": {
+   "status": "covered",
+   "note": "0.6.22 — strip + close/reopen/history/unread/select; ctrl+shift+t delivery is terminal-dependent"
+  },
+  "session.child": {
+   "status": "none",
+   "note": "child/parent navigation"
+  },
+  "session.parent": {
+   "status": "none",
+   "note": "child/parent navigation"
+  },
+  "session.move": {
+   "status": "none",
+   "note": "dialog-move-session"
+  },
+  "session.share": {
+   "status": "none",
+   "note": "share/unshare"
+  },
+  "session.message.": {
+   "status": "partial",
+   "note": "user walking 0.6.18; all-message walking open"
+  },
+  "session.undo": {
+   "status": "blocked-host",
+   "note": "needs session/revert in the app-server"
+  },
+  "session.redo": {
+   "status": "blocked-host",
+   "note": "needs session/revert in the app-server"
+  },
+  "session.diff": {
+   "status": "blocked-host",
+   "note": "needs a session-diff verb (diff last-turn source)"
+  },
+  "session.rename": {
+   "status": "covered",
+   "note": "sessions dialog two-stroke rename"
+  },
+  "session.": {
+   "status": "covered",
+   "note": "core session ops (new/list/resume/delete/pin/quick-slots/fork/compact/export/copy/queue)"
+  },
+  "agent.": {
+   "status": "covered",
+   "note": "0.6.10 cycles + dialogs"
+  },
+  "theme_switch_mode": {
+   "status": "none",
+   "note": "light/dark mode switch"
+  },
+  "theme_mode_lock": {
+   "status": "none",
+   "note": "mode lock"
+  },
+  "theme.": {
+   "status": "covered",
+   "note": "33 themes verbatim; live preview 0.6.16"
+  },
+  "command.palette": {
+   "status": "covered",
+   "note": "ctrl+p"
+  },
+  "help.show": {
+   "status": "covered",
+   "note": "0.6.13 help overlay"
+  },
+  "editor.": {
+   "status": "covered",
+   "note": "0.6.12 external editor round-trip"
+  },
+  "leader": {
+   "status": "covered",
+   "note": "ctrl+x grammar"
+  },
+  "prompt.paste": {
+   "status": "covered",
+   "note": "atomic burst paste"
+  },
+  "prompt.skills": {
+   "status": "covered",
+   "note": "0.6.23 /skills selector; insert is a plain @mention (no extmarks)"
+  },
+  "prompt.stash": {
+   "status": "covered",
+   "note": "0.6.23 stash family: push/pop/list + two-stroke delete dialog"
+  },
+  "prompt.images": {
+   "status": "none",
+   "note": "image preview"
+  },
+  "mcp.": {
+   "status": "none",
+   "note": "MCP server list dialog"
+  },
+  "pane.": {
+   "status": "none",
+   "note": "panes surface"
+  },
+  "terminal.": {
+   "status": "none",
+   "note": "embedded terminal surface"
+  },
+  "composer.terminal.": {
+   "status": "none",
+   "note": "embedded terminal"
+  },
+  "composer.subagent.": {
+   "status": "none",
+   "note": "subagent prompt switcher"
+  },
+  "composer.shell.": {
+   "status": "none",
+   "note": "shell prompt switcher"
+  },
+  "permission.prompt.fullscreen": {
+   "status": "none",
+   "note": "fullscreen permission prompt"
+  },
+  "permission.": {
+   "status": "covered",
+   "note": "0.6.19 reference card; body variants still deviation"
+  },
+  "app.toggle.": {
+   "status": "none",
+   "note": "display toggles (P2)"
+  },
+  "app.debug": {
+   "status": "none",
+   "note": "dev-facing"
+  },
+  "app.console": {
+   "status": "none",
+   "note": "dev-facing"
+  },
+  "app.scrap": {
+   "status": "none",
+   "note": "dev-facing"
+  },
+  "opencode.status": {
+   "status": "partial",
+   "note": "leader s status view — field parity unverified"
+  },
+  "opencode.debug": {
+   "status": "none",
+   "note": "dev-facing"
+  },
+  "plugins.": {
+   "status": "none"
+  },
+  "server.pair": {
+   "status": "none"
+  },
+  "service.restart": {
+   "status": "none"
+  },
+  "docs.open": {
+   "status": "none"
+  },
+  "app.exit": {
+   "status": "covered",
+   "note": "ctrl+c/ctrl+d quit"
+  },
+  "app.clear": {
+   "status": "covered",
+   "note": "ctrl+l clear (mini n/a)"
+  },
+  "stash.delete": {
+   "status": "covered",
+   "note": "0.6.23 ctrl+d two-stroke delete in the stash dialog"
+  },
+  "mcp.list": {
+   "status": "partial",
+   "note": "0.6.23 /mcps list + status grammar; toggle and error-detail are host gaps (no mcp connect/disconnect verbs, no error payload)"
+  },
+  "dialog.mcp.toggle": {
+   "status": "blocked-host",
+   "note": "zcode protocol has no mcp connect/disconnect verbs (0.6.23 finding)"
   }
+ }
 }

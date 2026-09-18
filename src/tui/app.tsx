@@ -47,6 +47,7 @@ import {
   type ClosedSessionTab,
   type SessionTabHistory,
 } from "./session/session-tabs-model";
+import { getRelativeTime, getStashPreview, promptStash, type StashEntry } from "./session/prompt-stash";
 import { listBranches, type DiffMode } from "./diff/git";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -161,7 +162,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -841,6 +842,19 @@ function SessionSidebar({
   );
 }
 
+// Dialog fetch state for the skills / mcp branches (App-level: the OpenTUI
+// reconciler remounts wrapper components on every App re-render — see the
+// 0.6.23 patch header — so their state lives here, the sessions-dialog shape).
+type SkillsDialogState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; skills: { id: string; name: string; description?: string }[] };
+type McpDialogState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ready"; servers: { name: string; status: string }[] };
+
 export function App({
   client,
   renderer,
@@ -935,6 +949,59 @@ export function App({
   // mangled mid-burst; the pump effect sends them when the turn ends.
   const [queue, setQueue] = useState<string[]>([]);
   const queueRef = useRef<string[]>([]);
+  // promptStash is a module singleton (port of the v2.0.7 PromptStash
+  // provider); dialogs read it during render, so mutations bump this tick.
+  const [, bumpStash] = useState(0);
+  const stashChanged = () => bumpStash((n) => n + 1);
+  // Armed two-stroke delete row of the stash dialog (v2 stash.delete) —
+  // App-level for the same reconciler reason as the fetch states below.
+  const [stashArm, setStashArm] = useState<number>();
+  const [skillsState, setSkillsState] = useState<SkillsDialogState>({ kind: "idle" });
+  const [mcpState, setMcpState] = useState<McpDialogState>({ kind: "idle" });
+  useEffect(() => {
+    if (dialog === "skills") {
+      setSkillsState({ kind: "loading" });
+      let live = true;
+      void client
+        .request("skills/referenceCatalog", { workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() } })
+        .then((res) => {
+          if (!live) return;
+          const skills = ((res as { skills?: { id: string; name: string; description?: string; enabled?: boolean }[] }).skills ?? [])
+            .filter((s) => s.enabled !== false)
+            .map(({ id, name, description }) => ({ id, name, description }));
+          setSkillsState({ kind: "ready", skills });
+        })
+        .catch((e) => {
+          if (!live) return;
+          setSkillsState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+        });
+      return () => {
+        live = false;
+      };
+    }
+    if (dialog === "mcp") {
+      setMcpState({ kind: "loading" });
+      let live = true;
+      void client
+        .request("mcp/list", { workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() } })
+        .then((res) => {
+          if (!live) return;
+          const statuses = (res as { statuses?: Record<string, { status?: string }> }).statuses ?? {};
+          setMcpState({
+            kind: "ready",
+            servers: Object.entries(statuses)
+              .map(([name, s]) => ({ name, status: s.status ?? "" }))
+              .sort((a, b) => a.name.localeCompare(b.name)),
+          });
+        })
+        .catch(() => {
+          if (live) setMcpState({ kind: "ready", servers: [] });
+        });
+      return () => {
+        live = false;
+      };
+    }
+  }, [dialog, client]);
   const [models, setModels] = useState<ModelChoice[]>(ALLOWED_MODELS.map((m) => ({ ...m })));
   const [modelIdx, setModelIdx] = useState(0);
   // modelsRef backs the push handler (registered once): model/effort patches
@@ -1407,6 +1474,8 @@ export function App({
       if (command === "model") { setDialog("model"); return; }
       if (command === "themes") { openThemes(); return; }
       if (command === "commands") { setDialog("palette"); return; }
+      if (command === "skills") { setDialog("skills"); return; }
+      if (command === "mcps") { setDialog("mcp"); return; }
       if (command === "help") { setDialog("help"); return; }
       if (command === "diff") { openDiff(); return; }
       if (command === "timeline") { openTimeline(); return; }
@@ -2750,6 +2819,8 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["alt+up/down · ctrl+tab", "previous / next session tab (shift = unread)"],
     ["ctrl+x then w / ctrl+shift+t", "close tab · reopen closed tab"],
     ["ctrl+x then 1-9 / 0", "select session tab"],
+    ["/skills · /mcps", "insert a skill · MCP server status"],
+    ["ctrl+p → stash", "stash · pop · list the draft"],
   ];
   return (
     <ModalBackdrop C={C} width={width} height={height}>
@@ -2875,6 +2946,142 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       />
     );
   }
+  if (dialog === "stash") {
+    const entries = promptStash.list();
+    // Ported from opencode v2.0.7 component/dialog-stash.tsx: newest first,
+    // first-line preview + relative age, ~N lines footer, two-stroke delete
+    // that repaints the row in the destructive colour. Restore is
+    // take-on-select (the entry leaves the stash — a stale copy never
+    // shadows newer input).
+    const stashOptions: DialogOption<number>[] = entries
+      .map((entry, index) => ({ entry, index }))
+      .slice()
+      .reverse()
+      .map(({ entry, index }) => {
+        const lineCount = (entry.prompt.text.match(/\n/g)?.length ?? 0) + 1;
+        return {
+          id: String(index),
+          label: stashArm === index ? "Press ctrl+d again to confirm" : getStashPreview(entry.prompt.text),
+          description: getRelativeTime(entry.timestamp),
+          meta: lineCount > 1 ? `~${lineCount} lines` : undefined,
+          bg: stashArm === index ? C.error : undefined,
+          value: index,
+        };
+      });
+    return (
+      <SelectDialog
+        title="Stash"
+        options={stashOptions}
+        theme={C}
+        footerHints={[
+          { key: "ctrl+d", label: "delete" },
+          { key: "enter", label: "restore" },
+          { key: "esc", label: "close" },
+        ]}
+        onAction={(action, option) => {
+          if (action !== "delete" || !option) return;
+          if (stashArm === option.value) {
+            promptStash.remove(option.value);
+            stashChanged();
+            setStashArm(undefined);
+            return;
+          }
+          setStashArm(option.value);
+        }}
+        onSelect={(_, id) => {
+          const index = Number(id);
+          const entry = entries[index];
+          if (!entry) return;
+          promptStash.remove(index);
+          stashChanged();
+          setDraft(entry.prompt.text);
+          setCursorBoth(null);
+          closeDialog();
+        }}
+        onClose={closeDialog}
+      />
+    );
+  }
+  if (dialog === "skills") {
+    // Ported from opencode v2.0.7 component/dialog-skill.tsx: /skills —
+    // name column padded to the widest row, whitespace-collapsed
+    // description, loading / error / empty views verbatim. Selecting
+    // inserts an @name mention (the v2 extmark decoration is
+    // composer-internal and not portable to our plain-text draft).
+    // Disabled skills stay out: the catalog marks them and the runtime
+    // would not run them.
+    const skillsOptions: DialogOption<string | null>[] =
+      skillsState.kind === "idle" || skillsState.kind === "loading"
+        ? [{ id: "loading", label: "Loading skills…", value: null }]
+        : skillsState.kind === "error"
+          ? [
+              { id: "err", label: "Could not load skills", description: skillsState.message, value: null },
+              { id: "err2", label: "Close and reopen Skills to try again.", value: null },
+            ]
+          : skillsState.skills.length === 0
+            ? [{ id: "empty", label: "No skills available", value: null }]
+            : skillsState.skills.map((skill) => ({
+                id: skill.id,
+                label: skill.name.padEnd(Math.max(0, ...skillsState.skills.map((s) => s.name.length))),
+                description: skill.description?.replace(/\s+/g, " ").trim(),
+                value: skill.name,
+              }));
+    return (
+      <SelectDialog
+        title="Skills"
+        size="large"
+        options={skillsOptions}
+        theme={C}
+        footerHints={[
+          { key: "enter", label: "insert" },
+          { key: "esc", label: "close" },
+        ]}
+        onSelect={(value) => {
+          if (typeof value === "string") insertAtCursor(`@${value} `);
+          closeDialog();
+        }}
+        onClose={closeDialog}
+      />
+    );
+  }
+  if (dialog === "mcp") {
+    // Ported from opencode v2.0.7 component/dialog-mcp.tsx: /mcps — sorted
+    // by name, the status footer grammar verbatim (Connecting … · Connected
+    // ✓ · Failed ! · Sign in required → · Disabled ○) with the reference
+    // colours. The v2 space toggle (dialog.mcp.toggle) and the
+    // enter-to-error detail view are HOST GAPS: the zcode protocol exposes
+    // mcp/list but no connect/disconnect verbs, and the status payload
+    // carries no error text — recorded in docs/parity-v2.md, not hacked
+    // around.
+    const statusCell = (status: string): { text: string; color?: string; bold?: boolean } => {
+      if (status === "connected") return { text: "Connected ✓", color: C.success, bold: true };
+      if (status === "failed") return { text: "Failed !", color: C.error };
+      if (status === "needs_auth") return { text: "Sign in required →", color: C.warning };
+      if (status === "pending" || status === "connecting") return { text: "Connecting …", color: C.subtle };
+      return { text: "Disabled ○", color: C.subtle };
+    };
+    const mcpOptions: DialogOption<string | null>[] =
+      mcpState.kind === "idle" || mcpState.kind === "loading"
+        ? [{ id: "loading", label: "Connecting …", value: null }]
+        : mcpState.servers.length === 0
+          ? [{ id: "none", label: "No MCP servers configured", value: null }]
+          : mcpState.servers.map((server) => ({
+              id: server.name,
+              label: server.name,
+              status: statusCell(server.status),
+              value: null,
+            }));
+    return (
+      <SelectDialog
+        title="MCP servers"
+        options={mcpOptions}
+        theme={C}
+        footerHints={[{ key: "esc", label: "close" }]}
+        onSelect={() => closeDialog()}
+        onClose={closeDialog}
+      />
+    );
+  }
   if (dialog === "help") {
     return <HelpDialog C={C} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
@@ -2889,6 +3096,11 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "fork", label: "fork session", description: "latest checkpoint", value: () => void forkActive() },
       { id: "fork-message", label: "fork at message…", value: openForkDialog },
       { id: "compact", label: "compact session", value: () => void compactActive() },
+      { id: "stash", label: "stash prompt", description: "park the draft · v2 prompt.stash", value: () => { if (!draft) return; promptStash.push({ prompt: { text: draft } }); setDraft(""); setCursorBoth(null); stashChanged(); } },
+      { id: "stash-pop", label: "stash pop", description: "restore the newest stashed draft", value: () => { const e = promptStash.pop(); if (!e) return; setDraft(e.prompt.text); setCursorBoth(null); stashChanged(); } },
+      { id: "stash-list", label: "stash list…", description: "restore or delete stashed drafts", value: () => { setStashArm(undefined); setDialog("stash"); } },
+      { id: "skills", label: "skills…", description: "insert a skill mention · /skills", value: () => setDialog("skills") },
+      { id: "mcp", label: "MCP servers", description: "connection status · /mcps", value: () => setDialog("mcp") },
       { id: "themes", label: "themes…", description: "the full OpenCode palette set", value: () => openThemes() },
       { id: "sidebar", label: "toggle sidebar", description: "leader b", value: () => { if (view === "session") setSidebarOpen((s) => !s); } },
       { id: "refresh", label: "refresh sessions", value: () => void refresh() },

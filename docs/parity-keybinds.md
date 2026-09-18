@@ -6,11 +6,11 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 
 | class | binds |
 |---|---|
-| blocked-host | 2 |
-| covered | 117 |
+| blocked-host | 3 |
+| covered | 122 |
 | law | 7 |
-| none | 96 |
-| partial | 18 |
+| none | 89 |
+| partial | 19 |
 
 Open surfaces (partial / none / blocked-host):
 
@@ -42,8 +42,7 @@ Open surfaces (partial / none / blocked-host):
 - `session.child.next` (right) [none] — child/parent navigation
 - `session.child.previous` (left) [none] — child/parent navigation
 - `session.parent` (up) [none] — child/parent navigation
-- `stash.delete` (ctrl+d) [none]
-- `mcp.list` (none) [none] — MCP server list dialog
+- `mcp.list` (none) [partial] — 0.6.23 /mcps list + status grammar; toggle and error-detail are host gaps (no mcp connect/disconnect verbs, no error payload)
 - `provider.connect` (none) [none]
 - `variant.cycle` (ctrl+t) [none]
 - `variant.list` (none) [none]
@@ -57,10 +56,6 @@ Open surfaces (partial / none / blocked-host):
 - `prompt.queue` (<leader>return) [none]
 - `prompt.editor_context.clear` (none) [none]
 - `prompt.images.view` (<leader>i) [none] — image preview
-- `prompt.skills` (none) [none] — skills selector dialog
-- `prompt.stash` (none) [none] — stash family
-- `prompt.stash.pop` (none) [none] — stash family
-- `prompt.stash.list` (none) [none] — stash family
 - `prompt.clear` (ctrl+c) [none]
 - `input.select.left` (shift+left) [partial] — cursor is char-mode; shift selections still partial
 - `input.select.right` (shift+right) [partial] — cursor is char-mode; shift selections still partial
@@ -110,7 +105,7 @@ Open surfaces (partial / none / blocked-host):
 - `prompt.autocomplete.complete` (tab) [none]
 - `permission.prompt.fullscreen` (ctrl+f) [none] — fullscreen permission prompt
 - `plugins.toggle` (return) [none]
-- `dialog.mcp.toggle` (space) [none]
+- `dialog.mcp.toggle` (space) [blocked-host] — zcode protocol has no mcp connect/disconnect verbs (0.6.23 finding)
 - `dialog.plugins.error` (space) [none]
 - `dialog.plugins.install` (shift+i) [none]
 - `dialog.plugins.update` (ctrl+u) [none]

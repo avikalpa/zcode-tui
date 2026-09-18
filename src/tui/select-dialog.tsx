@@ -22,6 +22,9 @@ export interface DialogOption<T> {
   label: string;
   description?: string;
   meta?: string;
+  /** Right-edge status cell — port of the v2.0.7 dialog-select option
+   * footer + footerColor pair (the MCP dialog's Connected ✓ column). */
+  status?: { text: string; color?: string; bold?: boolean };
   group?: string;
   bg?: string;
   gutter?: string;
@@ -249,6 +252,16 @@ export function SelectDialog<T>({
                     content={`  ${truncate(o.description, Math.max(8, cardWidth - labelWidth - 8))}`}
                     fg={selected ? C.accentText : C.subtle}
                   />
+                ) : null}
+                {o.status ? (
+                  <>
+                    <box style={{ flexGrow: 1, flexShrink: 0 }} />
+                    <text
+                      content={o.status.text}
+                      fg={o.status.color ?? rowFg}
+                      attributes={o.status.bold ? TextAttributes.BOLD : undefined}
+                    />
+                  </>
                 ) : null}
               </box>
             </box>
