@@ -63,10 +63,22 @@ export function withLockSync<T>(filePath: string, fn: () => T, options: FlockOpt
     `${path.basename(filePath)}.lock`,
   );
   const breakerPath = `${lockDir}.breaker`;
+  let lockParentReady = false;
   const deadline = Date.now() + opts.timeoutMs;
   let delay = opts.baseDelayMs;
   for (;;) {
     try {
+      // The locks/ parent cannot be assumed to exist — a cleaned (or
+      // first-run) config dir made every locked write throw ENOENT
+      // (measured 2026-09-19: the model dialog's enter-select died before
+      // closeDialog and cascade-failed the harness). Ensure it recursively,
+      // ONCE, outside the EEXIST probe: mkdirSync(recursive) never throws
+      // EEXIST, so the lock dir itself must stay non-recursive or the
+      // contention signal is lost.
+      if (!lockParentReady) {
+        mkdirSync(path.dirname(lockDir), { recursive: true, mode: 0o700 });
+        lockParentReady = true;
+      }
       mkdirSync(lockDir, { mode: 0o700 });
     } catch (err) {
       if (code(err) !== "EEXIST") throw err;

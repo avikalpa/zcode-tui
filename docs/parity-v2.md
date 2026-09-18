@@ -118,6 +118,21 @@ ports AROUND the logo, never over it).
   code here — our ports carry no upstream token layer; ledger wording
   updated. /btw (session.aside) and the v2.0.8 subagent-notice click are
   BLOCKED-ON-HOST (below).
+- **Deviation-drain wave** — the audit residuals #2/#5/#7 re-ported onto
+  v2.0.8 code (0.6.30): the v2 AssistantFooter + Locale.duration/number
+  grammars (turn footers, width gates, interrupted suffix, 29.2K context
+  labels), the FooterAction hint grammar (bold word first, subdued key,
+  left/right space-between), the static ▪ running marker + "esc stop" busy
+  status, and the conditional EditBody diff/patch branches on the
+  permission card. See the deviation queue for the per-item truth.
+  MAINTENANCE DEFECT FIXED in the 0.6.29 port: withLockSync assumed the
+  locks/ parent dir exists — a cleaned config dir made every locked
+  preference write throw ENOENT, which killed the model dialog's
+  enter-select before closeDialog() (the 2026-09-19 harness B0 cascade on
+  BOTH the wave and clean builds; the dir's existence had masked it since
+  0.6.29). The parent is now ensured recursively once per lock call, the
+  lock dir itself still non-recursive so EEXIST keeps signalling
+  contention.
 
 ## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
 
@@ -126,9 +141,14 @@ ports AROUND the logo, never over it).
    adapted to ctrl+o (no mouse plane), background-shell output polling
    needs the zcode shell verb (renders from the part instead).
 2. **Permission card** — header/labels ported 0.6.19 (△ Permission
-   required / Allow once / Always allow / Reject, esc=Reject); residual:
-   hidden y/a/n accelerators (invisible; keep) + the v2 body variants
-   (EditBody diff view, PatchDiff) not ported.
+   required / Allow once / Always allow / Reject, esc=Reject); the v2
+   EditBody branches (routes/session/permission.tsx) ported 0.6.30 as
+   CONDITIONAL renders: a `diff` payload → inline PatchDiff, a `patch`
+   payload → subdued patch text. HOST GAP carried (the mcp error-field
+   pattern): interaction/requestPermission inputs carry
+   command/file_path/path/url only — no diff/patch body — so both branches
+   are dead until the host grows the fields. Hidden y/a/n accelerators stay
+   (invisible).
 3. ~~Flash status line~~ CLOSED 0.6.21 — flashStatus is toast-only (the
    transient status-slot text was already invisible; lifecycle state still
    feeds the leader-s status summary).
@@ -138,12 +158,31 @@ ports AROUND the logo, never over it).
    upstream (grep-verified routes/home.tsx). The footer MCP half is ported
    (0.6.26); the plugins half has no plane here. ⚠ owner 2026-09-18: the
    zcodetui LOGO STAYS.
-5. **Footer hint rows** — our "enter select esc close" bracket-less hints
-   approximate v2's FooterAction pattern; diff the exact rendering.
-6. **Queue manager / timeline / sessions dialogs** — modeled on v2 but with
-   our own chrome; re-diff each against v2's dialog-* source file by file.
-7. **Turn footers, context label, spinner** — verify token-for-token against
-   v2 (formatTurnFooter was measured earlier; re-verify on v2.0.6).
+5. ~~Footer hint rows~~ RE-PORTED 0.6.30 — the diff found the rendering
+   INVERTED: v2's FooterAction puts the WORD first in bold and the KEY
+   after, subdued ("open enter"); ours had key-first with the word faint.
+   SelectDialog now renders the v2 order with the space-between left/right
+   groups (side: "right" plumbed; container keeps the card's established
+   chrome padding — the v2 4/2 numbers are dialog-edge-relative and our
+   cards predate them).
+6. **Queue manager / timeline / sessions dialogs** — measured 0.6.30: v2.0.8
+   has NO dialog-queue component (queued prompts surface only as the
+   statusline work group "N pending"); our leader-q manager dialog is our
+   own chrome around the queue model — recorded invention, pending owner's
+   call. dialog-timeline.tsx EXISTS upstream and is still un-diffed (open).
+   Sessions dialog: the hint row rides deviation 5's fix.
+7. ~~Turn footers, context label, spinner~~ RE-PORTED 0.6.30 (v2.0.8
+   verified): Locale.duration grammar (900ms / one-decimal seconds /
+   Xm Ys / Xh Ym — the round-to-12s and bare-seconds forms retired), the
+   AssistantFooter width gates (model hidden <28 cols, duration hidden in
+   28-35), the subdued `· interrupted` suffix (stamped at session/stop),
+   Locale.number context labels (29.2K — capital K, plain integers <1000),
+   and the STATIC ▪ running marker (the braille animation was an
+   invention; the busy status text is `{interruptLabel()} stop` → "esc
+   stop", the invented "Working…" retired). Known adaptation kept: our
+   tok/s denominator is the wall-clock turn duration (v2 sums per-step
+   stream times; our protocol carries one final content payload — no step
+   streams).
 9. **OpenTUI reconciler remount (0.6.23 finding)** — a wrapper function
    component around SelectDialog is REMOUNTED by the reconciler on every App
    re-render (the 530ms cursor blink), resetting the wrapper's useState each
@@ -180,7 +219,18 @@ lives after the session flow, just before kill(pid), where the whole
 battery ran green (0.6.24). LAW: a control run only controls the BINARY
 when both runs share the harness VERSION.
 
-## Remaining (v2.0.6 → us)
+(0.6.30 correction) EVERY dialog-open needs a POLLED ready paint — never a
+fixed settle. The B0 sessions-dialog open carried a fixed 1.5s and lost the
+race on a cold/slowed daemon (2026-09-19): B + C + G + I + S cascade-failed
+on BOTH the wave and clean builds, one day after the same harness ran green
+twice. The B0/reopen/S-series opens now poll for the dialog chrome (the
+ST0 pattern), and a poll timeout dumps the screen. The same sitting's
+flock ENOENT defect (above) shows the flip side: an environment ACCIDENT
+(the locks/ dir existing) can mask a real defect, and an environment
+CHANGE (the dir cleaned) can manufacture fake failures — the control run
+on the clean lane is what separates them.
+
+## Remaining (v2.0.8 → us)
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
   — category groups, current value per row, ←/→ cycles + enter steps —

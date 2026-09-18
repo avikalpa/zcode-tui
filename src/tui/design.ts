@@ -127,33 +127,71 @@ export function formatTokens(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-// The compact usage label on the composer underline: `29.2k (7%)`.
+// v2 Locale.number (util/locale.ts): compact token counts — `1.0M` / `29.2K`
+// / plain integer below 1000.
+export function formatNumberCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+}
+
+// v2 Locale.duration (util/locale.ts): `900ms` under a second, one decimal
+// under a minute, then `1m 5s` / `1h 0m` / `1d 3h` scales.
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 3_600_000) {
+    const minutes = Math.floor(ms / 60_000);
+    const seconds = Math.floor((ms % 60_000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+  if (ms < 86_400_000) {
+    const hours = Math.floor(ms / 3_600_000);
+    const minutes = Math.floor((ms % 3_600_000) / 60_000);
+    return `${hours}h ${minutes}m`;
+  }
+  const days = Math.floor(ms / 86_400_000);
+  const hours = Math.floor((ms % 86_400_000) / 3_600_000);
+  return `${days}d ${hours}h`;
+}
+
+// The compact usage label on the composer underline: `29.2K (7%)` — v2's
+// formatContextUsage = Locale.number(tokens) + rounded percent (0.6.30 fixed
+// the case + sub-K grammar to the reference).
 export function formatContextLabel(used: number, window: number): string {
-  const k = used / 1000;
-  const compact = k >= 100 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`;
   const pct = window > 0 ? Math.round((used / window) * 100) : 0;
-  return `${compact} (${pct}%)`;
+  return `${formatNumberCompact(used)} (${pct}%)`;
 }
 
 // The per-turn footer under a completed assistant message. The head carries
 // the mode word (rendered in the mode accent), the rest rides muted:
 // head `Build`, rest `GLM-5.3-Flash · 4.2s · 19.8 tok/s`. The throughput
 // numerator counts output + reasoning tokens (v2.0.8, upstream rows.ts).
+// Width gates + the `· interrupted` suffix are the v2 AssistantFooter
+// grammar (routes/session/index.tsx): model hidden under 28 cols, duration
+// hidden in the 28-35 band, `interrupted` appended subdued.
 export function formatTurnFooter(
   mode: string,
   model: string | undefined,
   durationMs: number | undefined,
   outputTokens: number | undefined,
   reasoningTokens?: number,
+  width?: number,
+  interrupted?: boolean,
 ): { head: string; rest: string } {
   const parts: string[] = [];
-  const seconds = durationMs && durationMs > 0 ? durationMs / 1000 : undefined;
-  if (seconds !== undefined) parts.push(`${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`);
+  if (model !== undefined && (width === undefined || width >= 28)) parts.push(model);
+  const ms = durationMs && durationMs > 0 ? durationMs : undefined;
+  const seconds = ms !== undefined ? ms / 1000 : undefined;
+  if (ms !== undefined && (width === undefined || width < 28 || width >= 36)) {
+    parts.push(formatDuration(ms));
+  }
   const generated = (outputTokens ?? 0) + (reasoningTokens ?? 0);
   if (generated > 0 && seconds !== undefined && seconds > 0) {
     parts.push(`${(generated / seconds).toFixed(1)} tok/s`);
   }
-  const tail = [model, ...parts].filter(Boolean).join(" · ");
+  if (interrupted) parts.push("interrupted");
+  const tail = parts.filter(Boolean).join(" · ");
   return { head: modeLabel(mode).label, rest: tail };
 }
 

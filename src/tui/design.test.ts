@@ -56,16 +56,31 @@ describe("OpenCode-shaped zcode-tui design model", () => {
     expect(modeAccent("yolo", C)).toBe(C.error);
   });
 
-  test("formats the per-turn footer like the reference", () => {
+  test("formats the per-turn footer like the reference (v2 AssistantFooter)", () => {
     expect(formatTurnFooter("auto", "GLM-5.3-Flash", 4200, 83)).toEqual({
       head: "Build",
       rest: "GLM-5.3-Flash · 4.2s · 19.8 tok/s",
     });
     expect(formatTurnFooter("plan", undefined, undefined, undefined)).toEqual({ head: "Plan", rest: "" });
+    // v2 duration grammar (Locale.duration): ms under 1s, one decimal under
+    // 1m, minute/hour scales above.
+    expect(formatTurnFooter("auto", "m", 900, 0).rest).toContain("900ms");
+    expect(formatTurnFooter("auto", "m", 65_000, 0).rest).toContain("1m 5s");
+    expect(formatTurnFooter("auto", "m", 3_600_000, 0).rest).toContain("1h 0m");
+    // Width gates: model hidden under 28 cols; duration hidden in 28-35.
+    expect(formatTurnFooter("auto", "m", 4200, 83, undefined, 27).rest).toBe("4.2s · 19.8 tok/s");
+    expect(formatTurnFooter("auto", "m", 4200, 83, undefined, 30).rest).toBe("m · 19.8 tok/s");
+    expect(formatTurnFooter("auto", "m", 4200, 83, undefined, 36).rest).toBe("m · 4.2s · 19.8 tok/s");
+    // Interrupted turns keep their metrics and append the subdued suffix.
+    expect(formatTurnFooter("auto", "m", 4200, 83, undefined, undefined, true).rest).toBe(
+      "m · 4.2s · 19.8 tok/s · interrupted",
+    );
   });
 
-  test("formats context usage like the reference", () => {
-    expect(formatContextLabel(29_214, 1_000_000)).toBe("29.2k (3%)");
+  test("formats context usage like the reference (v2 Locale.number)", () => {
+    expect(formatContextLabel(29_214, 1_000_000)).toBe("29.2K (3%)");
+    expect(formatContextLabel(900, 1000)).toBe("900 (90%)");
+    expect(formatContextLabel(1_234_567, 2_000_000)).toBe("1.2M (62%)");
     expect(formatTokens(29214)).toBe("29,214");
   });
 

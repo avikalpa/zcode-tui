@@ -34,7 +34,8 @@ import {
   diffFor,
 } from "./design";
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
-import { DiffViewer, diffSourceLabel, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
+import { DiffViewer, diffSourceLabel, filetypeOf, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
+import { PatchDiff } from "./diff/patch-diff";
 import { ToolPart } from "./session/tool-parts";
 import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
@@ -195,6 +196,9 @@ export interface TurnMessage {
   // `Build · model · 4.2s · 19.8 tok/s` line).
   turnStart?: number;
   durationMs?: number;
+  // v2 AssistantFooter appends a subdued `· interrupted` on a stopped turn
+  // (0.6.30 port); we stamp it at session/stop time.
+  interrupted?: boolean;
   outputTokens?: number;
   // v2.0.8 counts reasoning tokens in the throughput numerator (upstream
   // rows.ts); our payload takes the field when one ever carries it.
@@ -352,17 +356,12 @@ function osc52Copy(text: string): boolean {
 const isEffort = (value: unknown): value is (typeof EFFORTS)[number] =>
   typeof value === "string" && (EFFORTS as readonly string[]).includes(value);
 
-// Braille spinner for the running state — OpenCode mounts a block spinner on
-// the composer underline while a turn runs; this is the same slot.
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-function useSpinner(active: boolean): string {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
-    return () => clearInterval(timer);
-  }, [active]);
-  return SPINNER_FRAMES[frame];
+// Running-state marker for the composer underline — v2's spinner group is a
+// STATIC block char while busy (`▪`, mono fallback `*`; footer.width.ts +
+// footer.view.tsx). Our animated braille was an invention; prime doctrine
+// retires it (0.6.30).
+function runningMarker(active: boolean): string {
+  return active ? "▪" : "";
 }
 
 // The OpenCode toast overlay (consult item 3): top right, panel fill, split
@@ -487,7 +486,7 @@ const MessageView = memo(function MessageView({
 
   const streaming = running && isTail;
   const footer = m.durationMs !== undefined && !streaming
-    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens)
+    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, m.interrupted)
     : null;
   return (
     <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
@@ -863,7 +862,7 @@ export function App({
   const [dialog, setDialog] = useState<DialogName>(null);
   const [forkOptions, setForkOptions] = useState<DialogOption<string>[]>([]);
   const [theme, setTheme] = useState<ThemeName>("opencode");
-  const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string } | null>(null);
+  const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string; diff?: string; patch?: string } | null>(null);
   const [askSel, setAskSel] = useState(0);
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
   const askRef = useRef<((v: unknown) => void) | null>(null);
@@ -1194,7 +1193,7 @@ export function App({
   const dims = useTerminalDimensions();
   const C = THEMES[theme];
   const mdStyle = useMemo(() => mdStyleFor(theme), [theme]);
-  const spinner = useSpinner(running && view === "session");
+  const spinner = runningMarker(running && view === "session");
   // ctrl+o: the keyboard adapter for upstream's mouse-only tool-row
   // expansion (no mouse plane here) — toggles every expandable row.
   const [toolsExpanded, setToolsExpanded] = useState(false);
@@ -1721,6 +1720,18 @@ export function App({
     try {
       await client.request("session/stop", { sessionId: id });
       setRunning(false);
+      // v2 marks the stopped turn on the assistant footer (`· interrupted`,
+      // duration included) instead of dropping the metrics (0.6.30 port).
+      setMsgs((current) => {
+        if (current.length === 0) return current;
+        const last = current[current.length - 1];
+        if (last.role !== "assistant") return current;
+        return [...current.slice(0, -1), {
+          ...last,
+          interrupted: true,
+          durationMs: last.durationMs ?? (last.turnStart ? Date.now() - last.turnStart : undefined),
+        }];
+      });
       flashStatus(dropped > 0 ? `turn interrupted · ${dropped} queued dropped` : "turn interrupted", "warning");
       probe("turn-stop", id.slice(0, 18));
     } catch (e) {
@@ -1955,11 +1966,16 @@ export function App({
         const toolName = String(params.toolName ?? "tool");
         const riskLevel = String(params.riskLevel ?? "");
         const opts = Array.isArray(params.options) ? params.options as Record<string, unknown>[] : [];
+        // v2's EditBody renders the edit's diff (routes/session/permission.tsx);
+        // our payloads carry only command/file_path/path/url today — take the
+        // fields when a payload ever grows them (the mcp error-field pattern).
+        const diff = typeof input.diff === "string" ? input.diff : undefined;
+        const patch = typeof input.patch === "string" ? input.patch : undefined;
         askOptionsRef.current = opts.map((o) => ({ id: String(o.optionId), response: o.response }));
         return new Promise((resolve) => {
           probe("permission-ask", `${toolName}:${detail.slice(0, 40)}`);
           askRef.current = resolve as (v: unknown) => void;
-          setAsk({ toolName, detail, riskLevel });
+          setAsk({ toolName, detail, riskLevel, diff, patch });
           setTyping(false);
           setStatus(`permission · ${toolName}`);
         });
@@ -3596,6 +3612,36 @@ footerHints={[
                 <text content={`${ask.toolName}${ask.riskLevel ? ` · ${ask.riskLevel}` : ""}`} fg={C.subtle} wrapMode="word" />
               </box>
             </box>
+            {ask.diff ? (
+              // v2 EditBody's diff branch (PatchDiff, unified under our card
+              // width) — fires only when a permission payload carries a diff.
+              <box style={{ flexDirection: "column", flexShrink: 0, maxHeight: 10, marginTop: 1 }}>
+                <PatchDiff
+                  diff={ask.diff}
+                  hunkFg={diffFor(theme).diffHunkHeader}
+                  view="unified"
+                  filetype={filetypeOf(ask.detail)}
+                  syntaxStyle={mdStyle}
+                  showLineNumbers
+                  wrapMode="none"
+                  fg={C.fg}
+                  addedBg={diffFor(theme).diffAddedBg}
+                  removedBg={diffFor(theme).diffRemovedBg}
+                  contextBg={diffFor(theme).diffContextBg}
+                  addedSignColor={diffFor(theme).diffHighlightAdded}
+                  removedSignColor={diffFor(theme).diffHighlightRemoved}
+                  lineNumberFg={diffFor(theme).diffLineNumber}
+                  lineNumberBg={diffFor(theme).diffContextBg}
+                  addedLineNumberBg={diffFor(theme).diffAddedLineNumberBg}
+                  removedLineNumberBg={diffFor(theme).diffRemovedLineNumberBg}
+                />
+              </box>
+            ) : ask.patch ? (
+              // v2 EditBody's raw-patch branch: subdued patch text.
+              <box style={{ flexDirection: "column", flexShrink: 0, maxHeight: 10, marginTop: 1 }}>
+                <text content={ask.patch} fg={C.faint} />
+              </box>
+            ) : null}
             {[
               { id: "once", label: "Allow once" },
               { id: "always", label: "Always allow" },
@@ -3631,7 +3677,10 @@ footerHints={[
       </box>
       <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
         {running ? (
-          <text content={`${spinner} Working…`} fg={modeAccent(mode, C)} />
+          // v2 busy statusline grammar: the static spinner group then the
+          // status text `{interruptLabel()} stop` — "esc stop" here (our
+          // single-esc stop); the invented "Working…" retired 0.6.30.
+          <text content={`${spinner} esc stop`} fg={C.fg} />
         ) : (
           <text content={lost ? "backend lost · r to reconnect" : `${cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
         )}

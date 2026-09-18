@@ -263,7 +263,23 @@ except FileNotFoundError:
     w2 = False
 check(pid, "W2 f2 cycles recent and persists (state.json)", w2)
 
-os.write(master, b"\x18l"); read_for(master, stream, 1.5)
+os.write(master, b"\x18l")
+# The dialog's session/list fetch resolves late on a cold daemon (the HF0/ST0
+# lesson — 2026-09-19: the fixed 1.5s settle lost the race and cascade-failed
+# the B/C/G/I/S series on BOTH the wave and control builds). Poll the ready
+# paint; never fixed-settle an open.
+b0 = False
+for _ in range(16):
+    read_for(master, stream, 0.6)
+    disp = "\n".join(screen.display)
+    if "Sessions" in disp and "Search" in disp:
+        b0 = True
+        break
+if not b0:
+    print("---- B0 FAIL SCREEN ----")
+    for i, line in enumerate(screen.display):
+        if line.strip():
+            print(f"{i:2}|{line.rstrip()}")
 disp = "\n".join(screen.display)
 b0 = "Sessions" in disp and "Search" in disp
 check(pid, "B0 sessions dialog opens", b0)
@@ -291,7 +307,12 @@ if alive(pid):
     os.write(master, b"\x1b"); read_for(master, stream, 0.8)
     d2 = "\n".join(screen.display)
     check(pid, "D4 escape closes the dialog", "Search" not in d2)
-    os.write(master, b"\x18l"); read_for(master, stream, 1.5)  # reopen sessions for the C-series
+    os.write(master, b"\x18l")  # reopen sessions for the C-series — polled (cold-daemon law)
+    for _ in range(16):
+        read_for(master, stream, 0.6)
+        d_reopen = "\n".join(screen.display)
+        if "Sessions" in d_reopen and "Search" in d_reopen:
+            break
 else:
     for lbl in ("D0 themes dialog opens with bare rows (no OpenCod suffix)",
                 "D1 search row shows the Search placeholder",
@@ -442,7 +463,12 @@ else:
 
 # S-series on the long /themes transcript
 if b0 and alive(pid):
-    os.write(master, b"\x18l"); read_for(master, stream, 1.5)
+    os.write(master, b"\x18l")  # polled open (cold-daemon law)
+    for _ in range(16):
+        read_for(master, stream, 0.6)
+        d_s = "\n".join(screen.display)
+        if "Sessions" in d_s and "Search" in d_s:
+            break
     for ch in "themes":
         os.write(master, ch.encode()); time.sleep(0.05)
     read_for(master, stream, 0.8)

@@ -5,9 +5,11 @@
 // rounded borders, no recessed search box. Selection is a full-width primary
 // bar with background-coloured text; the current item wears a filled dot.
 // Group headers are accent + bold with a spacer row between groups, and the
-// dialog carries the reference footer hint row (bold key + muted label) —
-// owner ruling 2026-09-16 ("the sessions overlay of opencode is more
-// polished; copy it") supersedes the earlier no-footer consult line.
+// dialog carries the reference footer hint row in v2's FooterAction grammar
+// (bold word first, subdued key after; 0.6.30 re-port fixed the inverted
+// key-first rendering) — owner ruling 2026-09-16 ("the sessions overlay of
+// opencode is more polished; copy it") supersedes the earlier no-footer
+// consult line.
 // Dialogs deliberately use the global keyboard hook instead of a focused
 // InputRenderable: OpenTUI can retain focus on a component that has already
 // been reconciled away, so keeping filter state here makes every modal
@@ -111,7 +113,11 @@ export function SelectDialog<T>({
   onHighlight?: (option: DialogOption<T> | undefined) => void;
   size?: "medium" | "large" | "xlarge";
   countLabel?: string;
-  footerHints?: { key: string; label: string }[];
+  /** v2 footerHints grammar (dialog-select.tsx FooterAction): the WORD is
+   * bold and leads, the KEY rides subdued after it ("open enter"), pairs
+   * space 2 apart, left group left / side:"right" group right across a
+   * space-between footer row. */
+  footerHints?: { key: string; label: string; side?: "left" | "right" }[];
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
@@ -281,13 +287,29 @@ export function SelectDialog<T>({
         })}
         {visible.length === 0 ? <text content=" No matching items" fg={C.faint} /> : null}
         {footerHints && footerHints.length > 0 ? (
-          <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
-            {footerHints.map((hint) => (
-              <box key={hint.key} style={{ flexDirection: "row", flexShrink: 0 }}>
-                <text content={`  ${hint.key}`} fg={C.fg} />
-                <text content={` ${hint.label}`} fg={C.faint} />
+          <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
+            <box style={{ flexDirection: "row", flexShrink: 0 }}>
+              {footerHints.filter((h) => h.side !== "right").map((hint) => (
+                <box key={hint.key} style={{ flexDirection: "row", flexShrink: 0 }}>
+                  <text content={hint.label} fg={C.fg} attributes={TextAttributes.BOLD} />
+                  <text content={` ${hint.key}`} fg={C.faint} />
+                  <text content="  " fg={C.faint} />
+                </box>
+              ))}
+            </box>
+            {footerHints.some((h) => h.side === "right") ? (
+              <box style={{ flexDirection: "row", flexShrink: 0 }}>
+                {footerHints.filter((h) => h.side === "right").map((hint) => (
+                  <box key={hint.key} style={{ flexDirection: "row", flexShrink: 0 }}>
+                    <text content={hint.label} fg={C.fg} attributes={TextAttributes.BOLD} />
+                    <text content={` ${hint.key}`} fg={C.faint} />
+                    {hint !== footerHints.filter((h) => h.side === "right").at(-1) ? (
+                      <text content="  " fg={C.faint} />
+                    ) : null}
+                  </box>
+                ))}
               </box>
-            ))}
+            ) : null}
           </box>
         ) : null}
         {shown.length > visible.length ? (
