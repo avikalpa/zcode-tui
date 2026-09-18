@@ -163,7 +163,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "settings" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -1594,6 +1594,7 @@ export function App({
       if (command === "skills") { setDialog("skills"); return; }
       if (command === "mcps") { setDialog("mcp"); return; }
       if (command === "variants") { setDialog("effort"); return; }
+      if (command === "settings") { setDialog("settings"); return; }
       if (command === "help") { setDialog("help"); return; }
       if (command === "diff") { openDiff(); return; }
       if (command === "timeline") { openTimeline(); return; }
@@ -1868,15 +1869,15 @@ export function App({
       .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${err instanceof Error ? err.message : err}`));
   };
 
-  const cycleEffort = () => {
+  const cycleEffort = (dir: 1 | -1 = 1) => {
     const cur = isEffort(effort) ? effort : "max";
-    const next = EFFORTS[(EFFORTS.indexOf(cur) + 1) % EFFORTS.length];
+    const next = EFFORTS[(EFFORTS.indexOf(cur) + dir + EFFORTS.length) % EFFORTS.length];
     applyEffort(next);
   };
 
-  const cycleMode = async () => {
+  const cycleMode = async (dir: 1 | -1 = 1) => {
     const cur = MODES.includes(mode as (typeof MODES)[number]) ? mode as (typeof MODES)[number] : "build";
-    const next = MODES[(MODES.indexOf(cur) + 1) % MODES.length];
+    const next = MODES[(MODES.indexOf(cur) + dir + MODES.length) % MODES.length];
     if (!activeId) {
       setMode(next);
       flashStatus(`mode → ${next}`);
@@ -2450,7 +2451,7 @@ export function App({
       return;
     }
     if (key.ctrl && key.name === "c") {
-      if (typing) { draftRef.current = ""; setDraft(""); setCursorBoth(null); discardPending(); return; }
+      if (typing) { draftRef.current = ""; setDraft(""); setCursorBoth(null); clearSelection(); discardPending(); return; }
       onQuit();
       return;
     }
@@ -3029,6 +3030,7 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
     ["ctrl+p → toggles", "animations · file context · diff wrapping"],
     ["ctrl+p → messages", "next / previous (user) message jump"],
     ["shift+arrows · alt+shift+b/f", "select text · typing replaces it"],
+    ["/settings · ←/→", "settings dialog · change a value"],
   ];
   return (
     <ModalBackdrop C={C} width={width} height={height}>
@@ -3160,6 +3162,84 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
           queueRef.current = next;
           setQueue(next);
           if (next.length === 0) closeDialog();
+        }}
+        onClose={closeDialog}
+      />
+    );
+  }
+  if (dialog === "settings") {
+    // Ported from opencode v2.0.7 component/dialog-config.tsx: the settings
+    // list — category groups, the current value in the row meta, ←/→ cycles
+    // and enter steps forward. OUR rows map only to real setters
+    // (state.json + live session state); the v2 rows without a plane here
+    // (scrollbar, markdown, TPS, permissions, notifications…) stay out.
+    type SettingRow = {
+      id: string;
+      title: string;
+      group: string;
+      hint: string;
+      value: string;
+      change: (dir: 1 | -1) => void;
+    };
+    const rows: SettingRow[] = [
+      {
+        id: "theme",
+        title: "Theme",
+        group: "Appearance",
+        hint: "color scheme",
+        value: theme,
+        change: (dir) => {
+          const i = THEME_NAMES.indexOf(theme);
+          const next = THEME_NAMES[(i + dir + THEME_NAMES.length) % THEME_NAMES.length] as ThemeName;
+          persistTheme(next);
+          flashStatus(`theme → ${next}`);
+        },
+      },
+      { id: "animations", title: "Animations", group: "Appearance", hint: "cursor blink · motion", value: animations ? "on" : "off", change: () => toggleAnimations() },
+      { id: "file-context", title: "Editor context", group: "Input", hint: "the @files popup", value: fileContext ? "on" : "off", change: () => toggleFileContext() },
+      {
+        id: "diff-wrap",
+        title: "Diff wrapping",
+        group: "Input",
+        hint: "diff viewer lines",
+        value: (uiState.current.diff.wrap ?? "char") === "char" ? "word" : "none",
+        change: () => {
+          const next = (uiState.current.diff.wrap ?? "char") === "char" ? "none" : "char";
+          persistDiffPrefs({ wrap: next });
+          flashStatus(next === "char" ? "diff wrapping enabled" : "diff wrapping disabled");
+        },
+      },
+      { id: "thinking", title: "Thinking", group: "Session", hint: "reasoning visibility", value: thoughtLevel === "disabled" ? "hide" : "show", change: () => void toggleThinking() },
+      { id: "sidebar", title: "Sidebar", group: "Session", hint: "the session side panel", value: sidebarOpen ? "shown" : "hidden", change: () => setSidebarOpen((v) => !v) },
+      { id: "mode", title: "Mode", group: "Session", hint: "agent mode", value: mode, change: (dir) => void cycleMode(dir) },
+      { id: "effort", title: "Effort", group: "Session", hint: "reasoning effort", value: effort, change: (dir) => cycleEffort(dir) },
+      { id: "tool-output", title: "Tool output", group: "Session", hint: "expansion · ctrl+o", value: toolsExpanded ? "expanded" : "collapsed", change: () => setToolsExpanded((v) => !v) },
+    ];
+    return (
+      <SelectDialog
+        title="Settings"
+        size="large"
+        options={rows.map((row) => ({
+          id: row.id,
+          label: row.title,
+          description: row.hint,
+          meta: row.value,
+          group: row.group,
+          value: row.id,
+        }))}
+        theme={C}
+        footerHints={[
+          { key: "←/→", label: "change" },
+          { key: "enter", label: "next value" },
+          { key: "esc", label: "close" },
+        ]}
+        onHorizontal={(dir, option) => {
+          const row = rows.find((r) => r.id === option?.id);
+          if (row) row.change(dir);
+        }}
+        onSelect={(_, id) => {
+          const row = rows.find((r) => r.id === id);
+          if (row) row.change(1);
         }}
         onClose={closeDialog}
       />
@@ -3327,6 +3407,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "toggle-animations", label: animations ? "disable animations" : "enable animations", description: "cursor blink · v2 app.toggle.animations", value: toggleAnimations },
       { id: "toggle-file-context", label: fileContext ? "disable file context" : "enable file context", description: "the @files popup", value: toggleFileContext },
       { id: "toggle-diffwrap", label: (uiState.current.diff.wrap ?? "char") === "char" ? "disable diff wrapping" : "enable diff wrapping", description: "in the diff viewer", value: toggleDiffWrap },
+      { id: "settings", label: "Open settings", description: "· /settings", value: () => setDialog("settings") },
       { id: "themes", label: "themes…", description: "the full OpenCode palette set", value: () => openThemes() },
       { id: "sidebar", label: "toggle sidebar", description: "leader b", value: () => { if (view === "session") setSidebarOpen((s) => !s); } },
       { id: "refresh", label: "refresh sessions", value: () => void refresh() },
@@ -3389,17 +3470,16 @@ footerHints={[
           </box>
           <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
             <text content={`${cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
+            {mcpStatus && mcpStatus.total > 0 ? (
+              <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
+                <text
+                  content={"⊙ " + (mcpStatus.failed > 0 ? `${mcpStatus.failed} MCP failed` : `${mcpStatus.total} MCP`)}
+                  fg={mcpStatus.failed > 0 ? C.error : C.success}
+                />
+                {dims.width >= 64 ? <text content="/mcps" fg={C.subtle} /> : null}
+              </box>
+            ) : null}
             <box style={{ flexDirection: "row", flexShrink: 0 }}>
-              {mcpStatus && mcpStatus.total > 0 ? (
-                <>
-                  <text
-                    content={"⊙ " + (mcpStatus.failed > 0 ? `${mcpStatus.failed} MCP failed` : `${mcpStatus.total} MCP`)}
-                    fg={mcpStatus.failed > 0 ? C.error : C.success}
-                  />
-                  {dims.width >= 64 ? <text content=" /mcps" fg={C.subtle} /> : null}
-                  <text content="   " fg={C.faint} />
-                </>
-              ) : null}
               <HintBits text={hintBits} C={C} />
               <text content={`   ${VERSION}`} fg={C.faint} />
             </box>

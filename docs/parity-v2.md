@@ -153,6 +153,18 @@ when both runs share the harness VERSION.
 
 ## Remaining (v2.0.6 → us)
 
+- ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
+  — category groups, current value per row, ←/→ cycles + enter steps —
+  mapped ONLY to our real setters (theme, animations, editor context,
+  diff wrap, thinking, sidebar, mode, effort, tool output). The v2 rows
+  without a plane here (scrollbar, markdown, TPS, permissions,
+  notifications, sounds…) stay out rather than being invented.
+- ~~dialog.select.page_up/page_down/home/end~~ SHIPPED 0.6.27 in
+  SelectDialog (every dialog): pageup/pagedown move ±10 (v2's step), home/
+  end jump; prev/next/submit were already wired.
+- which-key.* (11 binds): v2.0.7 STUB — definitions only, no
+  implementation in the vendored tree (grep-verified). Nothing to copy.
+
 - ~~input.select.* (13 partials)~~ SHIPPED 0.6.25 — anchor-based selection
   on the hand-rolled composer: shift+left/right chars, shift+up/down VISUAL
   rows and alt+shift+a/e visual home/end over a new offset-carrying

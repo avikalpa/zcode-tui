@@ -119,6 +119,14 @@ if alive(pid):
     os.write(master, b"\x7f"); read_for(master, stream, 0.8)
     sl1 = "\n".join(screen.display)
     check(pid, "SL1 backspace deletes the selection", "abcX" not in sl1 and "abc" in sl1)
+    os.write(master, b"\x03")
+    sl_clear = False
+    for _ in range(6):                                         # verify the clear (never leave a draft behind)
+        read_for(master, stream, 0.5)
+        if "Ask anything" in "\n".join(screen.display):
+            sl_clear = True
+            break
+    check(pid, "SL2 ctrl+c clears after the selection flow", sl_clear)
 
     # HF-series: the v2 home.footer status row (0.6.26) — the MCP ⊙ count
     # with the /mcps hint at width >= 64.
@@ -130,6 +138,51 @@ if alive(pid):
             hf0 = True
             break
     check(pid, "HF0 home footer shows the MCP status row", hf0)
+
+    # SE-series: the /settings dialog (v2 DialogConfig port, 0.6.27).
+    # HARDENED: verify an empty composer, then a visible popup, BEFORE any
+    # enter — a blind enter on a leftover draft sends it as a real message
+    # (the 0.6.27 sitting measured exactly that: "abc/settings" ran a turn).
+    se_clear = False
+    for _ in range(6):
+        read_for(master, stream, 0.5)
+        if "Ask anything" in "\n".join(screen.display):
+            se_clear = True
+            break
+    check(pid, "SE-pre composer verified empty", se_clear)
+    os.write(master, b"/settings")
+    se_popup = False
+    for _ in range(6):
+        read_for(master, stream, 0.5)
+        d = "\n".join(screen.display)
+        if "/settings" in d and "Ask anything" not in d:
+            se_popup = True
+            break
+    check(pid, "SE-pre popup verified", se_popup)
+    os.write(master, b"\r")
+    se0 = False
+    for _ in range(8):                                         # poll: dialog paint
+        read_for(master, stream, 0.6)
+        d = "\n".join(screen.display)
+        if "Settings" in d and "Appearance" in d and "Session" in d:
+            se0 = True
+            break
+    if not se0:
+        print("---- SE0 FAIL SCREEN ----")
+        for i, line in enumerate(screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    check(pid, "SE0 /settings opens with category groups + values", se0)
+    os.write(master, b"\x1b[C")
+    se1 = False
+    for _ in range(8):                                         # poll: the value-change flash
+        read_for(master, stream, 0.6)
+        if "\u2192" in "\n".join(screen.display):
+            se1 = True
+            break
+    check(pid, "SE1 right cycles the highlighted setting", se1)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+    check(pid, "SE2 settings dialog closes", "Settings" not in "\n".join(screen.display))
     os.write(master, b"\x03"); time.sleep(0.3)
 else:
     check(pid, "SL0 shift-select + typing replaces the range", False)

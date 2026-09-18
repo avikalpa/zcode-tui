@@ -91,6 +91,7 @@ export function SelectDialog<T>({
   onClose,
   onAction,
   onHighlight,
+  onHorizontal,
   size,
   countLabel,
   footerHints,
@@ -102,6 +103,9 @@ export function SelectDialog<T>({
   onSelect: (value: T, id: string) => void;
   onClose: () => void;
   onAction?: DialogAction<T>;
+  /** v2 dialog.select paging: pageup/pagedown move ±10, home/end jump to
+   * the first/last row (dialog.select.page_up/page_down/home/end). */
+  onHorizontal?: (dir: -1 | 1, option: DialogOption<T> | undefined) => void;
   /** Live-preview hook (reference onMove/onFilter): fires whenever the
    * highlighted row changes — arrows and typing both count. */
   onHighlight?: (option: DialogOption<T> | undefined) => void;
@@ -168,6 +172,14 @@ export function SelectDialog<T>({
     if (key.name === "up") { setIdx((i) => Math.max(0, i - 1)); return; }
     if (key.name === "down") {
       setIdx((i) => Math.min(Math.max(0, shown.length - 1), i + 1));
+      return;
+    }
+    if (key.name === "pageup") { setIdx((i) => Math.max(0, i - 10)); return; }
+    if (key.name === "pagedown") { setIdx((i) => Math.min(Math.max(0, shown.length - 1), i + 10)); return; }
+    if (key.name === "home") { setIdx(0); return; }
+    if (key.name === "end") { setIdx(Math.max(0, shown.length - 1)); return; }
+    if (onHorizontal && (key.name === "left" || key.name === "right") && !key.ctrl && !key.meta) {
+      onHorizontal(key.name === "left" ? -1 : 1, shown[sel]);
       return;
     }
     if (key.name === "backspace") {

@@ -287,6 +287,62 @@
   "prompt.editor_context.clear": {
    "status": "none",
    "note": "n/a to the plain-text draft"
+  },
+  "opencode.settings": {
+   "status": "covered",
+   "note": "0.6.27 /settings — DialogConfig port onto our real setters (theme/animations/file-context/diff-wrap/thinking/sidebar/mode/effort/tool-output)"
+  },
+  "dialog.select.page_up": {
+   "status": "covered",
+   "note": "0.6.27 pageup moves -10 (v2 moves 10)"
+  },
+  "dialog.select.page_down": {
+   "status": "covered",
+   "note": "0.6.27 pagedown moves +10"
+  },
+  "dialog.select.home": {
+   "status": "covered",
+   "note": "0.6.27 first row"
+  },
+  "dialog.select.end": {
+   "status": "covered",
+   "note": "0.6.27 last row"
+  },
+  "dialog.select.prev": {
+   "status": "covered",
+   "note": "up (shipped with the dialog infra)"
+  },
+  "dialog.select.next": {
+   "status": "covered",
+   "note": "down"
+  },
+  "dialog.select.submit": {
+   "status": "covered",
+   "note": "enter"
+  },
+  "which-key.": {
+   "status": "none",
+   "note": "v2.0.7 STUB: keybind definitions only, no implementation anywhere in the vendored tree (grep-verified 0.6.27) — nothing to copy"
+  },
+  "prompt.autocomplete.prev": {
+   "status": "covered",
+   "note": "up in the slash popup"
+  },
+  "prompt.autocomplete.next": {
+   "status": "covered",
+   "note": "down"
+  },
+  "prompt.autocomplete.hide": {
+   "status": "covered",
+   "note": "escape dismisses"
+  },
+  "prompt.autocomplete.select": {
+   "status": "covered",
+   "note": "enter"
+  },
+  "prompt.autocomplete.complete": {
+   "status": "covered",
+   "note": "tab completes"
   }
  }
 }
