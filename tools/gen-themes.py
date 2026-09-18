@@ -44,6 +44,12 @@ DIFF_MAP = [
     ("diffAddedBg", "diffAddedBg", []),
     ("diffRemovedBg", "diffRemovedBg", []),
     ("diffContextBg", "diffContextBg", []),
+    ("diffHunkHeader", "diffHunkHeader", []),
+    ("diffHighlightAdded", "diffHighlightAdded", []),
+    ("diffHighlightRemoved", "diffHighlightRemoved", []),
+    ("diffLineNumber", "diffLineNumber", ["textMuted"]),
+    ("diffAddedLineNumberBg", "diffAddedLineNumberBg", []),
+    ("diffRemovedLineNumberBg", "diffRemovedLineNumberBg", []),
 ]
 
 MD_MAP = [
@@ -161,7 +167,9 @@ def main():
             v = pick(theme, key, fallbacks, defs)
             if v is None:
                 v = {"diffAdded": "#4fd6be", "diffRemoved": "#c53b53", "diffContext": "#828bb8",
-                     "diffAddedBg": "#20303b", "diffRemovedBg": "#37222c", "diffContextBg": "#1e1e1e"}[token]
+                     "diffAddedBg": "#20303b", "diffRemovedBg": "#37222c", "diffContextBg": "#1e1e1e",
+                     "diffHunkHeader": "#828bb8", "diffHighlightAdded": "#b8db87", "diffHighlightRemoved": "#e26a75",
+                     "diffLineNumber": "#8f8f8f", "diffAddedLineNumberBg": "#1b2b34", "diffRemovedLineNumberBg": "#2d1f26"}[token]
             dv[token] = normalize(v).lower()
         dbody = ", ".join(f"{k}: \"{v}\"" for k, v in dv.items())
         diff_lines.append(f"  \"{name}\": {{ {dbody} }},")

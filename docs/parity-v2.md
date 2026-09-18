@@ -48,6 +48,22 @@ console_org.
   1-9, running-status adoption on open (0.6.17).
 - Agents: list (leader a), cycle (tab), modes (shift+tab), status view
   (leader s).
+- **diff.* family (19 binds)** — the diff viewer route (`/diff` + ctrl+p
+  palette): full-screen route over the app, source header grammar
+  (All/Committed/Uncommitted `· vs <base>` + n/m reviewed count), file-tree
+  rail (width clamp 30..40, shown at >= 90 cols, collapsed single-dir
+  chains, rails + status letters + reviewed ✓), per-file cards (▄
+  separators, FilePath headers, +n/-m counts), split/unified with the
+  100-col split floor, single-patch view, hunk jumps (] / [), file jumps
+  (n / p + alt+arrows), mark_reviewed (m) with single-mode advance, Diff
+  source dialog (All/Committed/Uncommitted/Base) + Base branch picker
+  (local+remote, remembered until exit), Diff shortcuts overlay (?),
+  scroll grammar (j/k, pagedown/pageup, ctrl+d/u, gg/G, home/end), escape/q
+  close, preferences persisted (tree/single/view) (0.6.20). Wiring: local
+  git in the session cwd reproducing the reference server adapter —
+  working = `git diff HEAD` + untracked via `--no-index /dev/null`;
+  branch/committed = merge-base against the default branch (origin HEAD
+  symref, else main/master); `--unified=12 --no-renames --no-ext-diff`.
 
 ## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
 
@@ -69,16 +85,20 @@ console_org.
    our own chrome; re-diff each against v2's dialog-* source file by file.
 7. **Turn footers, context label, spinner** — verify token-for-token against
    v2 (formatTurnFooter was measured earlier; re-verify on v2.0.6).
+8. **Diff viewer binding gaps (0.6.20)** — opentui 0.5.11 has no mouse plane
+   (the right-click file menu and hover states are omitted; upstream's tree
+   is partly mouse-driven) and no renderer lifecycle passes (the
+   dynamically-tinted top edge renders static context colour; file headers
+   do not float while scrolling). Reviewed cards tint to the panel step (no
+   surface.overlay token in the 33-theme port); image files show the
+   no-patch notice (v2 previews image bytes); syntax highlighting rides the
+   markdown SyntaxStyle (the tree-sitter filetype→language map was not
+   ported, so per-language highlight fidelity may differ).
 
 ## Remaining (v2.0.6 → us)
 
-- **diff.* family (19 binds)** — the diff viewer route: open, tree,
-  hunks (next/prev), files (next/prev), split/unified, file tree toggle,
-  single patch, source switch (git/branch/last-turn), mark_reviewed, help.
-  Largest single surface gap. Reference: `feature-plugins/system/
-  diff-viewer.tsx` (~1077 lines) + file-tree utils. CLAIMED (parked twice —
-  see door); data sources git/branch via local git in the workspace cwd,
-  last-turn needs a host verb.
+- ~~diff.* family (19 binds)~~ SHIPPED 0.6.20 (the last-turn SOURCE stays
+  blocked below).
 - **session.tab.* (16 binds) + session-tabs-rail** — session TABS:
   next/prev/close/reopen/unread/history/select-1-10. We have sessions
   dialog + quick slots only; tabs are the v2 navigation structure.

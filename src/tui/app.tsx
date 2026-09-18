@@ -30,8 +30,11 @@ import {
   type SlashCommandSpec,
   type ThemeName,
   type ThemeTokens,
+  diffFor,
 } from "./design";
 import { OFFICIAL_DIFF, OFFICIAL_MD } from "./themes-generated";
+import { DiffViewer, diffSourceLabel, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
+import { listBranches, type DiffMode } from "./diff/git";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import pkgJson from "../../package.json";
@@ -144,8 +147,8 @@ const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
 const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
-type AppView = "home" | "session";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | null;
+type AppView = "home" | "session" | "diff";
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -258,7 +261,7 @@ function normalizeSession(value: Record<string, unknown>): SessionRow {
 // the model/effort voice. Writes are atomic (temp + rename), same as
 // writeJsonAtomic upstream.
 type ModelKey = { providerId: string; modelId: string };
-type UiState = { recent: ModelKey[]; favorite: ModelKey[]; variant: Record<string, string> };
+type UiState = { recent: ModelKey[]; favorite: ModelKey[]; variant: Record<string, string>; diff: DiffPreferences };
 const uiStatePath = `${process.env.HOME}/.config/zcode-tui/state.json`;
 function modelKey(model: ModelKey): string {
   return `${model.providerId}/${model.modelId}`;
@@ -286,9 +289,10 @@ function readUiState(): UiState {
           return typeof m.providerId === "string" && typeof m.modelId === "string";
         })
       : [];
-    return { recent, favorite, variant };
+    const diff: DiffPreferences = raw.diff && typeof raw.diff === "object" ? (raw.diff as DiffPreferences) : {};
+    return { recent, favorite, variant, diff };
   } catch {
-    return { recent: [], favorite: [], variant: {} };
+    return { recent: [], favorite: [], variant: {}, diff: {} };
   }
 }
 function writeUiState(next: UiState): void {
@@ -989,15 +993,12 @@ export function App({
       anchor.current = null;
       if (grown > 0) box.scrollTop = (box.scrollTop ?? 0) + grown;
     }
-    let stickyVal = "n/a";
-    try { stickyVal = String((box as { isAtStickyPosition?: () => boolean }).isAtStickyPosition?.()); } catch {}
-    try { appendFileSync("/tmp/zct-keys.log", "sync st=" + String(box.scrollTop) + " sh=" + String(box.scrollHeight) + " vp=" + String(box.viewport?.height) + " sticky=" + stickyVal + "\n"); } catch {}
+    try { (box as { isAtStickyPosition?: () => boolean }).isAtStickyPosition?.(); } catch {}
     // At-tail truth, all three voices OR'd (measured 2026-09-16): the
     // engine's own isAtStickyPosition() (glue engaged), the sticky anchor
     // (scrollTop ~0), and the classic geometric bottom (scrollTop + viewport
     // >= scrollHeight). Whichever coordinate voice the engine is using this
     // frame, the tail is the tail.
-    try { appendFileSync("/tmp/zct-keys.log", "sync st=" + String(box.scrollTop) + " glue=" + String((box as { _stickyScrollBottom?: boolean })._stickyScrollBottom) + "\n"); } catch {}
     const classicBottom = (box.scrollTop ?? 0) + ((box.viewport?.height as number | undefined) ?? 0) >= (box.scrollHeight ?? 0) - 3;
     const bottom = (typeof box.isAtStickyPosition === "function" && box.isAtStickyPosition())
       || (box.scrollTop ?? 999) <= 2
@@ -1344,6 +1345,7 @@ export function App({
       if (command === "themes") { openThemes(); return; }
       if (command === "commands") { setDialog("palette"); return; }
       if (command === "help") { setDialog("help"); return; }
+      if (command === "diff") { openDiff(); return; }
       if (command === "timeline") { openTimeline(); return; }
       if (command === "agents") { setDialog("mode"); return; }
       if (command === "status") { flashStatus(statusSummary()); return; }
@@ -1384,6 +1386,39 @@ export function App({
     const backend = lost ? "backend LOST" : running ? "working" : "idle";
     const ctxBit = ctx ? ` · ctx ${formatContextLabel(ctx.used, ctx.window)}` : "";
     return `${backend} · ${mode} · ${modelLabel(activeModel)} · effort ${effort}${ctxBit} · ${sessions.length} sessions`;
+  };
+
+  // opencode v2 diff viewer (/diff): a full-screen route over the app with
+  // its own key grammar; the return view is remembered like v2's
+  // returnRoute, and the composer is re-armed on close (closeDialog
+  // discipline — the dead-composer family).
+  const [diffMode, setDiffMode] = useState<DiffMode>("branch");
+  const [diffBase, setDiffBase] = useState<string | null>(null);
+  const [diffBranches, setDiffBranches] = useState<string[]>([]);
+  const diffApiRef = useRef<DiffViewerApi | null>(null);
+  const diffReturnView = useRef<AppView>("home");
+  const ggArmedRef = useRef(false);
+  const openDiff = () => {
+    diffReturnView.current = view;
+    setView("diff");
+    setTyping(false);
+  };
+  const closeDiff = () => {
+    setView(diffReturnView.current);
+    setTyping(true);
+  };
+  const openDiffSource = () => {
+    setDialog("diffsource");
+    setTyping(false);
+  };
+  const openDiffBasePicker = () => {
+    void listBranches(process.cwd()).then((names) => setDiffBranches(names));
+    setDialog("diffbase");
+    setTyping(false);
+  };
+  const persistDiffPrefs = (value: DiffPreferences) => {
+    uiState.current.diff = { ...uiState.current.diff, ...value };
+    writeUiState(uiState.current);
   };
 
   // OpenCode's agent quick slots: leader 1..9 jumps straight into the Nth
@@ -1913,6 +1948,37 @@ export function App({
       return;
     }
 
+    // The v2 diff viewer's keymap layer: while the diff route is up, its
+    // grammar owns the keyboard (diff-binding precedence — ctrl+d scrolls
+    // instead of quitting, escape/q close the route).
+    if (view === "diff") {
+      if (key.name === "escape" || key.name === "q") { closeDiff(); return; }
+      const api = diffApiRef.current;
+      if (!api) return;
+      if (key.name === "j" || key.name === "down") { api.scrollLine(1); return; }
+      if (key.name === "k" || key.name === "up") { api.scrollLine(-1); return; }
+      if (key.name === "pagedown" || (key.ctrl && key.name === "f")) { api.scrollPage(1); return; }
+      if (key.name === "pageup" || (key.ctrl && key.name === "b")) { api.scrollPage(-1); return; }
+      if (key.ctrl && key.name === "d") { api.scrollHalfPage(1); return; }
+      if (key.ctrl && key.name === "u") { api.scrollHalfPage(-1); return; }
+      if (key.name === "home") { api.scrollToStart(); return; }
+      if (key.name === "end") { api.scrollToEnd(); return; }
+      if (key.name === "g" && ggArmedRef.current) { api.scrollToStart(); ggArmedRef.current = false; return; }
+      ggArmedRef.current = key.name === "g";
+      if (key.name === "G" || (key.name === "g" && (key as { shift?: boolean }).shift)) { api.scrollToEnd(); return; }
+      if (key.name === "]") { api.jumpHunk(1); return; }
+      if (key.name === "[") { api.jumpHunk(-1); return; }
+      if (key.name === "n" || ((key as { meta?: boolean }).meta && key.name === "down")) { api.jumpFile(1); return; }
+      if (key.name === "p" || ((key as { meta?: boolean }).meta && key.name === "up")) { api.jumpFile(-1); return; }
+      if (key.name === "b") { api.toggleFileTree(); return; }
+      if (key.name === "s") { api.toggleSinglePatch(); return; }
+      if (key.name === "v") { api.toggleView(); return; }
+      if (key.name === "m") { api.markReviewed(); return; }
+      if (key.name === "d") { openDiffSource(); return; }
+      if (key.sequence === "?" || key.name === "?") { setDialog("diffhelp"); return; }
+      return;
+    }
+
     // Leader chord (ctrl+x then a key), the OpenCode navigation grammar:
     // b sidebar · t themes · l sessions · n new · c compact · q quit.
     // The armed leader consumes the next key unconditionally — no timeout —
@@ -2276,6 +2342,60 @@ export function App({
     value: row,
   }));
 
+  if (dialog === "diffsource") {
+    return (
+      <SelectDialog
+        title="Diff source"
+        theme={C}
+        options={[
+          { id: "branch", label: diffSourceLabel("branch"), description: "Branch + local changes", value: "branch" },
+          { id: "committed", label: diffSourceLabel("committed"), description: "Branch commits only", value: "committed" },
+          { id: "working", label: diffSourceLabel("working"), description: "Local changes only", value: "working" },
+          { id: "base", label: "Base", description: diffBase ?? "Choose…", value: "base" },
+        ]}
+        currentId={diffMode}
+        onSelect={(value) => {
+          if (value === "base") { openDiffBasePicker(); return; }
+          setDiffMode(value as DiffMode);
+          closeDialog();
+        }}
+        onClose={closeDialog}
+      />
+    );
+  }
+  if (dialog === "diffbase") {
+    return (
+      <SelectDialog
+        title="Base branch"
+        size="large"
+        theme={C}
+        options={diffBranches.map((name) => ({ id: name, label: name, value: name }))}
+        currentId={diffBase ?? undefined}
+        onSelect={(name) => { setDiffBase(name); closeDialog(); }}
+        onClose={closeDialog}
+      />
+    );
+  }
+  if (dialog === "diffhelp") {
+    return <DiffHelpDialog C={C} width={dims.width} height={dims.height} onClose={closeDialog} />;
+  }
+  if (view === "diff" && dialog === null) {
+    return (
+      <DiffViewer
+        C={C}
+        D={diffFor(theme)}
+        syntaxStyle={mdStyle}
+        cwd={process.cwd()}
+        mode={diffMode}
+        base={diffBase}
+        preferences={uiState.current.diff}
+        onPreferencesChange={persistDiffPrefs}
+        onSwitchSourceDialog={openDiffSource}
+        onHelpDialog={() => { setDialog("diffhelp"); setTyping(false); }}
+        apiRef={(api) => { diffApiRef.current = api; }}
+      />
+    );
+  }
   if (dialog === "sessions") {
     return (
       <SelectDialog
@@ -2528,6 +2648,77 @@ function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: ()
         ))}
         <box style={{ height: 1, flexShrink: 0 }} />
         <text content="enter / esc close · ctrl+p lists every command" fg={C.faint} />
+      </box>
+    </ModalBackdrop>
+  );
+}
+
+// The diff viewer's shortcut overlay — port of v2 DiffViewerHelpDialog
+// (medium panel, Review / Scroll / View groups, shortcut column 17). The
+// right-click file-menu row is omitted: this binding has no mouse plane.
+function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: () => void; width: number; height: number }) {
+  useKeyboard((key) => {
+    if (key.name === "escape" || key.name === "return" || (key.ctrl && key.name === "c")) { onClose(); return; }
+  });
+  const groups: { title: string; rows: [string, string][] }[] = [
+    {
+      title: "Review",
+      rows: [
+        ["n / alt+down", "Next file"],
+        ["p / alt+up", "Previous file"],
+        ["m", "Review + collapse / reopen"],
+        ["] / [", "Next / previous change"],
+      ],
+    },
+    {
+      title: "Scroll",
+      rows: [
+        ["j / k / arrows", "Down / up"],
+        ["ctrl+d / ctrl+u", "Half page down / up"],
+        ["pagedown / pageup", "Page down / up"],
+        ["gg / shift+g", "First / last"],
+      ],
+    },
+    {
+      title: "View",
+      rows: [
+        ["v", "Split / unified"],
+        ["s", "All files / single file"],
+        ["b", "Show / hide file tree"],
+        ["d", "Switch diff source"],
+        ["escape / q", "Close diff viewer"],
+      ],
+    },
+  ];
+  return (
+    <ModalBackdrop C={C} width={width} height={height}>
+      <box
+        style={{
+          width: Math.min(60, Math.max(30, width - 4)),
+          flexDirection: "column",
+          flexShrink: 0,
+          backgroundColor: C.panel,
+          paddingTop: 1,
+          paddingBottom: 1,
+          paddingLeft: 2,
+          paddingRight: 2,
+        }}
+      >
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content="Diff shortcuts" fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content="esc close" fg={C.faint} />
+        </box>
+        {groups.map((group) => (
+          <box key={group.title} style={{ flexDirection: "column", flexShrink: 0, paddingTop: 1 }}>
+            <text content={group.title} fg={C.fg} attributes={TextAttributes.BOLD} />
+            {group.rows.map(([k, label]) => (
+              <box key={k} style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+                <text content={k} fg={C.fg} width={17} />
+                <text content={label} fg={C.subtle} />
+              </box>
+            ))}
+          </box>
+        ))}
       </box>
     </ModalBackdrop>
   );

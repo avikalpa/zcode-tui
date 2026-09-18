@@ -6,7 +6,7 @@
 //   1. OFFICIAL_THEMES (themes-generated.ts) — the 33 official OpenCode TUI
 //      palettes, ported verbatim (dark arm) from the upstream repo.
 //   2. The two zai arms below — ZCode brand colours that have no OpenCode twin.
-import { OFFICIAL_MD, OFFICIAL_THEMES } from "./themes-generated";
+import { OFFICIAL_DIFF, OFFICIAL_MD, OFFICIAL_THEMES } from "./themes-generated";
 
 export interface ThemeTokens {
   bg: string;
@@ -91,6 +91,14 @@ export function isOfficialTheme(name: ThemeName): boolean {
 
 export function mdFor(theme: ThemeName): MdTokens {
   return OFFICIAL_MD[theme] ?? OFFICIAL_MD.opencode;
+}
+
+// The per-theme diff arms (added/removed/context + line-number gutters) —
+// the diff viewer's card backgrounds, signs, counts and hunk headers read
+// these, exactly as the reference theme module exposes them.
+export type DiffTokens = typeof OFFICIAL_DIFF[string];
+export function diffFor(theme: ThemeName): DiffTokens {
+  return OFFICIAL_DIFF[theme] ?? OFFICIAL_DIFF.opencode;
 }
 
 // The accent a surface carries for the active mode — OpenCode tints the
@@ -195,6 +203,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "model", aliases: [], description: "choose from the safe model allowlist" },
   { name: "themes", aliases: ["theme"], description: "OpenCode plus terminal colour arms" },
   { name: "commands", aliases: [], description: "open the command palette" },
+  { name: "diff", aliases: [], description: "open the diff viewer" },
   { name: "help", aliases: [], description: "keybind help" },
   { name: "timeline", aliases: [], description: "session timeline · fork at a prompt" },
   { name: "status", aliases: [], description: "session and backend status" },
@@ -216,6 +225,7 @@ export function matchSlashCommands(prefix: string): SlashCommandSpec[] {
 export type SlashCommand =
   | "agents" | "sessions" | "new" | "home" | "model" | "themes" | "commands"
   | "status" | "effort" | "thinking" | "fork" | "compact" | "quit" | "help" | "timeline"
+  | "diff"
   | null;
 
 export function parseSlashCommand(input: string): SlashCommand {

@@ -336,5 +336,117 @@ f0 = "GLM-5.3 Z.AI" in "\n".join(screen.display) and "· max" in "\n".join(scree
 check(pid, "F0 restart advertises the persisted model (GLM-5.3) with its effort", f0)
 kill(pid)
 
+
+# ---- boot 3: diff viewer (the v2 port over local-git wiring) ----
+DIFF_CWD = "/tmp/zct-proof-cwd"
+
+def seed_diff_repo():
+    # Deterministic every run: nuke and re-init (earlier runs must not leak
+    # tracked files into the next run's diff). Three changed files: a small
+    # modify, a 60-line file with a mid-file edit (so n/s/v visibly scroll),
+    # and an untracked addition.
+    import shutil
+    shutil.rmtree(f"{DIFF_CWD}/.git", ignore_errors=True)
+    for name in ("base.txt", "tallfile.txt", "untracked.txt"):
+        try:
+            os.remove(f"{DIFF_CWD}/{name}")
+        except FileNotFoundError:
+            pass
+    os.makedirs(DIFF_CWD, exist_ok=True)
+    def git(*args):
+        return subprocess.run(["git", "-C", DIFF_CWD, *args], capture_output=True)
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "proof@local")
+    git("config", "user.name", "proof")
+    with open(f"{DIFF_CWD}/base.txt", "w") as f:
+        f.write("one\n")
+    with open(f"{DIFF_CWD}/tallfile.txt", "w") as f:
+        f.writelines(f"line {i}\n" for i in range(1, 61))
+    git("add", "-A")
+    git("commit", "-q", "-m", "baseline")
+    with open(f"{DIFF_CWD}/base.txt", "w") as f:
+        f.write("one\ntwo\n")
+    with open(f"{DIFF_CWD}/tallfile.txt", "w") as f:
+        f.writelines((f"line {i} edited\n" if i == 30 else f"line {i}\n") for i in range(1, 61))
+        f.write("line 61\nline 62\n")
+    with open(f"{DIFF_CWD}/untracked.txt", "w") as f:
+        f.write("added\n")
+
+seed_diff_repo()
+pid, master, screen, stream = spawn(cols=140)
+read_for(master, stream, 9)
+
+# DF1: /diff opens the route: All header, tree rows, 0/3 review count
+os.write(master, b"/diff\r")
+read_for(master, stream, 3.0)
+disp = "\n".join(screen.display)
+# Branch mode is TRACKED-only upstream (untracked files appear in the
+# working source), so the count is 0/2 here.
+check(pid, "DF1 /diff opens: All source header + tree + 0/2 review count",
+      "All" in disp and "vs main" in disp and "tallfile.txt" in disp and "0/2" in disp)
+
+# DF2/DF3: file walk + single-patch toggle (screen truth: the pane changes)
+os.write(master, b"n"); read_for(master, stream, 1.2)
+disp_n = "\n".join(screen.display)
+check(pid, "DF2 n walks to the next file", disp_n != disp)
+os.write(master, b"s"); read_for(master, stream, 1.2)
+os.write(master, b"p"); read_for(master, stream, 1.2)          # single: back to base.txt
+os.write(master, b"G"); read_for(master, stream, 1.2)          # end of the ONLY card
+single_disp = "\n".join(screen.display)
+# The tallfile card does not exist in single view: its tree row is the one
+# mention, and none of its patch content may show.
+check(pid, "DF3 s enters single-file patch view (other card absent)",
+      single_disp.count("tallfile.txt") == 1 and "line 55" not in single_disp)
+os.write(master, b"s"); read_for(master, stream, 1.2)
+
+# DF4/DF5: the diff shortcuts overlay
+os.write(master, b"?"); read_for(master, stream, 1.2)
+disp = "\n".join(screen.display)
+check(pid, "DF4 ? opens the Diff shortcuts overlay", "Diff shortcuts" in disp and "Next / previous change" in disp)
+os.write(master, b"\x1b"); read_for(master, stream, 0.8)
+check(pid, "DF5 help overlay closes", "Diff shortcuts" not in "\n".join(screen.display))
+
+# DF6/DF7: the Diff source dialog -> Uncommitted
+os.write(master, b"d"); read_for(master, stream, 1.2)
+disp = "\n".join(screen.display)
+check(pid, "DF6 d opens the Diff source dialog", "Diff source" in disp and "Committed" in disp and "Choose" in disp)
+os.write(master, b"\x1b[B"); time.sleep(0.2)
+os.write(master, b"\x1b[B"); time.sleep(0.2)
+os.write(master, b"\r"); read_for(master, stream, 3.0)
+disp = "\n".join(screen.display)
+check(pid, "DF7 Uncommitted source: vs HEAD + the untracked file joins (0/3)",
+      "Uncommitted" in disp and "vs HEAD" in disp and "untracked.txt" in disp and "0/3" in disp)
+
+# DF8: v toggles split/unified
+before_v = "\n".join(screen.display)
+os.write(master, b"v"); read_for(master, stream, 1.2)
+check(pid, "DF8 v toggles the view (screen changed)", "\n".join(screen.display) != before_v)
+
+# DF9: m marks reviewed (count 1/2)
+os.write(master, b"m"); read_for(master, stream, 1.2)
+disp = "\n".join(screen.display)
+check(pid, "DF9 m marks the file reviewed (1/3)", "1/3" in disp)
+
+# DF10: b toggles the tree column (the ≡ file markers come and go)
+os.write(master, b"b"); read_for(master, stream, 1.2)
+disp = "\n".join(screen.display)
+check(pid, "DF10 b hides the file tree", "\u2261" not in disp)
+os.write(master, b"b"); read_for(master, stream, 1.2)
+check(pid, "DF10b b restores the file tree", "\u2261" in "\n".join(screen.display))
+
+# DF11/DF12: q closes back home; the composer must be alive
+os.write(master, b"q"); read_for(master, stream, 1.5)
+disp = "\n".join(screen.display)
+check(pid, "DF11 q closes the diff route", "Ask anything" in disp)
+token = False
+for _ in range(4):
+    os.write(master, b"ZC-DIFF-RETURN")
+    read_for(master, stream, 0.8)
+    if "ZC-DIFF-RETURN" in "\n".join(screen.display):
+        token = True
+        break
+check(pid, "DF12 composer alive after closing the diff route", token)
+kill(pid)
+
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")
 sys.exit(0 if all(ok for _, ok in verdicts) else 1)
