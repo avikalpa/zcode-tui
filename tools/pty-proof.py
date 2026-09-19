@@ -12,6 +12,12 @@ import pyte
 
 binary = sys.argv[1]
 verdicts = []
+check_secs = []          # parallel to verdicts: the FAM section each check ran under
+CUR_SECTION = None       # set by the --stage runner; None in the full run
+DUMPS_DIR = None         # --stage --dumps: per-state-change screen dumps land here
+_dump_seq = 0
+_dump_sig = None
+_SCREENS = {}            # id(stream) -> screen, for the dumps microscope
 
 def alive(pid):
     try:
@@ -24,6 +30,7 @@ def check(pid, label, ok):
     if not alive(pid):
         ok = False
     verdicts.append((label, ok))
+    check_secs.append(CUR_SECTION)
     print(f"{'PASS' if ok else 'FAIL'}{'' if alive(pid) else ' (DEAD)'} {label}")
 
 with open("/tmp/zct-fake-editor.sh", "w") as f:
@@ -45,6 +52,7 @@ def spawn(cols=110, rows=34):
 RAW = bytearray()
 
 def read_for(master, stream, seconds):
+    global _dump_seq, _dump_sig
     end = time.time() + seconds
     while time.time() < end:
         r, _, _ = select.select([master], [], [], 0.2)
@@ -57,6 +65,16 @@ def read_for(master, stream, seconds):
                 return
             RAW.extend(chunk)
             stream.feed(chunk)
+            if DUMPS_DIR is not None:                     # --stage --dumps: the microscope
+                _scr = getattr(stream, "screen", None) or _SCREENS.get(id(stream))
+                if _scr is not None:
+                    sig = hash(tuple(_scr.display))
+                    if sig != _dump_sig:
+                        _dump_sig = sig
+                        _dump_seq += 1
+                        if _dump_seq <= 999:
+                            with open(os.path.join(DUMPS_DIR, "s%04d.txt" % _dump_seq), "w") as _df:
+                                _df.write("\n".join(_scr.display))
 
 def kill(pid):
     try:
@@ -64,7 +82,110 @@ def kill(pid):
         os.waitpid(pid, 0)
     except ProcessLookupError:
         pass
+# ==== --stage microscope runner (dream ACK-c4026a1ec6, wave 0.6.38).
+# The no-arg full run below is untouched; --stage FAM [--dumps DIR] execs
+# boot-closure + ONE family slice (the '# ==== FAM:' markers below are the
+# only structure it adds) so the stage bodies stay the SSOT. Per-state-
+# change screen dumps, pid-scoped cli-trace tail on fail, family verdict.
+def _fam_parse(argv):
+    if len(argv) < 2:
+        sys.exit("usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR]")
+    binary, stage, dumps = argv[1], None, None
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--stage" and i + 1 < len(argv):
+            stage = argv[i + 1]; i += 2
+        elif argv[i] == "--dumps" and i + 1 < len(argv):
+            dumps = argv[i + 1]; i += 2
+        else:
+            sys.exit("pty-proof: bad argument %r (usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR])" % argv[i])
+    return binary, stage, dumps
 
+def _fam_sections(src):
+    lines = src.splitlines()
+    marks = []
+    for idx, line in enumerate(lines):
+        m = re.match(r"# ==== FAM:([A-Z0-9]+)(?: requires ([A-Z0-9, ]+))? ====", line)
+        if m:
+            reqs = [r for r in (m.group(2) or "").replace(",", " ").split() if r]
+            marks.append((m.group(1), reqs, idx))
+    if not marks or marks[-1][0] != "EPILOGUE":
+        sys.exit("pty-proof: FAM markers missing or corrupt")
+    secs, reqs_of, order = {}, {}, []
+    for i, (name, reqs, idx) in enumerate(marks):
+        end = marks[i + 1][2] if i + 1 < len(marks) else len(lines)
+        secs[name] = "\n".join(lines[idx:end])
+        reqs_of[name] = reqs
+        order.append(name)
+    return secs, reqs_of, order
+
+if len(sys.argv) > 2:   # stage mode; the full run is the plain one-arg invocation
+    _binary, _stage, _dumps = _fam_parse(sys.argv)
+    if _stage is None:
+        sys.exit("pty-proof: --dumps needs --stage FAM")
+    _secs, _reqs, _order = _fam_sections(open(__file__).read())
+    if _stage not in _secs or _stage == "EPILOGUE":
+        sys.exit("pty-proof: unknown family %r (known: %s)" % (
+            _stage, ", ".join(n for n in _order if n != "EPILOGUE")))
+    _need, _changed = set([_stage]), True
+    while _changed:                     # transitive requires closure
+        _changed = False
+        for _n in list(_need):
+            for _r in _reqs[_n]:
+                if _r not in _need:
+                    _need.add(_r)
+                    _changed = True
+    _run_order = [_n for _n in _order if _n in _need]
+    _orig_spawn = spawn
+    def spawn(cols=110, rows=34):   # stage-mode wrapper: register stream->screen
+        _r = _orig_spawn(cols, rows)
+        _SCREENS[id(_r[3])] = _r[2]
+        return _r
+    if _dumps:
+        DUMPS_DIR = _dumps
+        os.makedirs(_dumps, exist_ok=True)
+    print("STAGE run: %s (requires: %s)" % (
+        _stage, ", ".join(n for n in _run_order if n != _stage) or "none"))
+    try:
+        for _n in _run_order:
+            CUR_SECTION = _n
+            exec(compile(_secs[_n], "<fam:%s>" % _n, "exec"), globals())
+    finally:
+        CUR_SECTION = None
+        for _pname in ("pid", "th_pid", "th_pid2", "at_pid", "pf_pid"):
+            _p = globals().get(_pname)
+            if isinstance(_p, int) and _p > 0:
+                try:
+                    os.kill(_p, 0)
+                    os.kill(_p, 9)
+                    print("STAGE teardown: killed leftover %s=%d" % (_pname, _p))
+                except ProcessLookupError:
+                    pass
+        if DUMPS_DIR is not None:
+            try:
+                open(os.path.join(DUMPS_DIR, "raw.bin"), "wb").write(bytes(RAW))
+            except Exception as _e:
+                print("STAGE: raw dump failed:", _e)
+    _fam = [(l, ok) for (l, ok), s in zip(verdicts, check_secs) if s == _stage]
+    for _l, _ok in _fam:
+        print(("PASS " if _ok else "FAIL ") + _l)
+    if any(not ok for _, ok in _fam):
+        _pids = [str(globals().get(pn)) for pn in ("pid", "th_pid", "th_pid2", "at_pid", "pf_pid")
+                 if isinstance(globals().get(pn), int)]
+        try:
+            _rows = open(os.path.expanduser("~/.yggterm/cli-trace/zcode-tui.jsonl")).read().splitlines()
+            _tail = [r for r in _rows if any(p in r for p in _pids)][-60:]
+            if _tail:
+                print("---- cli-trace tail (pid-scoped) ----")
+                for _r in _tail:
+                    print(_r[:400])
+        except OSError:
+            pass
+    print("STAGE RESULT: %s %s (%d checks)" % (
+        "PASS" if _fam and all(ok for _, ok in _fam) else "FAIL", _stage, len(_fam)))
+    sys.exit(0 if _fam and all(ok for _, ok in _fam) else 1)
+
+# ==== FAM:BOOT ====
 # ---- boot 1 ----
 pid, master, screen, stream = spawn()
 read_for(master, stream, 9)
@@ -81,6 +202,7 @@ for _ in range(3):
 check(pid, "A1 typing on home paints", a1)
 os.write(master, b"\x03"); time.sleep(0.3)
 
+# ==== FAM:X0 requires BOOT ====
 # X0: leader e hands the draft to $EDITOR and loads it back
 os.write(master, b"base-")
 read_for(master, stream, 0.6)
@@ -93,6 +215,7 @@ read_for(master, stream, 0.8)
 check(pid, "X0b composer alive after editor resume", "base-EDITED-BY-EDITOR!" in "\n".join(screen.display))
 os.write(master, b"\x03"); time.sleep(0.3)
 
+# ==== FAM:H requires BOOT ====
 # H-series: ? opens the keybind help overlay
 os.write(master, b"?")
 read_for(master, stream, 1.0)
@@ -102,6 +225,7 @@ os.write(master, b"\x1b")
 read_for(master, stream, 0.6)
 check(pid, "H1 help overlay closes", "Help — keybinds" not in "\n".join(screen.display))
 
+# ==== FAM:SL requires BOOT ====
 # SL-series: the input.select.* family (v2 shift-selections). Behavior proof —
 # the highlight itself is colour-only (invisible to the pyte text dump), so
 # the asserts read the CONSUMPTION: typing replaces the selected range,
@@ -188,6 +312,7 @@ else:
     check(pid, "SL0 shift-select + typing replaces the range", False)
     check(pid, "SL1 backspace deletes the selection", False)
 
+# ==== FAM:TABL requires BOOT ====
 # TAB/L-series (home-local)
 before_mode = [l for l in screen.display if "Z.AI Coding Plan" in l]
 os.write(master, b"\t")
@@ -212,6 +337,7 @@ except FileNotFoundError:
     l2 = False
 check(pid, "L2 ctrl+t cycles the reasoning effort (state.json)", l2)
 
+# ==== FAM:ST requires BOOT ====
 # ST-series: the status dialog (v2 DialogStatus port, 0.6.28). leader s
 # opens the real v2 status view — the invented statusSummary toast is gone.
 # The mcp/list fetch resolves late on a cold daemon (the HF0 boot-fetch
@@ -239,6 +365,7 @@ for _ in range(6):                                         # poll: the close rep
         break
 check(pid, "ST1 esc closes the status dialog", st1)
 
+# ==== FAM:WMODEL requires BOOT ====
 # W-series: model dialog depth (favorites + recent select + f2 cycle)
 os.write(master, b"\x18m"); read_for(master, stream, 1.2)
 os.write(master, b"\x06"); time.sleep(0.3)                    # ctrl+f: favorite
@@ -263,6 +390,7 @@ except FileNotFoundError:
     w2 = False
 check(pid, "W2 f2 cycles recent and persists (state.json)", w2)
 
+# ==== FAM:B requires BOOT ==== (leaves the sessions dialog open; sets b0)
 os.write(master, b"\x18l")
 # The dialog's session/list fetch resolves late on a cold daemon (the HF0/ST0
 # lesson — 2026-09-19: the fixed 1.5s settle lost the race and cascade-failed
@@ -288,6 +416,7 @@ check(pid, "B2 footer hints", "pin" in disp and "delete" in disp and "switch" in
 check(pid, "B3 no idle clutter", "idle ·" not in disp)
 check(pid, "B4 quick-slot gutters", re.search(r"\b1 \S", disp) is not None)
 
+# ==== FAM:D requires BOOT ====
 # D-series: the themes dialog (reference parity — bare rows, Search, ● gutter).
 # Runs HERE, before the turn-dependent stages, so a flaky interrupt can never
 # poison it; the sessions dialog is re-opened afterwards for the C-series.
@@ -322,6 +451,7 @@ else:
         check(pid, lbl, False)
 
 
+# ==== FAM:CSPINE requires B, D ==== (C/W/G/X/TL/I/Q/CX — the nested spine)
 if b0 and alive(pid):
     os.write(master, b"\r"); read_for(master, stream, 5.5)   # let open() settle fully
     disp = "\n".join(screen.display)
@@ -593,6 +723,7 @@ else:
                 "CX6 esc closes the export dialog"):
         check(pid, lbl, False)
 
+# ==== FAM:STHEMES requires B, CSPINE ==== (needs the home state CSPINE restores)
 # S-series on the long /themes transcript
 if b0 and alive(pid):
     os.write(master, b"\x18l")  # polled open (cold-daemon law)
@@ -663,6 +794,7 @@ else:
     for lbl in ("S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
         check(pid, lbl, False)
 
+# ==== FAM:SKM requires BOOT ==== (stash is deterministic; K/M poll the live catalog)
 # ---- S/K/M-series: the stash family, skills selector, MCP list (v2 ports) ----
 # The stash store is exercised from EMPTY so the proof cannot see or leave
 # the owner's real stashed drafts; S0-S4 are deterministic (no backend).
@@ -743,6 +875,7 @@ else:
     check(pid, "M0 /mcps opens the MCP servers dialog", False)
     check(pid, "M1 status grammar renders", False)
 
+# ==== FAM:PG requires BOOT ====
 # ---- PG-series: the plugins dialog (v2 port, 0.6.34). Rows off
 # plugins/list; the toggle rounds-trips plugins/setEnabled and is
 # RESTORE-VERIFIED: the second enter must put the row's disabled flag
@@ -790,6 +923,7 @@ else:
     check(pid, "PG2 enter toggles the plugin (setEnabled round-trips)", False)
     check(pid, "PG3 second enter restores the found state", False)
 
+# ==== FAM:VTG requires BOOT ====
 # ---- V/TG-series: /variants alias + the file-context toggle (v2 ports). ----
 # The toggles persist into the real state.json, so the pre-toggle bytes are
 # captured and restored after the series.
@@ -846,6 +980,7 @@ else:
     check(pid, "TG2 re-enabling restores the @ popup", False)
 kill(pid)
 
+# ==== FAM:F0 requires WMODEL ==== (reads the model state W1 persists)
 # ---- boot 2: persisted effort advertised ----
 pid, master, screen, stream = spawn(cols=111)
 read_for(master, stream, 9)
@@ -858,6 +993,7 @@ check(pid, "F0 restart advertises the persisted model (GLM-5.3) with its effort"
 kill(pid)
 
 
+# ==== FAM:DF ==== (own spawn + seeded repo)
 # ---- boot 3: diff viewer (the v2 port over local-git wiring) ----
 DIFF_CWD = "/tmp/zct-proof-cwd"
 
@@ -969,6 +1105,7 @@ for _ in range(4):
 check(pid, "DF12 composer alive after closing the diff route", token)
 kill(pid)
 
+# ==== FAM:TH ==== (own isolated-home spawn)
 # TH-series: the theme-mode machine (v2 context/theme.tsx — 0.6.32). Runs in
 # an ISOLATED HOME so the persistence proof reads its own state.json and a
 # runner account never sees a mode flip. Colour itself is invisible to the
@@ -1066,6 +1203,7 @@ else:
         check(th_pid, lbl, False)
 
 
+# ==== FAM:AT ==== (own spawn; one real turn)
 # ---- AT-series: the prompt.images attachments (v2 port, 0.6.35). A
 # bracketed paste of an image path attaches it (the [Image 1] label + the
 # thumb strip paint), leader i walks DialogImagePreview, and the submit
@@ -1186,6 +1324,7 @@ else:
                 "AT7 the turn completes over the attachment"):
         check(at_pid, lbl, False)
 
+# ==== FAM:PF ==== (own spawn; one real turn)
 # ---- PF-series: permission.prompt.fullscreen (the v2 SessionQuestion arm,
 # 0.6.36). One tiny real turn forces a shell permission ask (the I-series
 # precedent); the series then drives the expanded arm: ctrl+f toggles the
@@ -1267,5 +1406,6 @@ else:
     for lbl in PF_LABELS:
         check(pf_pid, lbl, False)
 
+# ==== FAM:EPILOGUE ==== (full-run summary; stage mode prints its own)
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")
 sys.exit(0 if all(ok for _, ok in verdicts) else 1)

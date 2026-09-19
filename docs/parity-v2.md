@@ -337,6 +337,35 @@ on the clean lane is what separates them.
   leader-q). Locale.time ported (toLocaleTimeString timeStyle short — Bun
   ICU renders `8:23 AM` verbatim).
 
+## Stage microscope (0.6.38 — dream ACK-c4026a1ec6)
+
+`tools/pty-proof.py BINARY --stage FAM [--dumps DIR]` runs boot-closure +
+ONE family and exits with the FAMILY verdict — one harness spawn,
+per-state-change pyte screen dumps (`sNNNN.txt` + `raw.bin` in DIR), and a
+pid-scoped `~/.yggterm/cli-trace/zcode-tui.jsonl` tail on fail. The stage
+bodies stay the SSOT: the runner only slices and execs the sections between
+the `# ==== FAM:NAME [requires A, B] ====` marker comments; the no-arg full
+run is untouched (the instrumentation is inert without the flags).
+
+- Requires carry the VERIFIED state couplings and the runner execs them in
+  file (full-run) order, so a family starts in exactly its full-run state.
+  CSPINE is one unit for now (C/W/G/X/TL/I/Q/CX share the nested
+  `if b0 and alive(pid):` block); split it into per-family sections the
+  next time a family inside it needs the microscope — that is a data-only
+  change (a marker + a dedent).
+- STHEMES requires B + CSPINE even though it reads only `b0`: B alone
+  leaves the sessions dialog OPEN, and STHEMES' first leader l would close
+  it. The microscope must reproduce full-run STATE, not just variables —
+  annotate requires from the exit state, not the globals read.
+- Dumps fire on screen CHANGE (hash of the pyte display), capped at 999;
+  RAW bytes land in `raw.bin` at teardown, and the teardown also kills any
+  leftover harness even when a slice raises.
+- Proof (2026-09-19, dev, dist at lane e0d3e70): `--stage H` (requires
+  path + teardown + dumps), `--stage DF` (own-spawn path) 13/13, and
+  `--stage PF` (the motivating case, one real turn) 5/5 with 69 dumps —
+  verdicts agreeing with the full proof's series; full-run stability x2
+  unchanged after the tooling change.
+
 ## Remaining (v2.0.8 → us)
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
