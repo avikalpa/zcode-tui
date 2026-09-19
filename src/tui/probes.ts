@@ -18,6 +18,7 @@ import { appendFileSync, mkdirSync, existsSync, writeSync, openSync, closeSync }
 
 export type Milestone =
   | "boot" // process started, flags parsed
+  | "auth-sync" // SSOT auth synced into the config dir (or skipped)
   | "backend-spawn" // app-server child spawn beginning
   | "backend-live" // app-server answered its first request
   | "list-ok" // session/list returned
@@ -26,6 +27,7 @@ export type Milestone =
   | "turn-end" // the turn's final content arrived
   | "permission-ask" // a permission banner went up
   | "permission-answered" // the banner was resolved
+  | "turn-stop" // escape interrupted the running turn
   | "renderer-live" // OpenTUI committed the first frame
   | "quit";
 

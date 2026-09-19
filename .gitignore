@@ -4,3 +4,4 @@ dist/
 # owner conversation bytes — never publish
 docs/evidence/strace-cli-50s.txt
 dist/
+.ui/

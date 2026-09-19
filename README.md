@@ -38,23 +38,48 @@ can be distributed to the rest of the yggterm fleet. For source development,
 run `bun install && bun run tui` (bun ≥ 1.1), then publish or distribute the
 dev build with `ynpm dev`.
 
+## Auth
+
+zcode-tui's auth IS the zcode machine settings. At startup it syncs the
+SSOT provider config (`~/.zcode/v2/provider_config.json`) — read locally on
+the SSOT host or over `ssh <host>` elsewhere (fleet default: jojo) — stores
+it verbatim in `~/.config/zcode-tui/auth-provider-config.json` (0600, with
+metadata in `auth.json`), heals the local machine settings from it
+(`~/.zcode/v2/provider_config.json` + the api key field in
+`~/.zcode/cli/config.json`, dated `.pre-authsync-<date>` backups), and hands
+the stored copy to the spawned backend via
+`ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`. Configure with
+`~/.config/zcode-tui/config.json` → `{"auth": {"source": "jojo",
+"syncAtStartup": true}}` or the `ZCODE_TUI_AUTH_SOURCE` env. Sync failure
+never blocks the boot.
+
 ## Keys
 
 Launch opens the centered `zcodetui` front page. Type a prompt and press Enter
 to create a session, or type `/sessions` to open the session browser.
 
-`a` new session · `i` focus composer · Enter open/send · `s` sessions · `m`
-model dialog · `t` themes · `e` reasoning effort · **Ctrl+K** command palette
-(all verbs, type-to-filter) · `f` fork · `b` fork at message… · `c` compact ·
-`o` cycle mode (plan/build/edit/yolo/auto) · `[`/`]` page conversation · `r`
-refresh/reconnect · `q` quit · permission asks: `y` allow · `a` always
-(project) · `n` deny
+**Ctrl+X then a key** (the OpenCode leader): `b` sidebar · `t` themes ·
+`l` sessions · `n` new · `c` compact · `q` quit. **Ctrl+P** (or Ctrl+K)
+command palette (all verbs, type-to-filter) · **Shift+Tab** cycle mode
+(plan/build/edit/yolo/auto) · `a` new session · `i` focus composer · Enter
+open/send · `s` sessions · `m` model dialog · `t` themes · `e` reasoning
+effort · `b` sidebar (session view) · `f` fork · `c` compact · `o` cycle
+mode · `[`/`]` page conversation · `r` refresh/reconnect · `q` quit ·
+permission asks: `y` allow · `a` always (project) · `n` deny
 
 Dialogs follow OpenCode's selection pattern: type-to-filter, date-grouped
-sessions, arrows, Enter, Esc, and compact footer hints. Themes include the
-OpenCode reference arm, Z.ai light/dark, and several popular terminal arms.
+sessions, arrows, Enter, Esc, and compact footer hints. Themes are the 33
+official OpenCode TUI palettes (ported verbatim from the upstream theme
+assets, `tools/opencode-themes/`) plus Z.ai light/dark; markdown and syntax
+colours follow the active theme. Status rides the composer underline and the
+per-turn footer (mode · model · duration · tok/s) — there is no permanent
+bottom bar.
 
 ## Status
+
+**v0.6.0 — OpenCode visual parity (2026-09-10).** Composer with the
+mode-tinted left accent and OpenCode status grammar, user message blocks,
+per-turn footers, optional session sidebar, full official theme set.
 
 **v0.5.7 — OpenCode-shaped UX (2026-09-08).** The TUI lists/resumes/streams/sends
 against the real backend with the same store and identity as the desktop, with
@@ -75,6 +100,7 @@ release v0.1.0.
 ## Layout
 
 - `src/protocol/` — client + types for the v4 protocol (zero-dep).
+- `src/auth/` — startup auth sync from the zcode machine settings (SSOT).
 - `src/bin/` — probe, probe-script, live (stream capture), battery.
 - `docs/screenshots/` — captured character frames (real app, real data).
 - `docs/` — capture notes + evidence. `docs/evidence/strace-cli-50s.txt` is

@@ -1,7 +1,9 @@
 // zcode-tui live entry — spawns app-server, renders the sessions surface.
 // OpenTUI core is ESM-with-TLA: dynamic import (fleet law from the
 // mock-tui-opentui staging), bun-native entry picked automatically.
+import pkg from "../../package.json";
 import { AppServer } from "../protocol/client";
+import { syncAuthAtStartup } from "../auth/sync";
 import { probe, initProbeDir } from "./probes";
 import { THEMES } from "./design";
 
@@ -15,10 +17,26 @@ async function main() {
   let resumeId: string | null = null;
   let modelId: string | null = null;
   for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--version" || argv[i] === "-V") {
+      // The compiled dist binary has no shim around it (ynpm dev installs
+      // take the ELF directly), so the version probe must live here.
+      console.log(`zcode-tui ${pkg.version}`);
+      process.exit(0);
+    }
     if (argv[i] === "--resume") resumeId = argv[++i] ?? null;
     else if (argv[i] === "--model") modelId = argv[++i] ?? null;
   }
   probe("boot", `pid=${process.pid} argv=${JSON.stringify(argv)}`);
+  // Auth IS the zcode machine settings: sync the SSOT (fleet default jojo —
+  // local read here, `ssh jojo` elsewhere) into the TUI config, heal the
+  // local machine settings from it, and hand the stored copy to the backend.
+  // Fail-soft: no network/jojo must never block the boot.
+  const auth = syncAuthAtStartup();
+  if (auth) {
+    probe("auth-sync", `source=${auth.source} fp=${auth.fingerprint} healed=${auth.healedMachineSettings}`);
+  } else {
+    probe("auth-sync", "skipped (no source reachable)");
+  }
   probe("backend-spawn", "");
   const client = new AppServer({
     onNotification: () => {},
@@ -29,17 +47,21 @@ async function main() {
         client.respond(m.id as string, {});
       }
     },
-  });
+  }, auth ? { env: { ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: auth.providerConfigPath } } : {});
 
   const [{ createCliRenderer }, { createRoot }, { App }] = await Promise.all([
     import("@opentui/core"),
     import("@opentui/react"),
     import("./app"),
   ]);
-  const renderer = await createCliRenderer();
+  // The renderer must not eat ctrl+c: OpenCode disables the default
+  // exit-on-ctrl-c so ctrl+c reaches the key machine (clear the draft while
+  // typing, quit from a nav surface) instead of killing the TUI and
+  // dropping a composed prompt on the floor.
+  const renderer = await createCliRenderer({ exitOnCtrlC: false });
   renderer.setBackgroundColor(THEMES.opencode.bg);
   createRoot(renderer).render(
-    <App client={client} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
+    <App client={client} renderer={renderer} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
   );
 }
 

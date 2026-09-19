@@ -1,0 +1,583 @@
+{
+  "unmatched-default": "none",
+  "prefixes": {
+    "model.": {
+      "status": "law",
+      "note": "paid-burn ruling: the allowlist is ours by law"
+    },
+    "provider_connect": {
+      "status": "law",
+      "note": "zai only"
+    },
+    "console_org": {
+      "status": "law",
+      "note": "zai only"
+    },
+    "console.": {
+      "status": "law",
+      "note": "zai only"
+    },
+    "diff.": {
+      "status": "covered",
+      "note": "0.6.20 — the full viewer route",
+      "members": [
+        "diff.close",
+        "diff.collapse",
+        "diff.down",
+        "diff.expand",
+        "diff.expand_all",
+        "diff.first",
+        "diff.half_page.down",
+        "diff.half_page.up",
+        "diff.help",
+        "diff.last",
+        "diff.mark_reviewed",
+        "diff.next_file",
+        "diff.next_hunk",
+        "diff.open",
+        "diff.page.down",
+        "diff.page.up",
+        "diff.previous_file",
+        "diff.previous_hunk",
+        "diff.single_patch",
+        "diff.switch_focus",
+        "diff.switch_source",
+        "diff.toggle",
+        "diff.toggle_file_tree",
+        "diff.toggle_view",
+        "diff.up"
+      ],
+      "evidence": "PatchDiff"
+    },
+    "input.select.": {
+      "status": "covered",
+      "note": "0.6.25 — anchor selection: shift+arrows/visual rows (wrapRows math), ctrl+shift+a/e logical, alt+shift+a/e visual home/end, shift+home/end buffer, alt+shift words, super+a all (soft: no PTY super); typing replaces, backspace deletes",
+      "members": [
+        "input.select.all",
+        "input.select.buffer.end",
+        "input.select.buffer.home",
+        "input.select.down",
+        "input.select.left",
+        "input.select.line.end",
+        "input.select.line.home",
+        "input.select.right",
+        "input.select.up",
+        "input.select.visual.line.end",
+        "input.select.visual.line.home",
+        "input.select.word.backward",
+        "input.select.word.forward"
+      ],
+      "evidence": "wrapRows"
+    },
+    "input.": {
+      "status": "covered",
+      "note": "0.6.10 editing grammar",
+      "members": [
+        "input.backspace",
+        "input.buffer.end",
+        "input.buffer.home",
+        "input.delete",
+        "input.delete.line",
+        "input.delete.to.line.end",
+        "input.delete.to.line.start",
+        "input.delete.word.backward",
+        "input.delete.word.forward",
+        "input.line.end",
+        "input.line.home",
+        "input.move.down",
+        "input.move.left",
+        "input.move.right",
+        "input.move.up",
+        "input.newline",
+        "input.redo",
+        "input.submit",
+        "input.undo",
+        "input.visual.line.end",
+        "input.visual.line.home",
+        "input.word.backward",
+        "input.word.forward"
+      ],
+      "evidence": "insertAtCursor"
+    },
+    "messages.": {
+      "status": "covered",
+      "note": "0.6.9 scroll grammar; 0.6.18 user-message walk",
+      "evidence": "scroll"
+    },
+    "session_interrupt": {
+      "status": "covered",
+      "note": "0.6.10; 0.6.17 made it a full stop"
+    },
+    "session.tab.": {
+      "status": "covered",
+      "note": "0.6.22 — strip + close/reopen/history/unread/select; ctrl+shift+t delivery is terminal-dependent",
+      "members": [
+        "session.tab.close",
+        "session.tab.history.back",
+        "session.tab.history.forward",
+        "session.tab.next",
+        "session.tab.next_unread",
+        "session.tab.previous",
+        "session.tab.previous_unread",
+        "session.tab.reopen",
+        "session.tab.select.1",
+        "session.tab.select.10",
+        "session.tab.select.2",
+        "session.tab.select.3",
+        "session.tab.select.4",
+        "session.tab.select.5",
+        "session.tab.select.6",
+        "session.tab.select.7",
+        "session.tab.select.8",
+        "session.tab.select.9"
+      ],
+      "evidence": "SessionTabs"
+    },
+    "session.child": {
+      "status": "none",
+      "note": "child/parent navigation"
+    },
+    "session.parent": {
+      "status": "blocked-host",
+      "note": "same: no parent linkage in the protocol"
+    },
+    "session.move": {
+      "status": "blocked-host",
+      "note": "no workspace-move verb; dialog.move_session.* with it (0.6.24)"
+    },
+    "session.share": {
+      "status": "blocked-host",
+      "note": "no share verb in the zcode protocol (0.6.24)"
+    },
+    "session.message.": {
+      "status": "covered",
+      "note": "0.6.24 palette walk over all/user messages; alt+end last-user kept",
+      "members": [
+        "session.message.next",
+        "session.message.previous",
+        "session.message.user.next",
+        "session.message.user.previous"
+      ],
+      "evidence": "messageJump"
+    },
+    "session.aside": {
+      "status": "blocked-host",
+      "note": "v2.0.8 /btw side question — rides a one-shot session.generate (no tool loop); zcode has workspace/generateText only. Filed with the host 0.6.29."
+    },
+    "session.undo": {
+      "status": "blocked-host",
+      "note": "needs session/revert in the app-server"
+    },
+    "session.redo": {
+      "status": "blocked-host",
+      "note": "needs session/revert in the app-server"
+    },
+    "session.diff": {
+      "status": "blocked-host",
+      "note": "needs a session-diff verb (diff last-turn source)"
+    },
+    "session.rename": {
+      "status": "blocked-host",
+      "note": "0.6.37 LINT RETIRE: the ctrl+r dialog is a STUB — onSubmit flashes 'rename pending host support' (code comment: no rename method yet); needs the session/title verb (parity-v2 host-verb block)"
+    },
+    "messages.copy": {
+      "status": "covered",
+      "note": "leader y IS the v2 semantic (Copy last assistant message) verbatim; per-message Copy row 0.6.31 — 0.6.33 decoded the stale transcript-selection-copy residual as session.copy, not this",
+      "evidence": "messages_copy"
+    },
+    "session.copy.id": {
+      "status": "covered",
+      "note": "0.6.33 — palette Copy session ID; keys none as upstream stocks it"
+    },
+    "session.copy": {
+      "status": "covered",
+      "note": "0.6.33 — /copy + palette: formatSessionTranscript markdown into the clipboard (OSC 52); the old batch covered-lie retired"
+    },
+    "session.export": {
+      "status": "covered",
+      "note": "0.6.33 — the v2 DialogExportOptions flow on leader x + /export: thinking/tools toggles, Copy or tmp-file export + DialogExportResult; json/sanitize arms blocked-host (no session/export verb in the zcode protocol)"
+    },
+    "session.": {
+      "status": "covered",
+      "note": "core session ops (new/list/resume/delete/pin/quick-slots/fork/compact/export/copy/queue)",
+      "members": {
+        "session.compact": "id: \"compact\"",
+        "session.delete": "closeSession",
+        "session.fork": "id: \"fork\"",
+        "session.interrupt": "stopTurn|interrupt",
+        "session.list": "id: \"sessions\"",
+        "session.new": "id: \"new\"",
+        "session.pin.toggle": "togglePin",
+        "session.queued_prompts": "queue",
+        "session.quick_switch.1": "quick",
+        "session.quick_switch.2": "quick",
+        "session.quick_switch.3": "quick",
+        "session.quick_switch.4": "quick",
+        "session.quick_switch.5": "quick",
+        "session.quick_switch.6": "quick",
+        "session.quick_switch.7": "quick",
+        "session.quick_switch.8": "quick",
+        "session.quick_switch.9": "quick",
+        "session.sidebar.toggle": "id: \"sidebar\"",
+        "session.timeline": "id: \"jump\"",
+        "session.first": "scroll",
+        "session.last": "scroll",
+        "session.half.page.down": "scroll",
+        "session.half.page.up": "scroll",
+        "session.page.down": "scroll",
+        "session.page.up": "scroll",
+        "session.line.down": "scroll",
+        "session.line.up": "scroll",
+        "session.messages_last_user": "messageJump",
+        "session.toggle.thinking": "id: \"thinking\""
+      }
+    },
+    "agent.": {
+      "status": "covered",
+      "note": "0.6.10 cycles + dialogs",
+      "members": [
+        "agent.cycle",
+        "agent.cycle.reverse",
+        "agent.list"
+      ],
+      "evidence": "agent"
+    },
+    "theme.": {
+      "status": "covered",
+      "note": "33 themes verbatim (both arms 0.6.32); live preview 0.6.16",
+      "evidence": "id: \"themes\""
+    },
+    "command.palette": {
+      "status": "covered",
+      "note": "ctrl+p",
+      "evidence": "setDialog\\(\"palette\"\\)"
+    },
+    "help.show": {
+      "status": "covered",
+      "note": "0.6.13 help overlay",
+      "evidence": "HelpDialog"
+    },
+    "editor.": {
+      "status": "covered",
+      "note": "0.6.12 external editor round-trip",
+      "evidence": "EDITOR|editor"
+    },
+    "leader": {
+      "status": "covered",
+      "note": "ctrl+x grammar",
+      "evidence": "leader"
+    },
+    "prompt.paste": {
+      "status": "covered",
+      "note": "atomic burst paste",
+      "evidence": "paste"
+    },
+    "prompt.skills": {
+      "status": "covered",
+      "note": "0.6.23 /skills selector; insert is a plain @mention (no extmarks)",
+      "evidence": "id: \"skills\""
+    },
+    "prompt.stash": {
+      "status": "covered",
+      "note": "0.6.23 stash family: push/pop/list + two-stroke delete dialog",
+      "members": [
+        "prompt.stash",
+        "prompt.stash.list",
+        "prompt.stash.pop"
+      ],
+      "evidence": "stash"
+    },
+    "prompt.images": {
+      "status": "covered",
+      "note": "0.6.35 view is the only prompt.images bind upstream ships; the attach arms ride the composer paste path (path resolution ported from local-attachment.ts); clipboard-image paste has no PTY read plane"
+    },
+    "mcp.": {
+      "status": "none",
+      "note": "MCP server list dialog"
+    },
+    "pane.": {
+      "status": "none",
+      "note": "panes surface"
+    },
+    "terminal.": {
+      "status": "none",
+      "note": "embedded terminal surface"
+    },
+    "composer.terminal.": {
+      "status": "none",
+      "note": "embedded terminal"
+    },
+    "composer.subagent.": {
+      "status": "none",
+      "note": "subagent prompt switcher"
+    },
+    "composer.shell.": {
+      "status": "none",
+      "note": "shell prompt switcher"
+    },
+    "permission.prompt.fullscreen": {
+      "status": "covered",
+      "note": "0.6.36 expanded permission ask — ctrl+f toggles the card between inline and the full-viewport overlay, esc minimizes first (collapsed esc = the deny+stop owner law), footer hint flips fullscreen/minimize (the v2 SessionQuestion fullscreen arm)"
+    },
+    "permission.": {
+      "status": "covered",
+      "note": "0.6.19 reference card; body variants still deviation"
+    },
+    "app.toggle.": {
+      "status": "none",
+      "note": "display toggles (P2)"
+    },
+    "app.debug": {
+      "status": "none",
+      "note": "dev-facing"
+    },
+    "app.console": {
+      "status": "none",
+      "note": "dev-facing"
+    },
+    "app.scrap": {
+      "status": "none",
+      "note": "dev-facing"
+    },
+    "opencode.status": {
+      "status": "covered",
+      "note": "0.6.28 — the v2 DialogStatus port: leader s + /status + a palette row open the real dialog (title Status + esc, No MCP servers empty state, {n} MCP server(s) header, colored bullet rows, Connected / Failed / Disabled in configuration / Needs authentication grammar). The invented statusSummary toast is retired. Host gap: the mcp/list payload carries no error text (0.6.23), so failed/needs_auth render without v2's error suffix — the field is taken when a payload ever carries one.",
+      "evidence": "id: \"status\""
+    },
+    "opencode.debug": {
+      "status": "none",
+      "note": "dev-facing"
+    },
+    "plugins.": {
+      "status": "none"
+    },
+    "server.pair": {
+      "status": "blocked-host",
+      "note": "desktop-shell verb"
+    },
+    "service.restart": {
+      "status": "blocked-host",
+      "note": "desktop-shell verb"
+    },
+    "docs.open": {
+      "status": "blocked-host",
+      "note": "opens an external browser"
+    },
+    "app.exit": {
+      "status": "covered",
+      "note": "ctrl+c/ctrl+d quit",
+      "evidence": "id: \"quit\""
+    },
+    "app.clear": {
+      "status": "none",
+      "note": "0.6.37 LINT RETIRE: no ctrl+l binding exists anywhere in src — the row claimed a key that clears nothing"
+    },
+    "stash.delete": {
+      "status": "covered",
+      "note": "0.6.23 ctrl+d two-stroke delete in the stash dialog"
+    },
+    "mcp.list": {
+      "status": "partial",
+      "note": "0.6.23 /mcps list + status grammar; toggle and error-detail are host gaps (no mcp connect/disconnect verbs, no error payload)"
+    },
+    "dialog.mcp.toggle": {
+      "status": "blocked-host",
+      "note": "zcode protocol has no mcp connect/disconnect verbs (0.6.23 finding)"
+    },
+    "app.toggle.animations": {
+      "status": "covered",
+      "note": "0.6.24 — cursor blink is our one animation; toggle holds it steady"
+    },
+    "app.toggle.file_context": {
+      "status": "covered",
+      "note": "0.6.24 — gates the @files popup"
+    },
+    "app.toggle.diffwrap": {
+      "status": "covered",
+      "note": "0.6.24 — PatchDiff wrapMode char|none via DiffPreferences.wrap"
+    },
+    "app.toggle.paste_summary": {
+      "status": "none",
+      "note": "deviation: v2 compact-paste rendering needs composer paste spans; our draft is plain text"
+    },
+    "queued_prompt.delete": {
+      "status": "covered",
+      "note": "0.6.24 ctrl+d in the queue dialog; v2 enter=steer is a host gap (no mid-turn injection verb)"
+    },
+    "variant.list": {
+      "status": "covered",
+      "note": "0.6.24 /variants (aliases thinking, effort) opens the effort dialog",
+      "evidence": "id: \"effort\""
+    },
+    "variant.cycle": {
+      "status": "covered",
+      "note": "ctrl+t effort cycle shipped 0.6.10",
+      "evidence": "cycleEffort|effort"
+    },
+    "session.child.": {
+      "status": "blocked-host",
+      "note": "0.6.24 measured: session/list carries no parentSessionId — no child tree to walk"
+    },
+    "prompt.submit": {
+      "status": "covered",
+      "note": "enter (the 0.5.x submit grammar); slash-routed commands too",
+      "evidence": "submitPrompt"
+    },
+    "prompt.queue": {
+      "status": "covered",
+      "note": "typed mid-turn queues visibly (0.6.13 manager + Q-series pty)",
+      "evidence": "queue"
+    },
+    "prompt.clear": {
+      "status": "covered",
+      "note": "ctrl+c",
+      "evidence": "clearDraft|setDraft\\(\"\"\\)"
+    },
+    "prompt.history.previous": {
+      "status": "covered",
+      "note": "up walks the store history",
+      "evidence": "history"
+    },
+    "prompt.history.next": {
+      "status": "covered",
+      "note": "down walks the store history",
+      "evidence": "history"
+    },
+    "prompt.editor": {
+      "status": "covered",
+      "note": "leader e (0.6.12 round-trip, X-series pty)"
+    },
+    "location.reload": {
+      "status": "blocked-host",
+      "note": "desktop-shell verb"
+    },
+    "prompt.images.view": {
+      "status": "covered",
+      "note": "0.6.35 composer attach + DialogImagePreview (leader i + palette); pixels are the opentui image element verbatim (kitty/sixel when the terminal speaks them, blocks fallback), failed arm = v2 No preview"
+    },
+    "prompt.editor_context.clear": {
+      "status": "none",
+      "note": "n/a to the plain-text draft"
+    },
+    "opencode.settings": {
+      "status": "covered",
+      "note": "0.6.27 /settings — DialogConfig port onto our real setters (theme/animations/file-context/diff-wrap/thinking/sidebar/mode/effort/tool-output)",
+      "evidence": "id: \"settings\""
+    },
+    "dialog.select.page_up": {
+      "status": "covered",
+      "note": "0.6.27 pageup moves -10 (v2 moves 10)",
+      "evidence": "SelectDialog"
+    },
+    "dialog.select.page_down": {
+      "status": "covered",
+      "note": "0.6.27 pagedown moves +10",
+      "evidence": "SelectDialog"
+    },
+    "dialog.select.home": {
+      "status": "covered",
+      "note": "0.6.27 first row",
+      "evidence": "SelectDialog"
+    },
+    "dialog.select.end": {
+      "status": "covered",
+      "note": "0.6.27 last row",
+      "evidence": "SelectDialog"
+    },
+    "dialog.select.prev": {
+      "status": "covered",
+      "note": "up (shipped with the dialog infra)",
+      "evidence": "SelectDialog"
+    },
+    "dialog.select.next": {
+      "status": "covered",
+      "note": "down",
+      "evidence": "SelectDialog"
+    },
+    "dialog.select.submit": {
+      "status": "covered",
+      "note": "enter",
+      "evidence": "SelectDialog"
+    },
+    "which-key.": {
+      "status": "none",
+      "note": "v2.0.7 STUB: keybind definitions only, no implementation anywhere in the vendored tree (grep-verified 0.6.27) — nothing to copy"
+    },
+    "prompt.autocomplete.prev": {
+      "status": "covered",
+      "note": "up in the slash popup",
+      "evidence": "autocomplete"
+    },
+    "prompt.autocomplete.next": {
+      "status": "covered",
+      "note": "down",
+      "evidence": "autocomplete"
+    },
+    "prompt.autocomplete.hide": {
+      "status": "covered",
+      "note": "escape dismisses",
+      "evidence": "autocomplete"
+    },
+    "prompt.autocomplete.select": {
+      "status": "covered",
+      "note": "enter",
+      "evidence": "autocomplete"
+    },
+    "prompt.autocomplete.complete": {
+      "status": "covered",
+      "note": "tab completes",
+      "evidence": "autocomplete"
+    },
+    "theme.switch_mode": {
+      "status": "covered",
+      "note": "0.6.32 — mode machine: switch pins + persists theme.mode (v2 setMode semantics); stock surface is the settings Color-mode row (upstream: palette-hidden, keybind none)",
+      "evidence": "color-mode|Color mode"
+    },
+    "theme.mode.lock": {
+      "status": "covered",
+      "note": "0.6.32 — pin/free on the settings Color-mode row ('system' = unlock, persists theme.mode); the terminal-follow half of free (renderer.themeMode, palette probe) is blocked on the opentui terminal plane"
+    },
+    "plugins.list": {
+      "status": "covered",
+      "note": "0.6.34 — /plugins + palette; rows off plugins/list sorted by name; enter toggles via plugins/setEnabled",
+      "evidence": "id: \"plugins\""
+    },
+    "plugins.toggle": {
+      "status": "covered",
+      "note": "0.6.34 — mapped onto plugins/setEnabled; v2 toggles its TUI arm, ours is the server enabled flag (the only toggle plane the host offers)",
+      "evidence": "setEnabled"
+    },
+    "dialog.plugins.": {
+      "status": "blocked-host",
+      "note": "no plane: plugins/list carries no error or outdated fields (0.6.34 measured) — error/check/update omitted per the Revert-row precedent"
+    },
+    "dialog.plugins.install": {
+      "status": "blocked-host",
+      "note": "no install surface in the v2.0.8 plugins dialog; host has plugins/install but the marketplace flow stays host-side"
+    },
+    "session.background": {
+      "status": "blocked-host",
+      "note": "no session/background verb in SESSION_METHODS (0.6.34) — the core-ops batch note was a covered-lie"
+    },
+    "session.cd": {
+      "status": "blocked-host",
+      "note": "no session/move or location verbs in SESSION_METHODS (0.6.34) — same batch covered-lie; v2 needs session.move + location.get"
+    },
+    "open.menu": {
+      "status": "none",
+      "note": "projects/worktrees arms blocked-host (no location or project verbs); the recent-sessions arm is our session.list dialog"
+    },
+    "session.unshare": {
+      "status": "blocked-host",
+      "note": "0.6.37 LINT RETIRE: no unshare wiring in src; share/unshare ride the host-verb gap measured 0.6.24 (no share or workspace-move verbs)"
+    },
+    "session.toggle.exploration_grouping": {
+      "status": "none",
+      "note": "0.6.37 LINT RETIRE: never ported — no exploration grouping surface in src; portable in principle, a future wave can claim it"
+    },
+    "session.toggle.scrollbar": {
+      "status": "none",
+      "note": "0.6.37 LINT RETIRE: never ported — scrollbar has no plane on this stack (the 0.6.27 settings law kept the row out); a future wave can claim it if the plane lands"
+    }
+  }
+}

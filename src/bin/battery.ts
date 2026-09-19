@@ -28,11 +28,6 @@ try {
   const listed = (await sv.request("session/list", { limit: 10 })) as { sessions?: unknown[] };
   check("session/list", Array.isArray(listed.sessions) && listed.sessions.length > 0, `${listed.sessions?.length} sessions`);
 
-  const ws = (await sv.request("workspace/readState", { workspace: WORKSPACE })) as {
-    modelCatalog?: { available?: unknown[] };
-  };
-  check("workspace/readState catalog", (ws.modelCatalog?.available?.length ?? 0) > 0, `${ws.modelCatalog?.available?.length} models`);
-
   const created = (await sv.request("session/create", {
     workspace: WORKSPACE, mode: "build", persistence: "immediate",
   })) as { session?: { sessionId?: string } };
@@ -43,6 +38,16 @@ try {
     sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true,
   })) as { eventSeq?: number };
   check("session/subscribe", typeof sub.eventSeq === "number");
+
+  // 3.12.x removed workspace/readState — the model catalog rides the
+  // session create reply (settings.model.available).
+  const catalogAvail = (created as { settings?: { model?: { available?: unknown[] } } })
+    .settings?.model?.available ?? [];
+  check(
+    "session create reply carries the model catalog",
+    Array.isArray(catalogAvail) && catalogAvail.length > 0,
+    `${catalogAvail.length} models`,
+  );
 
   const read = (await sv.request("session/read", { sessionId })) as Record<string, unknown>;
   check("session/read", read.sessionId === sessionId || read.messages !== undefined);
