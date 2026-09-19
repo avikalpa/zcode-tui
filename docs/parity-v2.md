@@ -402,6 +402,47 @@ Zero runtime delta beyond generated-file stamps — NO ynpm ride.
   affordance check is the frailest in the battery) and consider catalog
   weight (the proof seeds real sessions on dev).
 
+### 0.6.40 — the proof re-needle (0.6.39's environmental find, zero parity delta)
+
+Three changes, all in `tools/pty-proof.py` (the battery, not the TUI):
+
+- **LEAK GUARD** — `sweep_stale_instances()` at run start, stage teardown
+  and the full-run epilogue: `/proc/<pid>/exe` exact-binary matching (never
+  cmdline — the path rides argv there) kills leftover instances of the
+  exact worktree-dist binary, plus orphaned `zcode-cli` backends (comm
+  match, reparented to ppid 1) that spin at 100% CPU for hours after their
+  TUI dies. An earlier sitting leaked five worktree-dist TUIs that burned
+  the host for hours — the "degrades with host load" flake class was
+  partly the proof's OWN orphans. Owner rows run from the ynpm generation
+  path, never a worktree dist, so the sweep cannot touch them (veto law
+  holds; measured live: the ynpm-generation row on dev survived every
+  sweep this sitting).
+- **S-series re-homed onto a transcript the PROOF OWNS** — the fossil
+  "/themes" session the family rode aged out of the 100-capped host
+  catalog (the 0.6.39 root cause: search hit "No matching items", enter
+  fell through to a short session, nothing to scroll). The family now
+  grows its own >1-page transcript in the throwaway: a 40-line
+  bracketed-paste filler (one atomic insert, under the 4096-byte tty
+  buf), send, poll the echo paint, esc-interrupt with re-arms at poll
+  windows 6/20/40 (the first escape can land before running=true), poll
+  quiescent. No new session seeded — the catalog-growth rate is
+  unchanged, and the family no longer depends on catalog state at all.
+- **S1 re-needled per the poll law** — the affordance paint LAGS the
+  scroll render under a heavy catalog (microscope evidence: the scrolled
+  frame runs 2-3 state-changes ahead of the affordance frame), so the
+  single fixed sample at first-scroll becomes a polled window.
+  Composer-empty verified before the filler turn (SE law) with ctrl+c and
+  the /home palette as fallbacks; every enter is poll-gated (a blind
+  enter on a leftover draft sends a real message).
+
+Gates (2026-09-19, dev, dist at lane 7df0735+needle): typecheck clean;
+110+1known (the documented auth-sync red); `--stage STHEMES` isolated
+PASS x4 consecutive (11 checks) after one pre-needle FAIL; full proof
+125+1F (F0 only — the cleanest full run on record) then 122+4F (F0 + the
+documented X2/CX timing class, green in run 1); S-series green in both
+full runs; the leak guard reaped one self-leaked instance per run at
+teardown. Tools-only wave — NO ynpm ride, hosts stay on their rides.
+
 ## Remaining (v2.0.9 → us)
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface

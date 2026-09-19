@@ -37,6 +37,51 @@ with open("/tmp/zct-fake-editor.sh", "w") as f:
     f.write('#!/bin/sh\nprintf EDITED-BY-EDITOR >> "$1"\ncp "$1" /tmp/zct-export-latest.md\n')
 os.chmod("/tmp/zct-fake-editor.sh", 0o755)
 
+def sweep_stale_instances(label):
+    # LEAK GUARD (2026-09-19 sitting): an earlier sitting leaked five
+    # worktree-dist TUIs that burned the host for hours — the "degrades with
+    # host load" class was partly the proof's own orphans. A live owner row
+    # never runs from a worktree dist path, so every instance of this exact
+    # binary is the proof's own.
+    # /proc/<pid>/exe matching (the deploy law technique): a cmdline match
+    # would kill the invoking shell — the path rides argv there.
+    killed = []
+    target = os.path.abspath(binary)
+    me = os.getpid()
+    for pid_s in os.listdir("/proc"):
+        if not pid_s.isdigit():
+            continue
+        p = int(pid_s)
+        if p == me:
+            continue
+        try:
+            exe_ok = os.readlink("/proc/%d/exe" % p) == target
+        except OSError:
+            continue
+        # backend orphans: a zcode-cli whose TUI died reparents to init and
+        # can spin at 100%% CPU for hours (two found this sitting, one since
+        # the PREVIOUS day) — the load behind the whole flake class.
+        try:
+            with open("/proc/%d/comm" % p) as _f:
+                comm = _f.read().strip()
+            with open("/proc/%d/stat" % p) as _f:
+                ppid = int(_f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            continue
+        if not (exe_ok or (comm == "zcode-cli" and ppid == 1)):
+            continue
+        try:
+            os.kill(p, 9)
+            killed.append(p)
+        except OSError:
+            continue
+    if killed:
+        print("%s: killed %d stale instance(s) of this binary: %s"
+              % (label, len(killed), killed))
+        time.sleep(0.5)
+
+sweep_stale_instances("LEAK GUARD start")
+
 def spawn(cols=110, rows=34):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -161,6 +206,7 @@ if len(sys.argv) > 2:   # stage mode; the full run is the plain one-arg invocati
                     print("STAGE teardown: killed leftover %s=%d" % (_pname, _p))
                 except ProcessLookupError:
                     pass
+        sweep_stale_instances("LEAK GUARD teardown")
         if DUMPS_DIR is not None:
             try:
                 open(os.path.join(DUMPS_DIR, "raw.bin"), "wb").write(bytes(RAW))
@@ -723,32 +769,125 @@ else:
                 "CX6 esc closes the export dialog"):
         check(pid, lbl, False)
 
-# ==== FAM:STHEMES requires B, CSPINE ==== (needs the home state CSPINE restores)
-# S-series on the long /themes transcript
+# ==== FAM:STHEMES requires B, CSPINE ==== (own long transcript; needs the
+# home state CSPINE restores — the I-series throwaway, composer live)
+# S-series on a transcript the PROOF owns. The fossil "/themes" session this
+# family used to ride aged out of the 100-capped host catalog (0.6.39 find:
+# the search hit "No matching items" and enter fell through to a short
+# session — nothing to scroll), so the family now grows its own >1-page
+# transcript with one minimal real turn in that throwaway (the I-series
+# precedent; no new session seeded, the catalog-growth rate is unchanged),
+# polls it to completion, and proves the scroll grammar on it.
 if b0 and alive(pid):
-    os.write(master, b"\x18l")  # polled open (cold-daemon law)
-    for _ in range(16):
-        read_for(master, stream, 0.6)
-        d_s = "\n".join(screen.display)
-        if "Sessions" in d_s and "Search" in d_s:
+    os.write(master, b"\x1b")              # esc settle: closes any dialog the
+    read_for(master, stream, 0.8)          # requires slice left covering the
+    se_clear = False                       # composer (measured 08:45Z: themes
+    for _ in range(20):                    # dialog up through window 1); SE law:
+        read_for(master, stream, 0.6)      # verify an empty composer before
+        if "Ask anything" in "\n".join(screen.display):   # typing (0.6.27),
+            se_clear = True               # generous windows - CSPINE-exit
+            break                         # repaints lag under host load
+    if not se_clear:
+        os.write(master, b"\x03")          # ctrl+c clears a leftover draft
+        for _ in range(20):                # (also closes a dialog: the dialog
+            read_for(master, stream, 0.6)  # onClose handlers take ctrl+c)
+            if "Ask anything" in "\n".join(screen.display):
+                se_clear = True
+                break
+    if not se_clear:
+        # Last resort: the /home palette command - the state-independent way
+        # back to the front page. Popup verified BEFORE enter (the SE law:
+        # a blind enter on a leftover draft sends it as a real message).
+        os.write(master, b"\x03"); time.sleep(0.3)
+        os.write(master, b"/home")
+        home_popup = False
+        for _ in range(8):
+            read_for(master, stream, 0.5)
+            d_h = "\n".join(screen.display)
+            if "/home" in d_h and "Ask anything" not in d_h:
+                home_popup = True
+                break
+        if home_popup:
+            os.write(master, b"\r")
+            for _ in range(20):
+                read_for(master, stream, 0.6)
+                if "Ask anything" in "\n".join(screen.display):
+                    se_clear = True
+                    break
+        else:
+            os.write(master, b"\x03")      # never leave the draft behind
+            read_for(master, stream, 0.5)
+    check(pid, "S-pre composer verified empty before the filler turn", se_clear)
+    # The filler ride: paste a 60-line prompt (bracketed paste = ONE atomic
+    # insert), send, then INTERRUPT (the I-series precedent). A full turn is
+    # too variable to wait out (measured: high-effort streaming ran past a
+    # 90s deadline and the live tail-pin defeats pageup mid-turn); the
+    # frozen transcript is >1 page no matter how the model paces.
+    fill = []
+    for _i in range(1, 41):                # the whole payload must stay under
+        fill.append(("ZCODE-SCROLL-FILLER line %02d of 40 - "   # the 4096-
+                     "proof-owned padding") % _i)                # byte tty buf
+    echoed = False
+    for _attempt in range(2):              # the enter can be lost under load;
+        os.write(master, b"\x1b[200~"      # a stranded 60-line draft would
+                 + "\n".join(fill).encode()   # poison every downstream family
+                 + b"\x1b[201~")
+        read_for(master, stream, 1.0)
+        os.write(master, b"\r")
+        for _ in range(24):                # poll: the message paints AND the
+            read_for(master, stream, 0.7)  # composer comes back empty (SE law)
+            d_st = "\n".join(screen.display)
+            if (d_st.count("ZCODE-SCROLL-FILLER") >= 4
+                    and "Ask anything" in d_st):
+                echoed = True
+                break
+        if echoed:
             break
-    for ch in "themes":
-        os.write(master, ch.encode()); time.sleep(0.05)
-    read_for(master, stream, 0.8)
-    os.write(master, b"\r"); read_for(master, stream, 6.0)
+        os.write(master, b"\x1b[201~")     # recovery: close a stranded paste
+        os.write(master, b"\x03")          # then clear the draft (ctrl+c)
+        for _ in range(8):
+            read_for(master, stream, 0.5)
+            if "Ask anything" in "\n".join(screen.display):
+                break
+    check(pid, "S-pre the filler message sends (echo paints)", echoed)
+    os.write(master, b"\x1b")              # escape: interrupt (harmless if done)
+    froze = False
+    for _ in range(60):                    # poll: quiescent transcript —
+        read_for(master, stream, 1.5)      # interrupted, or the turn finished;
+        d_st = "\n".join(screen.display)   # the placeholder back = composer
+        if ("Ask anything" in d_st         # empty, so a stranded draft can
+                and d_st.count("ZCODE-SCROLL-FILLER") >= 4
+                and ("turn interrupted" in d_st or "esc stop" not in d_st)):
+            froze = True
+            break
+        if _ in (6, 20, 40):               # under load the first escape can
+            os.write(master, b"\x1b")      # land BEFORE the turn starts (the
+                                           # interrupt needs running=true) —
+                                           # re-arm it; late escapes are no-ops
+    check(pid, "S-pre the transcript freezes (a scrollable transcript)", froze)
+    read_for(master, stream, 1.0)
     before_s = "\n".join(screen.display)
     scrolled = False
-    afford = False
+    after_s = before_s
     for _ in range(3):
         os.write(master, b"\x1b[5~"); time.sleep(0.4)
         read_for(master, stream, 1.0)
         after_s = "\n".join(screen.display)
         if after_s != before_s:
             scrolled = True
-            afford = "Jump to latest" in after_s or "Jump to latest" in before_s
             break
         before_s = after_s
     check(pid, "S0 pageup scrolls (content changed)", scrolled)
+    # S1 re-needle (0.6.39 environmental find): the affordance paint LAGS the
+    # scroll render under a heavy host catalog (the microscope caught the
+    # scrolled frame 2-3 state-changes ahead of the affordance frame), so a
+    # single sample at first-scroll fails on load. Poll, never fixed-settle.
+    afford = "Jump to latest" in after_s
+    for _ in range(15):
+        if afford:
+            break
+        read_for(master, stream, 0.7)
+        afford = "Jump to latest" in "\n".join(screen.display)
     check(pid, "S1 Jump-to-latest affordance appears", afford)
     os.write(master, b"\x1b\x07"); time.sleep(0.6)               # ctrl+alt+g: jump to latest
     cleared = False
@@ -791,7 +930,7 @@ if b0 and alive(pid):
 
 
 else:
-    for lbl in ("S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
+    for lbl in ("S-pre composer verified empty before the filler turn", "S-pre the filler message sends (echo paints)", "S-pre the transcript freezes (a scrollable transcript)", "S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
         check(pid, lbl, False)
 
 # ==== FAM:SKM requires BOOT ==== (stash is deterministic; K/M poll the live catalog)
@@ -1407,5 +1546,6 @@ else:
         check(pf_pid, lbl, False)
 
 # ==== FAM:EPILOGUE ==== (full-run summary; stage mode prints its own)
+sweep_stale_instances("LEAK GUARD teardown")
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")
 sys.exit(0 if all(ok for _, ok in verdicts) else 1)

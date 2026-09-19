@@ -5,3 +5,4 @@ dist/
 docs/evidence/strace-cli-50s.txt
 dist/
 .ui/
+__pycache__/
