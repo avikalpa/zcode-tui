@@ -443,6 +443,29 @@ documented X2/CX timing class, green in run 1); S-series green in both
 full runs; the leak guard reaped one self-leaked instance per run at
 teardown. Tools-only wave — NO ynpm ride, hosts stay on their rides.
 
+### 0.6.41 — the sync-opencode default-ref trap fix (tools-only, zero parity delta)
+
+The maintenance law's natural invocation is a bare `tools/sync-opencode.sh`,
+but the script's default ref was the `v2ref` branch in the upstream checkout —
+created from v2.0.6 and never advanced — so the natural invocation would have
+SILENTLY DOWNGRADED the vendored reference two releases behind the v2.0.9 pin
+(found in the 2026-09-19 maintenance sweep; dream ACK-93ca56afa0). Two layers
+now:
+
+- the default ref resolves to the NEWEST `v2.*` tag in the upstream checkout
+  (`git tag --sort=-v:refname`) — the maintenance law's own target; with no
+  `v2.*` tag the script refuses instead of guessing;
+- a backwards guard refuses a default-path pin whose base version is OLDER
+  than the current `tools/opencode-reference/VERSION` (base compare via
+  `sort -V`, `git describe` suffixes stripped; same-tag re-pins stay legal) —
+  the explicit-ref path still downgrades deliberately.
+
+- Gates (2026-09-19, dev): guard predicate checked for the trap pair
+  (v2.0.6 default vs v2.0.9 pin → refuse) and the pass cases (v2.0.10
+  default vs v2.0.9 pin, equal bases → proceed); default path run live on
+  the pinned tree — resolves v2.0.9, idempotent, the reference tree stays
+  `git status`-clean. Tools-only wave — NO ynpm ride.
+
 ## Remaining (v2.0.9 → us)
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
