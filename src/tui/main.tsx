@@ -16,6 +16,7 @@ async function main() {
   const argv = process.argv.slice(2);
   let resumeId: string | null = null;
   let modelId: string | null = null;
+  let launchMode: string | null = null;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--version" || argv[i] === "-V") {
       // The compiled dist binary has no shim around it (ynpm dev installs
@@ -25,6 +26,7 @@ async function main() {
     }
     if (argv[i] === "--resume") resumeId = argv[++i] ?? null;
     else if (argv[i] === "--model") modelId = argv[++i] ?? null;
+    else if (argv[i] === "--mode") launchMode = argv[++i] ?? null;
   }
   probe("boot", `pid=${process.pid} argv=${JSON.stringify(argv)}`);
   // Auth IS the zcode machine settings: sync the SSOT (fleet default jojo —
@@ -49,11 +51,15 @@ async function main() {
     },
   }, auth ? { env: { ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: auth.providerConfigPath } } : {});
 
-  const [{ createCliRenderer }, { createRoot }, { App }] = await Promise.all([
+  const [{ createCliRenderer }, { createRoot }, { App, MODES }] = await Promise.all([
     import("@opentui/core"),
     import("@opentui/react"),
     import("./app"),
   ]);
+  if (launchMode && !(MODES as readonly string[]).includes(launchMode)) {
+    console.error(`zcode-tui: unknown mode "${launchMode}" (plan|build|edit|yolo|auto)`);
+    process.exit(1);
+  }
   // The renderer must not eat ctrl+c: OpenCode disables the default
   // exit-on-ctrl-c so ctrl+c reaches the key machine (clear the draft while
   // typing, quit from a nav surface) instead of killing the TUI and
@@ -61,7 +67,7 @@ async function main() {
   const renderer = await createCliRenderer({ exitOnCtrlC: false });
   renderer.setBackgroundColor(THEMES.opencode.bg);
   createRoot(renderer).render(
-    <App client={client} renderer={renderer} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} />,
+    <App client={client} renderer={renderer} onQuit={() => process.exit(0)} resumeId={resumeId} modelId={modelId} launchMode={launchMode} />,
   );
 }
 

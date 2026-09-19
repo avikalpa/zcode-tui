@@ -177,7 +177,7 @@ const ALLOWED_MODELS = [
   { label: "GLM-5.3", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "GLM-5.3", isDefault: false },
 ] as const;
 
-const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
+export const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
 // v2 displayVersion: a 40/64-hex commit pin renders as the short sha, a
 // semver stays whole (feature-plugins/system/plugins.tsx footer grammar).
 const shortVersion = (version: string) =>
@@ -1092,6 +1092,7 @@ export function App({
   onQuit,
   resumeId,
   modelId,
+  launchMode,
 }: {
   client: AppServer;
 
@@ -1099,6 +1100,7 @@ export function App({
   onQuit: () => void;
   resumeId?: string | null;
   modelId?: string | null;
+  launchMode?: string | null;
 }) {
   const [view, setView] = useState<AppView>("home");
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -1852,7 +1854,7 @@ export function App({
       // starts with exactly what the composer advertises.
       const res = (await client.request("session/create", {
         workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() },
-        mode: "build",
+        mode: launchMode ?? "build",
         persistence: "immediate",
         model: { providerId: selected.providerId, modelId: selected.modelId, variant: effort },
       })) as { session?: Record<string, unknown>; settings?: unknown };
@@ -1868,7 +1870,7 @@ export function App({
       setSel(0);
       setMsgs([]);
       setActiveId(row.sessionId);
-      setMode("build");
+      setMode(launchMode ?? "build");
       resetToTail();
       setView("session");
       await subscribe(row.sessionId);
@@ -2638,7 +2640,13 @@ export function App({
   useEffect(() => {
     if (!resumeId || resumed.current) return;
     resumed.current = true;
-    void open({ sessionId: resumeId, title: "Resuming session", status: "", updatedAt: Date.now() });
+    void open({ sessionId: resumeId, title: "Resuming session", status: "", updatedAt: Date.now() })
+      .then(() => {
+        if (!launchMode) return;
+        void client.request("session/setMode", { sessionId: resumeId, mode: launchMode })
+          .then(() => setMode(launchMode))
+          .catch((e) => flashStatus(`setMode failed: ${e instanceof Error ? e.message : e}`));
+      });
   }, [resumeId]);
 
   useEffect(() => {
@@ -4292,17 +4300,20 @@ footerHints={[
               ...(askExpanded ? { height: dims.height - 1 } : {}),
             }}
           >
-            <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+            <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
               {/* opencode v2 permission.tsx, verbatim shape: "△ Permission
-                  required" header, icon+title row, select options with the
+                  required" header row is TITLE-ONLY, the payload lives in
+                  the body under the tool meta; select options keep the
                   reference labels; escape = Reject. */}
               <text content="△ Permission required" fg={C.warning} attributes={TextAttributes.BOLD} />
-              <text content={ask.detail} fg={C.fg} wrapMode="word" />
             </box>
             <box style={{ flexDirection: "row", flexShrink: 0, paddingRight: 2 }}>
               <box style={{ flexGrow: 1, backgroundColor: C.surface, paddingLeft: 1, paddingRight: 1 }}>
                 <text content={`${ask.toolName}${ask.riskLevel ? ` · ${ask.riskLevel}` : ""}`} fg={C.subtle} wrapMode="word" />
               </box>
+            </box>
+            <box style={{ flexDirection: "column", flexShrink: 0, marginTop: 1, ...(askExpanded ? {} : { maxHeight: 10 }) }}>
+              <text content={ask.detail} fg={C.fg} wrapMode="word" />
             </box>
             {ask.diff ? (
               // v2 EditBody's diff branch (PatchDiff, unified under our card

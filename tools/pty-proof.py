@@ -82,12 +82,12 @@ def sweep_stale_instances(label):
 
 sweep_stale_instances("LEAK GUARD start")
 
-def spawn(cols=110, rows=34):
+def spawn(cols=110, rows=34, args=None):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     screen = pyte.Screen(cols, rows)
     stream = pyte.ByteStream(screen)
-    pid = subprocess.Popen([binary], stdin=slave, stdout=slave, stderr=subprocess.DEVNULL,
+    pid = subprocess.Popen([binary] + (args or []), stdin=slave, stdout=slave, stderr=subprocess.DEVNULL,
                            cwd="/tmp/zct-proof-cwd",
                            env=dict(os.environ, TERM="xterm-256color", EDITOR="/tmp/zct-fake-editor.sh"),
                            close_fds=True).pid
@@ -182,8 +182,8 @@ if len(sys.argv) > 2:   # stage mode; the full run is the plain one-arg invocati
                     _changed = True
     _run_order = [_n for _n in _order if _n in _need]
     _orig_spawn = spawn
-    def spawn(cols=110, rows=34):   # stage-mode wrapper: register stream->screen
-        _r = _orig_spawn(cols, rows)
+    def spawn(cols=110, rows=34, args=None):   # stage-mode wrapper: register stream->screen
+        _r = _orig_spawn(cols, rows, args)
         _SCREENS[id(_r[3])] = _r[2]
         return _r
     if _dumps:
@@ -1462,6 +1462,55 @@ else:
                 "AT6 the send accepts the attachment (echo + turn start)",
                 "AT7 the turn completes over the attachment"):
         check(at_pid, lbl, False)
+
+# ==== FAM:YM ==== (own spawn with --mode yolo; one real gated turn)
+# The relay/yolo startup proof (0.6.39): the same Write-bait turn PF uses must
+# run with NO permission ask when the TUI boots with --mode yolo, the footer
+# badge must read Yolo, and the file must land on disk (read before kill).
+YM_LABELS = (
+    "YM0 the --mode yolo TUI boots",
+    "YM1 the footer badge reads Yolo",
+    "YM2 the gated write turn runs with NO permission ask",
+    "YM3 the write landed on disk (the turn really ran)",
+)
+
+ym_pid, ym_master, ym_screen, ym_stream = spawn(args=["--mode", "yolo"])
+read_for(ym_master, ym_stream, 9)
+ym_boot = "Ask anything" in "\n".join(ym_screen.display)
+check(ym_pid, YM_LABELS[0], ym_boot)
+
+if alive(ym_pid) and ym_boot:
+    os.write(ym_master, b"create the file /tmp/zct-proof-cwd/ym-mode-proof.txt containing just ok\r")
+    ym_asked = False
+    ym_done = False
+    for _ in range(150):                                   # poll: completion = the FILE, not a paint
+        read_for(ym_master, ym_stream, 1.0)
+        d_ym = "\n".join(ym_screen.display)
+        if "Permission required" in d_ym:
+            ym_asked = True
+            break
+        if os.path.exists("/tmp/zct-proof-cwd/ym-mode-proof.txt"):
+            ym_done = True
+            break
+    check(ym_pid, YM_LABELS[2], ym_done and not ym_asked)
+    if ym_asked:
+        print("---- YM2 FAIL SCREEN (ask painted under yolo) ----")
+        for line in ym_screen.display:
+            if line.strip():
+                print(f"|{line.rstrip()}")
+    ym_file = os.path.exists("/tmp/zct-proof-cwd/ym-mode-proof.txt")
+    check(ym_pid, YM_LABELS[3], ym_file)
+    ym_badge = False
+    for _ in range(16):
+        read_for(ym_master, ym_stream, 0.5)
+        if "Yolo" in "\n".join(ym_screen.display):
+            ym_badge = True
+            break
+    check(ym_pid, YM_LABELS[1], ym_badge)
+    kill(ym_pid)
+else:
+    for lbl in YM_LABELS[1:]:
+        check(ym_pid, lbl, False)
 
 # ==== FAM:PF ==== (own spawn; one real turn)
 # ---- PF-series: permission.prompt.fullscreen (the v2 SessionQuestion arm,

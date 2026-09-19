@@ -28,6 +28,21 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- ~~**permission.ask payload layout**~~ FIXED 0.6.44 — the ask card's payload
+  (`ask.detail`, the Bash command) rendered INSIDE the height-1 title row with
+  space-between justification, so long commands overran the "△ Permission
+  required" header (surfaced by the relay dogfood: "more ugly not in opencode
+  UX"). v2's header row is TITLE-ONLY; the payload now lives in a body box
+  under the tool meta (wrapMode word, maxHeight 10 collapsed, lifting when
+  expanded like the diff/patch arms).
+- ~~**agent mode at startup**~~ SHIPPED 0.6.44 — `zcode-tui --mode
+  <plan|build|edit|yolo|auto>` (the owner's "run it like opencode2 --auto"):
+  the mode rides session/create (replacing the hardcoded build), applies to
+  the launch-resumed session via session/setMode, and the footer badge shows
+  it. Relay sessions can now spawn straight into yolo (no permission asks).
+  Proven by the pty-proof YM family (own spawn, the PF Write-bait: no ask
+  paints, the file lands, the badge reads Yolo through the turn).
+
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2
   SessionQuestion fullscreen arm (routes/session/permission.tsx) onto our
   ask card: ctrl+f toggles the ask between the inline card and the
@@ -493,6 +508,32 @@ convention: rides are owner-directed; 0.6.43 offered from the lane tip).
 
 ## Remaining (v2.0.10 → us)
 
+- **sessions view on the v2.0.8 footer-menu grammar** (owner, 2026-09-19
+  relay dogfood: "the sessions view has so many UX differences from
+  opencode2") — our sessions surface is still the OLD routes-era overlay
+  dialog (flat DialogSelect: search, pin/delete/switch hints, date groups,
+  quick-slot gutters). The v2.0.8 reference replaced that architecture: a
+  shared footer-menu primitive (mini/footer.menu.tsx — categorized header /
+  item / spacer rows; items carry icon, current-marker, description,
+  category and a footer tone of selection|running|error|success; 8-row
+  viewport; compact-width mode; select-controller with reveal offsets) that
+  sessions surface through as a category, plus the tab strip for subagents.
+  WAVE: port the menu primitive and rebuild the sessions surface on it (and
+  audit our dialog's carry-over features against what the menu grammar
+  keeps). This is the top open parity line.
+- **auto-update while running** (owner directive 2026-09-19: "like opencode2,
+  an outstanding UX feature") — opencode2 checks for newer releases and
+  updates itself without the user driving. For us the channels are npm
+  (public, @avikalpa/zcode-tui) and the ynpm dev fleet rides (push-based).
+  WAVE (needs design before code): a version check against the npm registry,
+  an unobtrusive update-available surface (v2-style toast), and a
+  self-upgrade path for npm-installed binaries (atomic swap + restart-to-
+  apply); fleet hosts keep riding ynpm pushes.
+- **MODES list audit** — our mode set carries an `auto` entry ("ride the
+  default agent (Build)") alongside plan/build/edit/yolo; verify against the
+  daemon's real mode vocabulary and the v2 semantics; drop or re-label if it
+  is an early invention (deviation-queue rules apply).
+
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
   — category groups, current value per row, ←/→ cycles + enter steps —
   mapped ONLY to our real setters (theme, animations, editor context,
@@ -661,6 +702,32 @@ convention: rides are owner-directed; 0.6.43 offered from the lane tip).
   projects (location/file listing) and worktrees per project from the
   server; the zcode protocol has no location/project/worktree listing
   verbs (0.6.34). The recent-sessions arm is already ours (session.list).
+- **session/delete (or close-of-persisted)** — the daemon's session store
+  accumulates every session a client ever creates, and there is NO client
+  verb to remove a persisted (inactive) session: `session/close` answers
+  "Session is not active" for them (measured 2026-09-20 with a sweep probe,
+  tools/cleanup-proof-sessions.ts, ~40 proof sessions unremovable). The
+  desktop host has the machinery (gateway SessionsIndexPublisher
+  removeSession; the daemon emits session.deleted/session.removed events) —
+  the wire verb is the gap. Real consequence: the proof battery's throwaway
+  sessions bury real work in /sessions (the owner hit this live in the
+  relay dogfood, 2026-09-20). FILED with the zcode host.
+
+## Harness law (proof isolation, 2026-09-20)
+
+The battery runs against the SHARED daemon: every throwaway turn it creates
+persists into the session store the owner's real sessions live in (the
+relay-dogfood /sessions flood). Until a session/delete verb exists, this is
+bounded but not solved: keep proof bait volume low, prefer re-running single
+families (--stage) over full batteries when the question is one family, and
+treat the session store as SHARED STATE — the proof never cleans what it
+cannot delete. (persistence:"deferred" at create does NOT help: proof
+sessions carry turns, and turned sessions persist regardless.)
+
+Defect note: the sessions dialog's ctrl+d delete runs session/close, which
+fails on inactive ("Session is not active") sessions — delete in the dialog
+is dead for everything older than the current run. Rides on the
+session/delete verb above.
 
 ## Maintenance law
 
