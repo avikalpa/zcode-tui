@@ -240,7 +240,14 @@ export function SelectDialog<T>({
           const previous = visible[visible.indexOf(o) - 1];
           const group = o.group && o.group !== previous?.group ? o.group : undefined;
           const groupSpacer = visible.indexOf(o) > 0;
-          const labelWidth = Math.max(16, cardWidth - 10);
+          // Width budget: the label column fits the longest label (+meta)
+          // actually present, capped so the description always keeps a
+          // readable remainder — cardWidth-10 starved every hint to ~8
+          // chars in large dialogs (0.6.45 fix).
+          const labelWidth = Math.min(
+            Math.max(16, ...shown.map((o) => o.label.length + (o.meta ? o.meta.length + 2 : 0))),
+            Math.max(16, cardWidth - 18),
+          );
           // Reference row shape (dialog-select.tsx): titles align at column 3;
           // the CURRENT row donates its gutter to a ● so its title stays put,
           // and its label wears the accent when not selected.

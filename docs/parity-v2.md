@@ -28,6 +28,14 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- ~~**settings dialog truncated hints**~~ FIXED 0.6.45 — SelectDialog's row
+  budget gave the label column `cardWidth - 10` (78 of 88 cols in large
+  dialogs), starving every description to `max(8, 2)` = 8 chars ("color
+  s…", "dark mo…" — the owner's modal complaint, relay dogfood). The label
+  column now fits the longest label+meta actually present, capped at
+  cardWidth - 18; descriptions get the remainder (≈58 cols in large).
+  Fixes every SelectDialog with descriptions, not just settings.
+
 - ~~**permission.ask payload layout**~~ FIXED 0.6.44 — the ask card's payload
   (`ask.detail`, the Bash command) rendered INSIDE the height-1 title row with
   space-between justification, so long commands overran the "△ Permission
@@ -508,6 +516,36 @@ convention: rides are owner-directed; 0.6.43 offered from the lane tip).
 
 ## Remaining (v2.0.10 → us)
 
+- **plan-quota surface (owner directive 2026-09-20: show the Z.AI Coding
+  Plan / Start Plan quota, usage and weekly quota left)** — PROBED
+  2026-09-20: `usage/stats {range:"7d"|"30d"|"all"}` carries the USAGE half
+  (totalTokens, sessions, turns, toolCallCount, activeDays, streaks, peak
+  day, favourite model, a day-level heatmap — live-measured on dev: 31.9M
+  tokens / 181 sessions / 7d). The LIMIT half (plan quota denominators,
+  weekly reset) is NOT in the client protocol: session/usage is per-session
+  counters, workspace/readState is the catalog only, and the host bundle
+  (/opt/ZCode/resources/glm/zcode.cjs) maps provider quota ERROR codes but
+  serves no quota-remaining surface — the desktop renders it from its own
+  account service. DESIGN FORK: (a) host verb (usage/quota or a
+  coding-plan/overview pass-through) — cleaner, host campaign owns it;
+  (b) the TUI calls the Z.AI coding-plan usage endpoint directly with the
+  synced coding-plan-api-key (the key already reaches the TUI via
+  syncAuthAtStartup) — TUI-owned, no host dependency. Surface: a Usage
+  section in the Status dialog (leader s) fed by usage/stats 7d, with the
+  limit/remaining row gated on which fork lands. NEXT WAVE.
+- **agent permission asks die in ~10s (CRITICAL, host-side — the relay's
+  maiden-run TLDR, owner-confirmed 2026-09-20)** — in a yggterm zcode-tui
+  row, every agent permission ask errors "Permission request failed" after
+  ~10s: the TUI card holds indefinitely by design (src/tui/app.tsx ask
+  Promise resolves only on the card's keybindings), but the HOST
+  (/opt/ZCode/resources/glm/zcode.cjs) deadline-limits the client answer
+  and fails the tool call silently (the CLI's own log records zero
+  permission events — the relay measured 155+ asks, zero answered,
+  unattended rows are thereby read-only). MITIGATION SHIPPED 0.6.44:
+  --mode yolo for unattended relays. FIX BELONGS WITH THE ZCODE HOST:
+  raise/remove the client-answer deadline for TUI rows (a human at the
+  card is the point), or expose a permission-mode arm in the yggterm
+  launch contract. Filed with the host campaign this sitting.
 - **sessions view on the v2.0.8 footer-menu grammar** (owner, 2026-09-19
   relay dogfood: "the sessions view has so many UX differences from
   opencode2") — our sessions surface is still the OLD routes-era overlay
