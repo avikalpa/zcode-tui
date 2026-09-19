@@ -19,19 +19,90 @@
     },
     "diff.": {
       "status": "covered",
-      "note": "0.6.20 — the full viewer route"
+      "note": "0.6.20 — the full viewer route",
+      "members": [
+        "diff.close",
+        "diff.collapse",
+        "diff.down",
+        "diff.expand",
+        "diff.expand_all",
+        "diff.first",
+        "diff.half_page.down",
+        "diff.half_page.up",
+        "diff.help",
+        "diff.last",
+        "diff.mark_reviewed",
+        "diff.next_file",
+        "diff.next_hunk",
+        "diff.open",
+        "diff.page.down",
+        "diff.page.up",
+        "diff.previous_file",
+        "diff.previous_hunk",
+        "diff.single_patch",
+        "diff.switch_focus",
+        "diff.switch_source",
+        "diff.toggle",
+        "diff.toggle_file_tree",
+        "diff.toggle_view",
+        "diff.up"
+      ],
+      "evidence": "PatchDiff"
     },
     "input.select.": {
       "status": "covered",
-      "note": "0.6.25 — anchor selection: shift+arrows/visual rows (wrapRows math), ctrl+shift+a/e logical, alt+shift+a/e visual home/end, shift+home/end buffer, alt+shift words, super+a all (soft: no PTY super); typing replaces, backspace deletes"
+      "note": "0.6.25 — anchor selection: shift+arrows/visual rows (wrapRows math), ctrl+shift+a/e logical, alt+shift+a/e visual home/end, shift+home/end buffer, alt+shift words, super+a all (soft: no PTY super); typing replaces, backspace deletes",
+      "members": [
+        "input.select.all",
+        "input.select.buffer.end",
+        "input.select.buffer.home",
+        "input.select.down",
+        "input.select.left",
+        "input.select.line.end",
+        "input.select.line.home",
+        "input.select.right",
+        "input.select.up",
+        "input.select.visual.line.end",
+        "input.select.visual.line.home",
+        "input.select.word.backward",
+        "input.select.word.forward"
+      ],
+      "evidence": "wrapRows"
     },
     "input.": {
       "status": "covered",
-      "note": "0.6.10 editing grammar"
+      "note": "0.6.10 editing grammar",
+      "members": [
+        "input.backspace",
+        "input.buffer.end",
+        "input.buffer.home",
+        "input.delete",
+        "input.delete.line",
+        "input.delete.to.line.end",
+        "input.delete.to.line.start",
+        "input.delete.word.backward",
+        "input.delete.word.forward",
+        "input.line.end",
+        "input.line.home",
+        "input.move.down",
+        "input.move.left",
+        "input.move.right",
+        "input.move.up",
+        "input.newline",
+        "input.redo",
+        "input.submit",
+        "input.undo",
+        "input.visual.line.end",
+        "input.visual.line.home",
+        "input.word.backward",
+        "input.word.forward"
+      ],
+      "evidence": "insertAtCursor"
     },
     "messages.": {
       "status": "covered",
-      "note": "0.6.9 scroll grammar; 0.6.18 user-message walk"
+      "note": "0.6.9 scroll grammar; 0.6.18 user-message walk",
+      "evidence": "scroll"
     },
     "session_interrupt": {
       "status": "covered",
@@ -39,7 +110,28 @@
     },
     "session.tab.": {
       "status": "covered",
-      "note": "0.6.22 — strip + close/reopen/history/unread/select; ctrl+shift+t delivery is terminal-dependent"
+      "note": "0.6.22 — strip + close/reopen/history/unread/select; ctrl+shift+t delivery is terminal-dependent",
+      "members": [
+        "session.tab.close",
+        "session.tab.history.back",
+        "session.tab.history.forward",
+        "session.tab.next",
+        "session.tab.next_unread",
+        "session.tab.previous",
+        "session.tab.previous_unread",
+        "session.tab.reopen",
+        "session.tab.select.1",
+        "session.tab.select.10",
+        "session.tab.select.2",
+        "session.tab.select.3",
+        "session.tab.select.4",
+        "session.tab.select.5",
+        "session.tab.select.6",
+        "session.tab.select.7",
+        "session.tab.select.8",
+        "session.tab.select.9"
+      ],
+      "evidence": "SessionTabs"
     },
     "session.child": {
       "status": "none",
@@ -59,7 +151,14 @@
     },
     "session.message.": {
       "status": "covered",
-      "note": "0.6.24 palette walk over all/user messages; alt+end last-user kept"
+      "note": "0.6.24 palette walk over all/user messages; alt+end last-user kept",
+      "members": [
+        "session.message.next",
+        "session.message.previous",
+        "session.message.user.next",
+        "session.message.user.previous"
+      ],
+      "evidence": "messageJump"
     },
     "session.aside": {
       "status": "blocked-host",
@@ -78,12 +177,13 @@
       "note": "needs a session-diff verb (diff last-turn source)"
     },
     "session.rename": {
-      "status": "covered",
-      "note": "sessions dialog two-stroke rename"
+      "status": "blocked-host",
+      "note": "0.6.37 LINT RETIRE: the ctrl+r dialog is a STUB — onSubmit flashes 'rename pending host support' (code comment: no rename method yet); needs the session/title verb (parity-v2 host-verb block)"
     },
     "messages.copy": {
       "status": "covered",
-      "note": "leader y IS the v2 semantic (Copy last assistant message) verbatim; per-message Copy row 0.6.31 — 0.6.33 decoded the stale transcript-selection-copy residual as session.copy, not this"
+      "note": "leader y IS the v2 semantic (Copy last assistant message) verbatim; per-message Copy row 0.6.31 — 0.6.33 decoded the stale transcript-selection-copy residual as session.copy, not this",
+      "evidence": "messages_copy"
     },
     "session.copy.id": {
       "status": "covered",
@@ -99,43 +199,93 @@
     },
     "session.": {
       "status": "covered",
-      "note": "core session ops (new/list/resume/delete/pin/quick-slots/fork/compact/export/copy/queue)"
+      "note": "core session ops (new/list/resume/delete/pin/quick-slots/fork/compact/export/copy/queue)",
+      "members": {
+        "session.compact": "id: \"compact\"",
+        "session.delete": "closeSession",
+        "session.fork": "id: \"fork\"",
+        "session.interrupt": "stopTurn|interrupt",
+        "session.list": "id: \"sessions\"",
+        "session.new": "id: \"new\"",
+        "session.pin.toggle": "togglePin",
+        "session.queued_prompts": "queue",
+        "session.quick_switch.1": "quick",
+        "session.quick_switch.2": "quick",
+        "session.quick_switch.3": "quick",
+        "session.quick_switch.4": "quick",
+        "session.quick_switch.5": "quick",
+        "session.quick_switch.6": "quick",
+        "session.quick_switch.7": "quick",
+        "session.quick_switch.8": "quick",
+        "session.quick_switch.9": "quick",
+        "session.sidebar.toggle": "id: \"sidebar\"",
+        "session.timeline": "id: \"jump\"",
+        "session.first": "scroll",
+        "session.last": "scroll",
+        "session.half.page.down": "scroll",
+        "session.half.page.up": "scroll",
+        "session.page.down": "scroll",
+        "session.page.up": "scroll",
+        "session.line.down": "scroll",
+        "session.line.up": "scroll",
+        "session.messages_last_user": "messageJump",
+        "session.toggle.thinking": "id: \"thinking\""
+      }
     },
     "agent.": {
       "status": "covered",
-      "note": "0.6.10 cycles + dialogs"
+      "note": "0.6.10 cycles + dialogs",
+      "members": [
+        "agent.cycle",
+        "agent.cycle.reverse",
+        "agent.list"
+      ],
+      "evidence": "agent"
     },
     "theme.": {
       "status": "covered",
-      "note": "33 themes verbatim (both arms 0.6.32); live preview 0.6.16"
+      "note": "33 themes verbatim (both arms 0.6.32); live preview 0.6.16",
+      "evidence": "id: \"themes\""
     },
     "command.palette": {
       "status": "covered",
-      "note": "ctrl+p"
+      "note": "ctrl+p",
+      "evidence": "setDialog\\(\"palette\"\\)"
     },
     "help.show": {
       "status": "covered",
-      "note": "0.6.13 help overlay"
+      "note": "0.6.13 help overlay",
+      "evidence": "HelpDialog"
     },
     "editor.": {
       "status": "covered",
-      "note": "0.6.12 external editor round-trip"
+      "note": "0.6.12 external editor round-trip",
+      "evidence": "EDITOR|editor"
     },
     "leader": {
       "status": "covered",
-      "note": "ctrl+x grammar"
+      "note": "ctrl+x grammar",
+      "evidence": "leader"
     },
     "prompt.paste": {
       "status": "covered",
-      "note": "atomic burst paste"
+      "note": "atomic burst paste",
+      "evidence": "paste"
     },
     "prompt.skills": {
       "status": "covered",
-      "note": "0.6.23 /skills selector; insert is a plain @mention (no extmarks)"
+      "note": "0.6.23 /skills selector; insert is a plain @mention (no extmarks)",
+      "evidence": "id: \"skills\""
     },
     "prompt.stash": {
       "status": "covered",
-      "note": "0.6.23 stash family: push/pop/list + two-stroke delete dialog"
+      "note": "0.6.23 stash family: push/pop/list + two-stroke delete dialog",
+      "members": [
+        "prompt.stash",
+        "prompt.stash.list",
+        "prompt.stash.pop"
+      ],
+      "evidence": "stash"
     },
     "prompt.images": {
       "status": "covered",
@@ -191,7 +341,8 @@
     },
     "opencode.status": {
       "status": "covered",
-      "note": "0.6.28 — the v2 DialogStatus port: leader s + /status + a palette row open the real dialog (title Status + esc, No MCP servers empty state, {n} MCP server(s) header, colored bullet rows, Connected / Failed / Disabled in configuration / Needs authentication grammar). The invented statusSummary toast is retired. Host gap: the mcp/list payload carries no error text (0.6.23), so failed/needs_auth render without v2's error suffix — the field is taken when a payload ever carries one."
+      "note": "0.6.28 — the v2 DialogStatus port: leader s + /status + a palette row open the real dialog (title Status + esc, No MCP servers empty state, {n} MCP server(s) header, colored bullet rows, Connected / Failed / Disabled in configuration / Needs authentication grammar). The invented statusSummary toast is retired. Host gap: the mcp/list payload carries no error text (0.6.23), so failed/needs_auth render without v2's error suffix — the field is taken when a payload ever carries one.",
+      "evidence": "id: \"status\""
     },
     "opencode.debug": {
       "status": "none",
@@ -214,11 +365,12 @@
     },
     "app.exit": {
       "status": "covered",
-      "note": "ctrl+c/ctrl+d quit"
+      "note": "ctrl+c/ctrl+d quit",
+      "evidence": "id: \"quit\""
     },
     "app.clear": {
-      "status": "covered",
-      "note": "ctrl+l clear (mini n/a)"
+      "status": "none",
+      "note": "0.6.37 LINT RETIRE: no ctrl+l binding exists anywhere in src — the row claimed a key that clears nothing"
     },
     "stash.delete": {
       "status": "covered",
@@ -254,11 +406,13 @@
     },
     "variant.list": {
       "status": "covered",
-      "note": "0.6.24 /variants (aliases thinking, effort) opens the effort dialog"
+      "note": "0.6.24 /variants (aliases thinking, effort) opens the effort dialog",
+      "evidence": "id: \"effort\""
     },
     "variant.cycle": {
       "status": "covered",
-      "note": "ctrl+t effort cycle shipped 0.6.10"
+      "note": "ctrl+t effort cycle shipped 0.6.10",
+      "evidence": "cycleEffort|effort"
     },
     "session.child.": {
       "status": "blocked-host",
@@ -266,23 +420,28 @@
     },
     "prompt.submit": {
       "status": "covered",
-      "note": "enter (the 0.5.x submit grammar); slash-routed commands too"
+      "note": "enter (the 0.5.x submit grammar); slash-routed commands too",
+      "evidence": "submitPrompt"
     },
     "prompt.queue": {
       "status": "covered",
-      "note": "typed mid-turn queues visibly (0.6.13 manager + Q-series pty)"
+      "note": "typed mid-turn queues visibly (0.6.13 manager + Q-series pty)",
+      "evidence": "queue"
     },
     "prompt.clear": {
       "status": "covered",
-      "note": "ctrl+c"
+      "note": "ctrl+c",
+      "evidence": "clearDraft|setDraft\\(\"\"\\)"
     },
     "prompt.history.previous": {
       "status": "covered",
-      "note": "up walks the store history"
+      "note": "up walks the store history",
+      "evidence": "history"
     },
     "prompt.history.next": {
       "status": "covered",
-      "note": "down walks the store history"
+      "note": "down walks the store history",
+      "evidence": "history"
     },
     "prompt.editor": {
       "status": "covered",
@@ -302,35 +461,43 @@
     },
     "opencode.settings": {
       "status": "covered",
-      "note": "0.6.27 /settings — DialogConfig port onto our real setters (theme/animations/file-context/diff-wrap/thinking/sidebar/mode/effort/tool-output)"
+      "note": "0.6.27 /settings — DialogConfig port onto our real setters (theme/animations/file-context/diff-wrap/thinking/sidebar/mode/effort/tool-output)",
+      "evidence": "id: \"settings\""
     },
     "dialog.select.page_up": {
       "status": "covered",
-      "note": "0.6.27 pageup moves -10 (v2 moves 10)"
+      "note": "0.6.27 pageup moves -10 (v2 moves 10)",
+      "evidence": "SelectDialog"
     },
     "dialog.select.page_down": {
       "status": "covered",
-      "note": "0.6.27 pagedown moves +10"
+      "note": "0.6.27 pagedown moves +10",
+      "evidence": "SelectDialog"
     },
     "dialog.select.home": {
       "status": "covered",
-      "note": "0.6.27 first row"
+      "note": "0.6.27 first row",
+      "evidence": "SelectDialog"
     },
     "dialog.select.end": {
       "status": "covered",
-      "note": "0.6.27 last row"
+      "note": "0.6.27 last row",
+      "evidence": "SelectDialog"
     },
     "dialog.select.prev": {
       "status": "covered",
-      "note": "up (shipped with the dialog infra)"
+      "note": "up (shipped with the dialog infra)",
+      "evidence": "SelectDialog"
     },
     "dialog.select.next": {
       "status": "covered",
-      "note": "down"
+      "note": "down",
+      "evidence": "SelectDialog"
     },
     "dialog.select.submit": {
       "status": "covered",
-      "note": "enter"
+      "note": "enter",
+      "evidence": "SelectDialog"
     },
     "which-key.": {
       "status": "none",
@@ -338,27 +505,33 @@
     },
     "prompt.autocomplete.prev": {
       "status": "covered",
-      "note": "up in the slash popup"
+      "note": "up in the slash popup",
+      "evidence": "autocomplete"
     },
     "prompt.autocomplete.next": {
       "status": "covered",
-      "note": "down"
+      "note": "down",
+      "evidence": "autocomplete"
     },
     "prompt.autocomplete.hide": {
       "status": "covered",
-      "note": "escape dismisses"
+      "note": "escape dismisses",
+      "evidence": "autocomplete"
     },
     "prompt.autocomplete.select": {
       "status": "covered",
-      "note": "enter"
+      "note": "enter",
+      "evidence": "autocomplete"
     },
     "prompt.autocomplete.complete": {
       "status": "covered",
-      "note": "tab completes"
+      "note": "tab completes",
+      "evidence": "autocomplete"
     },
     "theme.switch_mode": {
       "status": "covered",
-      "note": "0.6.32 — mode machine: switch pins + persists theme.mode (v2 setMode semantics); stock surface is the settings Color-mode row (upstream: palette-hidden, keybind none)"
+      "note": "0.6.32 — mode machine: switch pins + persists theme.mode (v2 setMode semantics); stock surface is the settings Color-mode row (upstream: palette-hidden, keybind none)",
+      "evidence": "color-mode|Color mode"
     },
     "theme.mode.lock": {
       "status": "covered",
@@ -366,11 +539,13 @@
     },
     "plugins.list": {
       "status": "covered",
-      "note": "0.6.34 — /plugins + palette; rows off plugins/list sorted by name; enter toggles via plugins/setEnabled"
+      "note": "0.6.34 — /plugins + palette; rows off plugins/list sorted by name; enter toggles via plugins/setEnabled",
+      "evidence": "id: \"plugins\""
     },
     "plugins.toggle": {
       "status": "covered",
-      "note": "0.6.34 — mapped onto plugins/setEnabled; v2 toggles its TUI arm, ours is the server enabled flag (the only toggle plane the host offers)"
+      "note": "0.6.34 — mapped onto plugins/setEnabled; v2 toggles its TUI arm, ours is the server enabled flag (the only toggle plane the host offers)",
+      "evidence": "setEnabled"
     },
     "dialog.plugins.": {
       "status": "blocked-host",
@@ -391,6 +566,18 @@
     "open.menu": {
       "status": "none",
       "note": "projects/worktrees arms blocked-host (no location or project verbs); the recent-sessions arm is our session.list dialog"
+    },
+    "session.unshare": {
+      "status": "blocked-host",
+      "note": "0.6.37 LINT RETIRE: no unshare wiring in src; share/unshare ride the host-verb gap measured 0.6.24 (no share or workspace-move verbs)"
+    },
+    "session.toggle.exploration_grouping": {
+      "status": "none",
+      "note": "0.6.37 LINT RETIRE: never ported — no exploration grouping surface in src; portable in principle, a future wave can claim it"
+    },
+    "session.toggle.scrollbar": {
+      "status": "none",
+      "note": "0.6.37 LINT RETIRE: never ported — scrollbar has no plane on this stack (the 0.6.27 settings law kept the row out); a future wave can claim it if the plane lands"
     }
   }
 }

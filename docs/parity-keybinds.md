@@ -6,14 +6,15 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 
 | class | binds |
 |---|---|
-| blocked-host | 20 |
-| covered | 167 |
+| blocked-host | 22 |
+| covered | 162 |
 | law | 7 |
-| none | 46 |
+| none | 49 |
 | partial | 1 |
 
 Open surfaces (partial / none / blocked-host):
 
+- `app.clear` (ctrl+l) [none] — 0.6.37 LINT RETIRE: no ctrl+l binding exists anywhere in src — the row claimed a key that clears nothing
 - `app.debug` (none) [none] — dev-facing
 - `app.console` (none) [none] — dev-facing
 - `app.scrap` (none) [none] — dev-facing
@@ -27,13 +28,17 @@ Open surfaces (partial / none / blocked-host):
 - `terminal.select` (<leader>down) [none] — embedded terminal surface
 - `terminal.toggle` (<leader>t) [none] — embedded terminal surface
 - `terminal.close` (<leader>up) [none] — embedded terminal surface
+- `session.toggle.scrollbar` (none) [none] — 0.6.37 LINT RETIRE: never ported — scrollbar has no plane on this stack (the 0.6.27 settings law kept the row out); a future wave can claim it if the plane lands
 - `opencode.debug` (none) [none] — dev-facing
 - `session.move` (none) [blocked-host] — no workspace-move verb; dialog.move_session.* with it (0.6.24)
 - `open.menu` (ctrl+o) [none] — projects/worktrees arms blocked-host (no location or project verbs); the recent-sessions arm is our session.list dialog
+- `session.rename` (ctrl+r) [blocked-host] — 0.6.37 LINT RETIRE: the ctrl+r dialog is a STUB — onSubmit flashes 'rename pending host support' (code comment: no rename method yet); needs the session/title verb (parity-v2 host-verb block)
 - `session.share` (none) [blocked-host] — no share verb in the zcode protocol (0.6.24)
+- `session.unshare` (none) [blocked-host] — 0.6.37 LINT RETIRE: no unshare wiring in src; share/unshare ride the host-verb gap measured 0.6.24 (no share or workspace-move verbs)
 - `session.background` (ctrl+b) [blocked-host] — no session/background verb in SESSION_METHODS (0.6.34) — the core-ops batch note was a covered-lie
 - `session.aside` (none) [blocked-host] — v2.0.8 /btw side question — rides a one-shot session.generate (no tool loop); zcode has workspace/generateText only. Filed with the host 0.6.29.
 - `session.cd` (none) [blocked-host] — no session/move or location verbs in SESSION_METHODS (0.6.34) — same batch covered-lie; v2 needs session.move + location.get
+- `session.toggle.exploration_grouping` (none) [none] — 0.6.37 LINT RETIRE: never ported — no exploration grouping surface in src; portable in principle, a future wave can claim it
 - `session.child.first` (down) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
 - `session.child.next` (right) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
 - `session.child.previous` (left) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
