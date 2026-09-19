@@ -167,7 +167,7 @@
     },
     "permission.prompt.fullscreen": {
       "status": "none",
-      "note": "fullscreen permission prompt"
+      "note": "local expanded-ask toggle; our ask surface has no expanded arm — future small wave"
     },
     "permission.": {
       "status": "covered",
@@ -294,7 +294,7 @@
     },
     "prompt.images.view": {
       "status": "none",
-      "note": "no attachments plane in this TUI"
+      "note": "protocol HAS v4/attachment verbs but this TUI speaks none — needs composer attach + turn-store image parts (future wave)"
     },
     "prompt.editor_context.clear": {
       "status": "none",
@@ -363,6 +363,34 @@
     "theme.mode.lock": {
       "status": "covered",
       "note": "0.6.32 — pin/free on the settings Color-mode row ('system' = unlock, persists theme.mode); the terminal-follow half of free (renderer.themeMode, palette probe) is blocked on the opentui terminal plane"
+    },
+    "plugins.list": {
+      "status": "covered",
+      "note": "0.6.34 — /plugins + palette; rows off plugins/list sorted by name; enter toggles via plugins/setEnabled"
+    },
+    "plugins.toggle": {
+      "status": "covered",
+      "note": "0.6.34 — mapped onto plugins/setEnabled; v2 toggles its TUI arm, ours is the server enabled flag (the only toggle plane the host offers)"
+    },
+    "dialog.plugins.": {
+      "status": "blocked-host",
+      "note": "no plane: plugins/list carries no error or outdated fields (0.6.34 measured) — error/check/update omitted per the Revert-row precedent"
+    },
+    "dialog.plugins.install": {
+      "status": "blocked-host",
+      "note": "no install surface in the v2.0.8 plugins dialog; host has plugins/install but the marketplace flow stays host-side"
+    },
+    "session.background": {
+      "status": "blocked-host",
+      "note": "no session/background verb in SESSION_METHODS (0.6.34) — the core-ops batch note was a covered-lie"
+    },
+    "session.cd": {
+      "status": "blocked-host",
+      "note": "no session/move or location verbs in SESSION_METHODS (0.6.34) — same batch covered-lie; v2 needs session.move + location.get"
+    },
+    "open.menu": {
+      "status": "none",
+      "note": "projects/worktrees arms blocked-host (no location or project verbs); the recent-sessions arm is our session.list dialog"
     }
   }
 }

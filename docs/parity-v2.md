@@ -163,6 +163,25 @@ ports AROUND the logo, never over it).
   The keybind ledger carried a batch covered-lie on copy/copy.id — retired
   with per-row truth.
 
+- **plugins dialog (0.6.34)** — the v2 feature-plugins/system/plugins.tsx
+  select ported: /plugins + palette plugins.list, rows off plugins/list
+  (live-measured payload: {id, name, version, enabled, components, …}),
+  sorted by name; footer grammar verbatim (status word when not active,
+  then the version — v2 displayVersion shortens a 40/64-hex pin to 7);
+  enter toggles via plugins/setEnabled {pluginId, enabled} with the
+  pending gutter mark, the success/error toast, and the row updated from
+  the response. MAPPING NOTE: v2's toggle lives on its TUI-runtime arm
+  (activate/deactivate of plugins embedded in the TUI process); our rows
+  are server plugins with a server-side enabled flag — the only toggle
+  plane the host offers, so v2's toggle semantic rides it. OMITTED per the
+  Revert-row precedent: dialog.plugins.error/-check/-update (plugins/list
+  carries no error or outdated fields — measured 0.6.34) and the ctrl+a
+  internal-plugins toggle (no TUI-runtime arm in our architecture).
+  REAL FIND: the coverage ledger's host-gap assumption on the whole
+  plugins.* family was WRONG — the zcode protocol carries a full plugins
+  verb family (SESSION_METHODS measured); only the error/outdated fields
+  are missing.
+
 ## Deviation queue (past inventions to re-port onto v2 code — audit 2026-09-17)
 
 1. ~~Tool-call rendering~~ RE-PORTED 0.6.21 (see Shipped) — the row now
@@ -366,12 +385,35 @@ on the clean lane is what separates them.
   toggle/close, composer.terminal.*, dialog-shell-output. New v2 surface.
 - **composer.subagent.* / composer.shell.*** — subagent & shell prompt
   switchers. New v2 surface.
-- **prompt.images.view / dialog-image-preview** — image preview.
-- **misc dialogs** — experiments, integration, pair, update, workspaces,
-  worktree-name, open, config, debug, error-details; plugins.* family;
-  server.pair; service.restart; session.cd; session.background;
-  permission.prompt.fullscreen; opencode.debug (a dev-facing view —
-  nothing to port).
+- **prompt.images.view / dialog-image-preview** — ledger truth 0.6.34:
+  the protocol HAS the v4/attachment/* verbs but this TUI speaks none of
+  them (no composer attach surface, no image parts in the turn store) —
+  a TUI-side feature gap, not a host gap; a future wave of its own.
+- **permission.prompt.fullscreen** — ledger truth 0.6.34: a local UI
+  toggle in v2 (expanded permission ask, ctrl+f, bind:false). Our ask
+  surface has no expanded arm; small future wave, not half-done here.
+- ~~**misc dialogs**~~ TRIAGED 0.6.34, the line dissolved into truth:
+  - **plugins.*** SHIPPED 0.6.34 (see Shipped).
+  - **experiments** — DEVTOOLS-ONLY upstream (opened from the v2 devtools
+    bar, devtools-bar.tsx:433 — no palette/slash command) and the
+    experiments[] array is EMPTY at v2.0.8; dev-facing, nothing to port.
+  - **integration** — the dialog IS provider.connect (app.tsx "Connect an
+    integration", /connect): OWNER NON-PARITY by the 2026-09-17 law.
+  - **config** — dialog-config = opencode.settings, SHIPPED 0.6.27.
+  - **debug (opencode.debug, app.debug, app.console, dialog-debug)** —
+    v2 devtools surfaces; dev-facing, nothing to port.
+  - **pair / server.pair** — already ledger-blocked (desktop-shell verb).
+  - **workspaces + dialog.move_session.*** — already blocked-host (0.6.24).
+  - **service.restart** — already ledger-blocked (desktop-shell verb).
+  - **session.cd / session.background** — moved to Blocked-on-host below
+    (their coverage rows were batch covered-lies; retired 0.6.34).
+  - **update / worktree-name / open (projects+worktrees arms)** — moved
+    to Blocked-on-host below.
+  - **error-details** — the v2 DialogErrorDetails component rides dialogs
+    whose payloads carry error text (plugins failures, mcp errors); both
+    zcode payloads (plugins/list, mcp/list) carry no error field, so the
+    surface has no data source — filed with the plugins row, returns when
+    a host payload grows error text.
 - ~~selection grammar~~ — STALE BULLET RETIRED 0.6.31: the input.select.*
   scope (shift selections, visual line ops, buffer home/end, select.all)
   SHIPPED 0.6.25 (see its entry above); this 0.6.10 note survived its own
@@ -406,6 +448,27 @@ on the clean lane is what separates them.
   subagent-notice click-to-open-child rides the SAME parent-linkage gap
   already filed below (payload carries no childID), and upstream opens it
   by mouse regardless (no mouse plane here).
+- **session.background** — v2 "Background blocking tools" rides
+  client.api.session.background({sessionID}); SESSION_METHODS has no
+  session/background verb (measured 0.6.34 — the coverage row had been a
+  batch covered-lie under the core-ops note).
+- **session.cd** — v2 "Change working directory" (/cd) rides
+  client.api.session.move({sessionID, directory}) + location.get;
+  SESSION_METHODS has neither (measured 0.6.34 — same covered-lie).
+- **opencode.update / dialog-update** — v2 stocks the command ONLY when an
+  updater exists (app.tsx gates it on updater.open) and rides its own
+  UpdateSource/install/restart machine; the zcode stack has no updater or
+  self-update plane (the TUI is npm-distributed, the backend is the host
+  daemon). No dialog to port while no updater exists — upstream itself
+  omits the surface.
+- **worktree-name / dialog.worktree.generate** — v2's worktree-session
+  creation flow (name-a-worktree prompt) needs host worktree verbs
+  (server-side git worktree + session move into it); SESSION_METHODS has
+  none (0.6.34).
+- **open.menu projects/worktrees arms** — v2's Open menu (ctrl+o) lists
+  projects (location/file listing) and worktrees per project from the
+  server; the zcode protocol has no location/project/worktree listing
+  verbs (0.6.34). The recent-sessions arm is already ours (session.list).
 
 ## Maintenance law
 

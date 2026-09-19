@@ -169,11 +169,15 @@ const ALLOWED_MODELS = [
 ] as const;
 
 const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
+// v2 displayVersion: a 40/64-hex commit pin renders as the short sha, a
+// semver stays whole (feature-plugins/system/plugins.tsx footer grammar).
+const shortVersion = (version: string) =>
+  /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(version) ? version.slice(0, 7) : version;
 const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "status" | "settings" | "msgactions" | "export" | "exportresult" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | null;
 
 export interface SessionRow {
   sessionId: string;
@@ -958,6 +962,11 @@ type McpDialogState =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "ready"; servers: { name: string; status: string; error?: string }[] };
+type PluginRow = { id: string; name: string; version?: string; enabled: boolean };
+type PluginsDialogState =
+  | { kind: "idle" | "loading"; plugins: PluginRow[] }
+  | { kind: "error"; message: string; plugins: PluginRow[] }
+  | { kind: "ready"; plugins: PluginRow[] };
 
 export function App({
   client,
@@ -1102,6 +1111,40 @@ export function App({
   const [stashArm, setStashArm] = useState<number>();
   const [skillsState, setSkillsState] = useState<SkillsDialogState>({ kind: "idle" });
   const [mcpState, setMcpState] = useState<McpDialogState>({ kind: "idle" });
+  // opencode v2 plugins dialog (0.6.34, feature-plugins/system/plugins.tsx):
+  // rows off plugins/list, enter toggles enabled via plugins/setEnabled (the
+  // mapping note lives in docs/parity-v2.md — v2 toggles its TUI arm, ours
+  // is the only toggle plane the host offers). Pending ids drive the gutter.
+  const [pluginsState, setPluginsState] = useState<PluginsDialogState>({ kind: "idle", plugins: [] });
+  const [pluginPending, setPluginPending] = useState<string[]>([]);
+  const pluginPendingRef = useRef<string[]>([]);
+  const togglePlugin = (row: PluginRow) => {
+    if (pluginPendingRef.current.includes(row.id)) return;
+    const next: string[] = [...pluginPendingRef.current, row.id];
+    pluginPendingRef.current = next;
+    setPluginPending(next);
+    const ws = { workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() } };
+    void client
+      .request("plugins/setEnabled", { ...ws, pluginId: row.id, enabled: !row.enabled })
+      .then((res) => {
+        const updated = (res as { plugin?: { id?: string; enabled?: boolean } }).plugin;
+        setPluginsState((prev) => ({
+          ...prev,
+          plugins: prev.plugins.map((p) =>
+            p.id === row.id ? { ...p, enabled: updated?.enabled === true } : p,
+          ),
+        }));
+        flashStatus(`${row.name} ${updated?.enabled === true ? "enabled" : "disabled"}`, "success");
+      })
+      .catch((e) => {
+        flashStatus(e instanceof Error ? e.message : String(e), "error");
+      })
+      .finally(() => {
+        const rest = pluginPendingRef.current.filter((id) => id !== row.id);
+        pluginPendingRef.current = rest;
+        setPluginPending(rest);
+      });
+  };
   useEffect(() => {
     if (dialog === "skills") {
       setSkillsState({ kind: "loading" });
@@ -1140,6 +1183,29 @@ export function App({
         })
         .catch(() => {
           if (live) setMcpState({ kind: "ready", servers: [] });
+        });
+      return () => {
+        live = false;
+      };
+    }
+    if (dialog === "plugins") {
+      setPluginsState({ kind: "loading", plugins: [] });
+      let live = true;
+      void client
+        .request("plugins/list", { workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() } })
+        .then((res) => {
+          if (!live) return;
+          const rows = ((res as { plugins?: Record<string, unknown>[] }).plugins ?? []).map((p) => ({
+            id: String(p.id ?? ""),
+            name: String(p.name ?? p.id ?? ""),
+            version: typeof p.version === "string" ? p.version : undefined,
+            enabled: p.enabled === true,
+          })).sort((a, b) => a.name.localeCompare(b.name));
+          setPluginsState({ kind: "ready", plugins: rows });
+        })
+        .catch((e) => {
+          if (!live) return;
+          setPluginsState({ kind: "error", message: e instanceof Error ? e.message : String(e), plugins: [] });
         });
       return () => {
         live = false;
@@ -1691,6 +1757,7 @@ export function App({
       if (command === "commands") { setDialog("palette"); return; }
       if (command === "skills") { setDialog("skills"); return; }
       if (command === "mcps") { setDialog("mcp"); return; }
+      if (command === "plugins") { setDialog("plugins"); return; }
       if (command === "variants") { setDialog("effort"); return; }
       if (command === "settings") { setDialog("settings"); return; }
       if (command === "help") { setDialog("help"); return; }
@@ -3699,6 +3766,62 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       />
     );
   }
+  if (dialog === "plugins") {
+    // Ported from opencode v2.0.8 feature-plugins/system/plugins.tsx (0.6.34):
+    // the Plugins select — rows off plugins/list sorted by name, the v2
+    // footer grammar (status word when not active, then the version; hash
+    // versions shortened to 7) with subdued colour, pending rows wear a
+    // gutter mark while the toggle is in flight. Enter toggles
+    // plugins/setEnabled (v2 toggles its TUI arm — ours is the only toggle
+    // plane the host offers; mapping note in docs/parity-v2.md). The v2
+    // ctrl+a internal-plugins toggle, dialog.plugins.error/-check/-update
+    // have no plane here (no TUI-runtime arm, no error/outdated payloads) —
+    // omitted per the Revert-row precedent, not hacked around.
+    const pluginOptions: DialogOption<string | null>[] =
+      pluginsState.kind === "idle" || pluginsState.kind === "loading"
+        ? [{ id: "loading", label: "Loading plugins…", value: null }]
+        : pluginsState.kind === "error"
+          ? [
+              { id: "err", label: "Could not load plugins", description: pluginsState.message, value: null },
+              { id: "err2", label: "Close and reopen Plugins to try again.", value: null },
+            ]
+          : pluginsState.plugins.length === 0
+            ? [{ id: "empty", label: "No plugins available", value: null }]
+            : pluginsState.plugins.map((plugin) => {
+                const footerParts = [
+                  ...(plugin.enabled ? [] : ["disabled"]),
+                  ...(plugin.version ? [shortVersion(plugin.version)] : []),
+                ];
+                return {
+                  id: plugin.id,
+                  label: plugin.name,
+                  status: footerParts.length > 0 ? { text: footerParts.join(", "), color: C.subtle } : undefined,
+                  gutter: pluginPending.includes(plugin.id) ? "…" : undefined,
+                  value: plugin.id,
+                };
+              });
+    return (
+      <SelectDialog
+        title="Plugins"
+        size="large"
+        options={pluginOptions}
+        theme={C}
+        footerHints={[
+          { key: "enter", label: "toggle" },
+          { key: "esc", label: "close" },
+        ]}
+        onSelect={(value) => {
+          if (typeof value === "string") {
+            const row = pluginsState.plugins.find((p) => p.id === value);
+            if (row) togglePlugin(row);
+            return;
+          }
+          closeDialog();
+        }}
+        onClose={closeDialog}
+      />
+    );
+  }
   if (dialog === "status") {
     return <StatusDialog C={C} mcpState={mcpState} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
@@ -3730,6 +3853,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "stash-list", label: "stash list…", description: "restore or delete stashed drafts", value: () => { setStashArm(undefined); setDialog("stash"); } },
       { id: "skills", label: "skills…", description: "insert a skill mention · /skills", value: () => setDialog("skills") },
       { id: "mcp", label: "MCP servers", description: "connection status · /mcps", value: () => setDialog("mcp") },
+      { id: "plugins", label: "Plugins", description: "enable or disable plugins · /plugins", value: () => setDialog("plugins") },
       { id: "status", label: "View status", description: "MCP server status · leader s", value: () => setDialog("status") },
       { id: "msg-next", label: "next message", description: "jump the transcript · v2 session.message.next", value: () => messageJump(1, false) },
       { id: "msg-prev", label: "previous message", value: () => messageJump(-1, false) },

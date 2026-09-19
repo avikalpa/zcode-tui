@@ -743,6 +743,53 @@ else:
     check(pid, "M0 /mcps opens the MCP servers dialog", False)
     check(pid, "M1 status grammar renders", False)
 
+# ---- PG-series: the plugins dialog (v2 port, 0.6.34). Rows off
+# plugins/list; the toggle rounds-trips plugins/setEnabled and is
+# RESTORE-VERIFIED: the second enter must put the row's disabled flag
+# back exactly as found. The filter pins the row so the "disabled,"
+# footer needle can only be the row under test (other rows may legally
+# be disabled too). Dev inventory: android-emulator sorts into the filter.
+if alive(pid):
+    os.write(master, b"/plugins\r"); read_for(master, stream, 2.0)
+    pg0 = False
+    for _ in range(12):                                        # poll: list fetch
+        read_for(master, stream, 0.8)
+        d_pg = "\n".join(screen.display)
+        if "Plugins" in d_pg and "Search" in d_pg and "Loading plugins" not in d_pg:
+            pg0 = True
+            break
+    check(pid, "PG0 /plugins opens the Plugins dialog", pg0)
+    pg1 = "android-emulator" in "\n".join(screen.display)
+    check(pid, "PG1 plugin rows render (android-emulator listed)", pg1)
+    for ch in "android":                                       # pin the row
+        os.write(master, ch.encode()); time.sleep(0.05)
+    read_for(master, stream, 0.8)
+    pre_disabled = "disabled," in "\n".join(screen.display)
+    os.write(master, b"\r"); read_for(master, stream, 0.5)     # enter: toggle
+    pg2 = False
+    for _ in range(12):                                        # poll: round-trip
+        read_for(master, stream, 0.6)
+        d_pg = "\n".join(screen.display)
+        if "Plugins" in d_pg and ("disabled," in d_pg) != pre_disabled:
+            pg2 = True
+            break
+    check(pid, "PG2 enter toggles the plugin (setEnabled round-trips)", pg2)
+    os.write(master, b"\r"); read_for(master, stream, 0.5)     # enter: restore
+    pg3 = False
+    for _ in range(12):
+        read_for(master, stream, 0.6)
+        d_pg = "\n".join(screen.display)
+        if "Plugins" in d_pg and ("disabled," in d_pg) == pre_disabled:
+            pg3 = True
+            break
+    check(pid, "PG3 second enter restores the found state", pg3)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)
+else:
+    check(pid, "PG0 /plugins opens the Plugins dialog", False)
+    check(pid, "PG1 plugin rows render (android-emulator listed)", False)
+    check(pid, "PG2 enter toggles the plugin (setEnabled round-trips)", False)
+    check(pid, "PG3 second enter restores the found state", False)
+
 # ---- V/TG-series: /variants alias + the file-context toggle (v2 ports). ----
 # The toggles persist into the real state.json, so the pre-toggle bytes are
 # captured and restored after the series.

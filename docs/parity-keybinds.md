@@ -6,10 +6,10 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 
 | class | binds |
 |---|---|
-| blocked-host | 14 |
+| blocked-host | 20 |
 | covered | 165 |
 | law | 7 |
-| none | 54 |
+| none | 48 |
 | partial | 1 |
 
 Open surfaces (partial / none / blocked-host):
@@ -29,9 +29,11 @@ Open surfaces (partial / none / blocked-host):
 - `terminal.close` (<leader>up) [none] — embedded terminal surface
 - `opencode.debug` (none) [none] — dev-facing
 - `session.move` (none) [blocked-host] — no workspace-move verb; dialog.move_session.* with it (0.6.24)
-- `open.menu` (ctrl+o) [none]
+- `open.menu` (ctrl+o) [none] — projects/worktrees arms blocked-host (no location or project verbs); the recent-sessions arm is our session.list dialog
 - `session.share` (none) [blocked-host] — no share verb in the zcode protocol (0.6.24)
+- `session.background` (ctrl+b) [blocked-host] — no session/background verb in SESSION_METHODS (0.6.34) — the core-ops batch note was a covered-lie
 - `session.aside` (none) [blocked-host] — v2.0.8 /btw side question — rides a one-shot session.generate (no tool loop); zcode has workspace/generateText only. Filed with the host 0.6.29.
+- `session.cd` (none) [blocked-host] — no session/move or location verbs in SESSION_METHODS (0.6.34) — same batch covered-lie; v2 needs session.move + location.get
 - `session.child.first` (down) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
 - `session.child.next` (right) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
 - `session.child.previous` (left) [blocked-host] — 0.6.24 measured: session/list carries no parentSessionId — no child tree to walk
@@ -41,7 +43,7 @@ Open surfaces (partial / none / blocked-host):
 - `session.undo` (<leader>u) [blocked-host] — needs session/revert in the app-server
 - `session.redo` (<leader>r) [blocked-host] — needs session/revert in the app-server
 - `prompt.editor_context.clear` (none) [none] — n/a to the plain-text draft
-- `prompt.images.view` (<leader>i) [none] — no attachments plane in this TUI
+- `prompt.images.view` (<leader>i) [none] — protocol HAS v4/attachment verbs but this TUI speaks none — needs composer attach + turn-store image parts (future wave)
 - `composer.subagent.up` (up) [none] — subagent prompt switcher
 - `composer.subagent.down` (down) [none] — subagent prompt switcher
 - `composer.subagent.select` (return) [none] — subagent prompt switcher
@@ -61,16 +63,14 @@ Open surfaces (partial / none / blocked-host):
 - `dialog.move_session.move` (ctrl+m) [none]
 - `dialog.move_session.delete` (ctrl+d) [none]
 - `dialog.move_session.refresh` (ctrl+r) [none]
-- `permission.prompt.fullscreen` (ctrl+f) [none] — fullscreen permission prompt
-- `plugins.toggle` (return) [none]
+- `permission.prompt.fullscreen` (ctrl+f) [none] — local expanded-ask toggle; our ask surface has no expanded arm — future small wave
 - `dialog.mcp.toggle` (space) [blocked-host] — zcode protocol has no mcp connect/disconnect verbs (0.6.23 finding)
-- `dialog.plugins.error` (space) [none]
-- `dialog.plugins.install` (shift+i) [none]
-- `dialog.plugins.update` (ctrl+u) [none]
-- `dialog.plugins.check` (ctrl+r) [none]
+- `dialog.plugins.error` (space) [blocked-host] — no plane: plugins/list carries no error or outdated fields (0.6.34 measured) — error/check/update omitted per the Revert-row precedent
+- `dialog.plugins.install` (shift+i) [blocked-host] — no install surface in the v2.0.8 plugins dialog; host has plugins/install but the marketplace flow stays host-side
+- `dialog.plugins.update` (ctrl+u) [blocked-host] — no plane: plugins/list carries no error or outdated fields (0.6.34 measured) — error/check/update omitted per the Revert-row precedent
+- `dialog.plugins.check` (ctrl+r) [blocked-host] — no plane: plugins/list carries no error or outdated fields (0.6.34 measured) — error/check/update omitted per the Revert-row precedent
 - `terminal.suspend` (ctrl+z) [none] — embedded terminal surface
 - `terminal.title.toggle` (none) [none] — embedded terminal surface
-- `plugins.list` (none) [none]
 - `plugins.install` (none) [none]
 - `key.toggle` (ctrl+alt+k) [none]
 - `key.layout.toggle` (ctrl+alt+shift+k) [none]

@@ -322,6 +322,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "status", aliases: [], description: "session and backend status" },
   { name: "skills", aliases: [], description: "insert a skill mention" },
   { name: "mcps", aliases: ["mcp"], description: "MCP server status" },
+  { name: "plugins", aliases: ["plugin"], description: "enable or disable plugins" },
   { name: "effort", aliases: [], description: "choose reasoning effort · low high max" },
   { name: "variants", aliases: ["thinking", "effort"], description: "switch model variant" },
   { name: "settings", aliases: [], description: "open settings" },
@@ -348,6 +349,7 @@ export type SlashCommand =
   | "diff"
   | "skills"
   | "mcps"
+  | "plugins"
   | "variants"
   | "settings"
   | null;
