@@ -477,8 +477,9 @@ now:
 - ~~dialog.select.page_up/page_down/home/end~~ SHIPPED 0.6.27 in
   SelectDialog (every dialog): pageup/pagedown move ±10 (v2's step), home/
   end jump; prev/next/submit were already wired.
-- which-key.* (11 binds): v2.0.7 STUB — definitions only, no
-  implementation in the vendored tree (grep-verified). Nothing to copy.
+- which-key.* (11 binds): STUB — definitions only, no implementation in
+  the vendored tree (grep-verified at v2.0.7; re-verified at v2.0.9,
+  2026-09-19). Nothing to copy.
 
 - ~~input.select.* (13 partials)~~ SHIPPED 0.6.25 — anchor-based selection
   on the hand-rolled composer: shift+left/right chars, shift+up/down VISUAL
