@@ -58,6 +58,14 @@ import {
   type SessionTabHistory,
 } from "./session/session-tabs-model";
 import { getRelativeTime, getStashPreview, promptStash, type StashEntry } from "./session/prompt-stash";
+import {
+  attachmentKind,
+  deduplicatePromptImages,
+  nextAttachmentLabel,
+  resolvePastedAttachments,
+  stripAttachmentLabels,
+  uploadSessionAttachment,
+} from "./attachment";
 import { listBranches, type DiffMode } from "./diff/git";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -177,7 +185,12 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | "imagepreview" | null;
+
+// v2 PromptInput.FileAttachment as our draft carries it: the data-uri,
+// its mime and bytes (the upload needs both), the filename, and the
+// virtual [Image N]/[PDF N] label living in the draft text.
+type PromptFilePart = { uri: string; mime: string; bytes: Uint8Array; name?: string; label: string };
 
 export interface SessionRow {
   sessionId: string;
@@ -385,6 +398,110 @@ const isEffort = (value: unknown): value is (typeof EFFORTS)[number] =>
 // host gap: the zcode protocol has no session/export verb, so the json
 // radio and its sanitize toggle have no data source and stay out (the
 // 0.6.31 Revert-row precedent) — the tab order shortens accordingly.
+// The v2 prompt image strip: the first three thumbs (height clamped to a
+// quarter of the terminal, width twice the height) and the +N more box.
+// Thumbs render the v2 <image> element verbatim (protocol auto: kitty/
+// sixel when the terminal speaks them, the blocks fallback otherwise);
+// the failed arm is v2's own. The click arms are mouse-only upstream.
+function AttachmentStrip({ C, files, more, height }: {
+  C: ThemeTokens;
+  files: PromptFilePart[];
+  more: (index: number) => void;
+  height: number;
+}) {
+  if (files.length === 0) return null;
+  const visible = files.slice(0, 3);
+  return (
+    <box style={{ flexDirection: "row", gap: 1, paddingBottom: 1, flexShrink: 0 }}>
+      {visible.map((file, index) => (
+        <ImageThumb key={file.label} C={C} file={file} height={height} onOpen={() => more(index)} />
+      ))}
+      {files.length > visible.length ? (
+        <box style={{ width: 8, height, alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <text content={`+${files.length - visible.length} more`} fg={C.subtle} />
+        </box>
+      ) : null}
+    </box>
+  );
+}
+
+function ImageThumb({ C, file, height, onOpen }: {
+  C: ThemeTokens;
+  file: PromptFilePart;
+  height: number;
+  onOpen: () => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <box style={{ width: height * 2, height, flexShrink: 0 }}>
+      {failed ? (
+        <box style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
+          <text content="No preview" fg={C.subtle} />
+        </box>
+      ) : (
+        <image source={file.uri} fit="cover" protocol="auto" width="100%" height="100%" onError={() => setFailed(true)} />
+      )}
+    </box>
+  );
+}
+
+// Ported from opencode v2.0.8 component/dialog-image-preview.tsx: the
+// draft's image attachments walked with left/right, esc closes, the
+// footer shows the label (or the failed arm's No preview).
+function ImagePreviewDialog({ C, images, initial, onClose, width, height }: {
+  C: ThemeTokens;
+  images: PromptFilePart[];
+  initial: number;
+  onClose: () => void;
+  width: number;
+  height: number;
+}) {
+  const first = Math.max(0, Math.min(initial, Math.max(0, images.length - 1)));
+  const [index, setIndex] = useState(first);
+  const [failed, setFailed] = useState(false);
+  const mirror = useRef({ index: first });
+  const move = (direction: number) => {
+    if (images.length < 2) return;
+    setFailed(false);
+    const next = (mirror.current.index + direction + images.length) % images.length;
+    mirror.current.index = next;
+    setIndex(next);
+  };
+  useKeyboard((key) => {
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
+    if (key.name === "left") { move(-1); return; }
+    if (key.name === "right") { move(1); return; }
+  });
+  if (images.length === 0) return null;
+  const shown = Math.min(index, images.length - 1);
+  const current = images[shown];
+  const imageHeight = Math.max(3, height - 8);
+  return (
+    <ModalBackdrop C={C} width={width} height={height}>
+      <box style={{ width: Math.min(96, Math.max(56, width - 6)), flexDirection: "column", backgroundColor: C.panel, paddingTop: 1, paddingBottom: 1, paddingLeft: 2, paddingRight: 2, gap: 1, flexShrink: 0 }}>
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content={`Image ${shown + 1} of ${images.length}`} fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content="esc" fg={C.faint} />
+        </box>
+        <box style={{ height: imageHeight, flexShrink: 0 }}>
+          {failed ? (
+            <box style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
+              <text content="No preview" fg={C.subtle} />
+            </box>
+          ) : (
+            <image source={current.uri} fit="fit" protocol="auto" width="100%" height={imageHeight} onError={() => setFailed(true)} />
+          )}
+        </box>
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+          <text content={images.length > 1 ? "← previous" : ""} fg={C.subtle} />
+          <text content={failed ? "No preview" : (current.name ?? current.label)} fg={failed ? C.error : C.subtle} />
+          <text content={images.length > 1 ? "next →" : ""} fg={C.subtle} />
+        </box>
+      </box>
+    </ModalBackdrop>
+  );
+}
+
 function ExportDialog({ C, onClose, onConfirm, width, height }: {
   C: ThemeTokens;
   onClose: () => void;
@@ -995,6 +1112,12 @@ export function App({
     thinkingRef.current = thinking;
   }, [thinking]);
   const [dialog, setDialog] = useState<DialogName>(null);
+  // v2 prompt.files — the draft's attachment parts. Labels are virtual
+  // text: a part lives while its label survives in the draft (the
+  // plain-draft equivalent of v2's extmark sync).
+  const [promptFiles, setPromptFiles] = useState<PromptFilePart[]>([]);
+  const promptFilesRef = useRef<PromptFilePart[]>([]);
+  const [previewIdx, setPreviewIdx] = useState(0);
   const [forkOptions, setForkOptions] = useState<DialogOption<string>[]>([]);
   const [theme, setTheme] = useState<ThemeName>("opencode");
   // v2 context/theme.tsx (0.6.32): themeMode is the active color arm,
@@ -1020,6 +1143,19 @@ export function App({
   const [ctx, setCtx] = useState<{ used: number; window: number } | null>(null);
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
+  // Alive parts, and the image-only view the strip and preview show
+  // (v2 imageAttachments: dedupe over the data:image/ subset).
+  const aliveFiles = promptFiles.filter((f) => draft.includes(f.label));
+  const aliveFilesRef = useRef<PromptFilePart[]>([]);
+  aliveFilesRef.current = aliveFiles;
+  const imageFiles = deduplicatePromptImages(aliveFiles.filter((f) => f.uri.startsWith("data:image/")));
+  useEffect(() => {
+    const alive = promptFilesRef.current.filter((f) => draftRef.current.includes(f.label));
+    if (alive.length !== promptFilesRef.current.length) {
+      promptFilesRef.current = alive;
+      setPromptFiles(alive);
+    }
+  }, [draft]);
   // The composer cursor: an index into the draft (default = end). Arrows move
   // it, printable input inserts at it, backspace deletes before it.
   const [cursor, setCursor] = useState<number | null>(null); // null = end
@@ -1720,18 +1856,46 @@ export function App({
     }
   };
 
-  const send = async (content: string, targetId = activeId) => {
+  const send = async (content: string, targetId = activeId, parts = promptFilesRef.current.filter((f) => content.includes(f.label))) => {
     if (!targetId || running) return;
     probe("turn-start", content.slice(0, 40));
+    // v2 submit: the alive labels leave the text (virtual text), the parts
+    // ride as attachments — uploaded begin/chunk/commit, sent by ref. Parts
+    // arrive from submitPrompt: the draft clear lets the pruning effect win
+    // the newSession await gap, so the refs read empty by the time send
+    // runs on the first-turn path.
+    const clean = stripAttachmentLabels(content, parts.map((f) => f.label));
+    const echoText = parts.length > 0
+      ? `${clean}${clean ? "\n" : ""}${parts.map((f) => (f.name ? `${f.label} ${f.name}` : f.label)).join("\n")}`
+      : content;
+    promptFilesRef.current = [];
+    setPromptFiles([]);
     setRunning(true);
     setView("session");
     resetToTail();
     setHistory((h) => [content, ...h.filter((x) => x !== content)]);
     historyIdx.current = -1;
-    setMsgs((m) => [...m, { role: "user", text: content }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
+    setMsgs((m) => [...m, { role: "user", text: echoText }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
+    let attachments: { ref: string; fileName: string; mime: string; bytes: number }[] | undefined;
+    if (parts.length > 0) {
+      setStatus(`uploading ${parts.length} attachment${parts.length === 1 ? "" : "s"}…`);
+      attachments = [];
+      for (const f of parts) {
+        try {
+          const ref = await uploadSessionAttachment(client, targetId, { mime: f.mime, bytes: f.bytes, filename: f.name ?? f.label });
+          attachments.push({ ref, fileName: f.name ?? f.label, mime: f.mime, bytes: f.bytes.byteLength });
+        } catch (e) {
+          setStatus(`attachment upload failed: ${e instanceof Error ? e.message : e}`);
+          setRunning(false);
+          return;
+        }
+      }
+    }
     setStatus("working…");
     try {
-      await client.request("session/send", { sessionId: targetId, content });
+      await client.request("session/send", attachments
+        ? { sessionId: targetId, content: clean, attachments }
+        : { sessionId: targetId, content: clean });
     } catch (e) {
       setStatus(`send failed: ${e instanceof Error ? e.message : e}`);
       setRunning(false);
@@ -1740,6 +1904,9 @@ export function App({
 
   const submitPrompt = async (content: string) => {
     const route = submitRoute(content);
+    // The alive parts are captured BEFORE the draft clears — after it,
+    // the pruning effect treats the labels as deleted.
+    const submitParts = promptFilesRef.current.filter((f) => content.includes(f.label));
     setDraft("");
     draftRef.current = "";
     setCursorBoth(null);
@@ -1775,11 +1942,11 @@ export function App({
       return;
     }
     if (activeId) {
-      await send(content, activeId);
+      await send(content, activeId, submitParts);
       return;
     }
     const id = await newSession();
-    if (id) await send(content, id);
+    if (id) await send(content, id, submitParts);
   };
 
   const openSessions = () => {
@@ -2481,6 +2648,25 @@ export function App({
     setDraft(next);
     setCursorBoth(cur + text.length);
   };
+  // v2 pasteAttachment: the label inserts at the cursor and the part
+  // rides in prompt.files; the same uri+name reuses its label.
+  const attachFile = (item: { uri: string; mime: string; bytes: Uint8Array; filename: string }) => {
+    const kind = attachmentKind(item.mime);
+    if (!kind) return;
+    const current = promptFilesRef.current;
+    const existing = current.find((f) => f.uri === item.uri && (f.name ?? null) === (item.filename ?? null) && draftRef.current.includes(f.label));
+    const label = existing?.label ?? nextAttachmentLabel(current.map((f) => f.label), kind);
+    insertAtCursor(`${label} `);
+    promptFilesRef.current = [...current, { uri: item.uri, mime: item.mime, bytes: item.bytes, name: item.filename, label }];
+    setPromptFiles(promptFilesRef.current);
+  };
+  // v2 openImagePreview: dialog.replace(DialogImagePreview) at the index.
+  const openImagePreview = (index: number) => {
+    const images = aliveFilesRef.current.filter((f) => f.uri.startsWith("data:image/"));
+    if (images.length === 0) { flashStatus("no image attachments"); return; }
+    setPreviewIdx(Math.max(0, Math.min(index, images.length - 1)));
+    setDialog("imagepreview");
+  };
   const pendingBuf = useRef("");
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const discardPending = () => {
@@ -2508,7 +2694,21 @@ export function App({
     }
     sugDismissed.current = false;
     moveSug(0);
-    insertAtCursor(text);
+    // v2 pasteInputText: a paste that IS an attachment path (image/pdf,
+    // or a multi-path paste) becomes prompt parts — labels insert, not
+    // the text. Typed-while-resolving falls back to the plain insert.
+    const beforePaste = draftRef.current;
+    void (async () => {
+      const resolved = await resolvePastedAttachments(text).catch(() => undefined);
+      if (!resolved || draftRef.current !== beforePaste) {
+        insertAtCursor(text);
+        return;
+      }
+      for (const item of resolved) {
+        if (item.type === "text") insertAtCursor(item.content);
+        else attachFile(item);
+      }
+    })();
   });
 
   useKeyboard((key) => {
@@ -2633,6 +2833,9 @@ export function App({
       // "to editor" description from v1 but the flow never touches an
       // editor — the v1 editor-export retires with this.
       if (key.name === "x" && view === "session") { setDialog("export"); return; }
+      // opencode prompt.images.view (leader i): the DialogImagePreview
+      // over the draft's image attachments.
+      if (key.name === "i") { openImagePreview(0); return; }
       // opencode messages_copy: the last assistant message, via OSC 52.
       // opencode session_queued_prompts: manage the prompts queued behind a
       // running turn (enter removes the selected entry).
@@ -3831,6 +4034,9 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
   if (dialog === "exportresult") {
     return <ExportResultDialog C={C} path={exportResultPath ?? ""} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
+  if (dialog === "imagepreview") {
+    return <ImagePreviewDialog C={C} images={imageFiles} initial={previewIdx} onClose={closeDialog} width={dims.width} height={dims.height} />;
+  }
   if (dialog === "help") {
     return <HelpDialog C={C} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
@@ -3848,7 +4054,8 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "copy-transcript", label: "Copy session transcript", description: "markdown · v2 session.copy · /copy", value: copyTranscript },
       { id: "copy-session-id", label: "Copy session ID", description: "v2 session.copy.id", value: copySessionId },
       { id: "export", label: "Export session transcript…", description: "markdown · leader x · /export", value: () => setDialog("export") },
-      { id: "stash", label: "stash prompt", description: "park the draft · v2 prompt.stash", value: () => { if (!draft) return; promptStash.push({ prompt: { text: draft } }); setDraft(""); setCursorBoth(null); stashChanged(); } },
+      { id: "images-view", label: "View image attachments", description: "v2 prompt.images.view · leader i", value: () => openImagePreview(0) },
+      { id: "stash", label: "stash prompt", description: "park the draft · v2 prompt.stash", value: () => { if (!draft) return; promptStash.push({ prompt: { text: stripAttachmentLabels(draft, promptFilesRef.current.map((f) => f.label)) } }); setDraft(""); setCursorBoth(null); stashChanged(); } },
       { id: "stash-pop", label: "stash pop", description: "restore the newest stashed draft", value: () => { const e = promptStash.pop(); if (!e) return; setDraft(e.prompt.text); setCursorBoth(null); stashChanged(); } },
       { id: "stash-list", label: "stash list…", description: "restore or delete stashed drafts", value: () => { setStashArm(undefined); setDialog("stash"); } },
       { id: "skills", label: "skills…", description: "insert a skill mention · /skills", value: () => setDialog("skills") },
@@ -3886,6 +4093,8 @@ footerHints={[
     );
   }
 
+  // v2 imagePreviewHeight: clamp(4, 8, quarter of the terminal rows).
+  const stripHeight = Math.max(4, Math.min(8, Math.floor(dims.height / 4)));
   const PLACEHOLDERS = [
     'Ask anything…  "What is the tech stack of this project?"',
     'Ask anything…  "How do I run the test suite?"',
@@ -3920,6 +4129,7 @@ footerHints={[
           <ZCodeLogo C={C} />
           <box style={{ height: 1, flexShrink: 0 }} />
           <box style={{ width: promptWidth, flexShrink: 0 }}>
+            <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
             {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
             <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
           </box>
@@ -4101,6 +4311,7 @@ footerHints={[
           <text content={`⧗ ${queue.length} queued · next: ${queue[0].slice(0, 48)}`} fg={C.warning} />
         </box>
       ) : null}
+      <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
       {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} /> : null}
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
         <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />

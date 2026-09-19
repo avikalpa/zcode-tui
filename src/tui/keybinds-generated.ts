@@ -157,7 +157,7 @@ export const UPSTREAM_KEYBINDS: UpstreamKeybind[] = [
   { id: "prompt.submit", keys: "none", description: "Submit prompt", coverage: "covered", note: "enter (the 0.5.x submit grammar); slash-routed commands too" },
   { id: "prompt.queue", keys: "<leader>return", description: "Queue prompt", coverage: "covered", note: "typed mid-turn queues visibly (0.6.13 manager + Q-series pty)" },
   { id: "prompt.editor_context.clear", keys: "none", description: "Clear editor context", coverage: "none", note: "n/a to the plain-text draft" },
-  { id: "prompt.images.view", keys: "<leader>i", description: "View image attachments", coverage: "none", note: "protocol HAS v4/attachment verbs but this TUI speaks none — needs composer attach + turn-store image parts (future wave)" },
+  { id: "prompt.images.view", keys: "<leader>i", description: "View image attachments", coverage: "covered", note: "0.6.35 composer attach + DialogImagePreview (leader i + palette); pixels are the opentui image element verbatim (kitty/sixel when the terminal speaks them, blocks fallback), failed arm = v2 No preview" },
   { id: "prompt.skills", keys: "none", description: "Open skill selector", coverage: "covered", note: "0.6.23 /skills selector; insert is a plain @mention (no extmarks)" },
   { id: "prompt.stash", keys: "none", description: "Stash prompt", coverage: "covered", note: "0.6.23 stash family: push/pop/list + two-stroke delete dialog" },
   { id: "prompt.stash.pop", keys: "none", description: "Pop stashed prompt", coverage: "covered", note: "0.6.23 stash family: push/pop/list + two-stroke delete dialog" },

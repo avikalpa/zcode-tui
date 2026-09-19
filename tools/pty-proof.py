@@ -1065,5 +1065,126 @@ else:
                 "TH7 restart restores the lock (Color mode reads light)"):
         check(th_pid, lbl, False)
 
+
+# ---- AT-series: the prompt.images attachments (v2 port, 0.6.35). A
+# bracketed paste of an image path attaches it (the [Image 1] label + the
+# thumb strip paint), leader i walks DialogImagePreview, and the submit
+# uploads over v4/attachment + sends by ref. The AT TUI spawns its own
+# instance (the proof retires the main one before TH); its session is the
+# series' throwaway, and AT6/AT7 are the one live write (a tiny real turn —
+# the I-series precedent). The strip paints via the blocks protocol on this
+# PTY; the failed arm (No preview) is its legal sibling, so AT2 takes either.
+import struct as _struct
+import zlib as _zlib
+
+def _at_png_bytes():
+    # a real 8x8 red PNG, built here so the proof owns its bytes
+    def chunk(tag, data):
+        c = _struct.pack(">I", len(data)) + tag + data
+        return c + _struct.pack(">I", _zlib.crc32(tag + data) & 0xFFFFFFFF)
+    ihdr = _struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0)
+    raw = b"".join(b"\x00" + b"\xff\x00\x00" * 8 for _ in range(8))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", _zlib.compress(raw)) + chunk(b"IEND", b""))
+
+AT_PNG = "/tmp/at-proof.png"
+try:
+    open(AT_PNG, "wb").write(_at_png_bytes())
+except Exception as e:
+    print("NOTE could not stage the proof png:", e)
+
+at_pid, at_master, at_screen, at_stream = spawn()
+read_for(at_master, at_stream, 9)
+at_boot = "Ask anything" in "\n".join(at_screen.display)
+check(at_pid, "AT-pre the attachments TUI boots", at_boot)
+
+if alive(at_pid) and at_boot and os.path.exists(AT_PNG):
+    os.write(at_master, b"\x18i"); read_for(at_master, at_stream, 1.0)  # leader i, nothing attached
+    a0 = "\n".join(at_screen.display)
+    check(at_pid, "AT0 leader i with no attachments flashes the guard", "no image attachments" in a0)
+
+    os.write(at_master, b"\x1b[200~" + AT_PNG.encode() + b"\x1b[201~")
+    a1 = False
+    for _ in range(10):
+        read_for(at_master, at_stream, 0.5)
+        if "[Image 1]" in "\n".join(at_screen.display):
+            a1 = True
+            break
+    check(at_pid, "AT1 pasting an image path attaches it (label in the composer)", a1)
+
+    a2 = False
+    for _ in range(8):
+        read_for(at_master, at_stream, 0.5)
+        d_a2 = "\n".join(at_screen.display)
+        if ("\u2580" in d_a2 or "\u2584" in d_a2 or "\u2588" in d_a2 or "No preview" in d_a2):
+            a2 = True
+            break
+    check(at_pid, "AT2 the attachment strip paints (blocks or the failed arm)", a2)
+
+    os.write(at_master, b"\x18i"); read_for(at_master, at_stream, 1.2)  # leader i: the preview
+    a3 = "\n".join(at_screen.display)
+    check(at_pid, "AT3 leader i opens the image preview (Image 1 of 1)", "Image 1 of 1" in a3)
+    if not a3:
+        print("---- AT3 FAIL SCREEN ----")
+        for i, line in enumerate(at_screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    os.write(at_master, b"\x1b"); read_for(at_master, at_stream, 0.6)
+
+    for _ in range(12):                                        # backspace: the label leaves
+        os.write(at_master, b"\x7f"); time.sleep(0.02)
+    read_for(at_master, at_stream, 0.8)
+    a4 = "\n".join(at_screen.display)
+    check(at_pid, "AT4 removing the label drops the attachment", "[Image 1]" not in a4)
+
+    os.write(at_master, b"\x1b[200~" + AT_PNG.encode() + b"\x1b[201~")
+    a5 = False
+    for _ in range(10):
+        read_for(at_master, at_stream, 0.5)
+        if "[Image 1]" in "\n".join(at_screen.display):
+            a5 = True
+            break
+    check(at_pid, "AT5 re-attach for the send", a5)
+
+    os.write(at_master, b"Reply with exactly: ok\r")
+    a6 = False
+    for _ in range(30):                                        # the echo IS the acceptance proof
+        read_for(at_master, at_stream, 0.5)
+        if "at-proof.png" in "\n".join(at_screen.display):
+            a6 = True
+            break
+    check(at_pid, "AT6 the send accepts the attachment (the echo carries the label + name)", a6)
+    if not a6:
+        print("---- AT6 FAIL SCREEN (tail) ----")
+        for line in at_screen.display[-14:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
+
+    a7 = False
+    for _ in range(60):                                        # the live write: the turn footer
+        read_for(at_master, at_stream, 1.5)                    # (duration grammar) is the first
+        d_a7 = "\n".join(at_screen.display)                    # footer this fresh session renders
+        if re.search(r"\b\d+\.\d+s\b", d_a7):
+            a7 = True
+            break
+    check(at_pid, "AT7 the turn completes over the attachment (footer renders)", a7 and "esc stop" not in d_a7)
+    if not a7:
+        print("---- AT7 FAIL SCREEN (tail) ----")
+        for line in at_screen.display[-14:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
+    kill(at_pid)
+else:
+    for lbl in ("AT-pre the attachments TUI boots",
+                "AT0 leader i with no attachments flashes the guard",
+                "AT1 pasting an image path attaches it (label in the composer)",
+                "AT2 the attachment strip paints (blocks or the failed arm)",
+                "AT3 leader i opens the image preview (Image 1 of 1)",
+                "AT4 removing the label drops the attachment",
+                "AT5 re-attach for the send",
+                "AT6 the send accepts the attachment (echo + turn start)",
+                "AT7 the turn completes over the attachment"):
+        check(at_pid, lbl, False)
+
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")
 sys.exit(0 if all(ok for _, ok in verdicts) else 1)

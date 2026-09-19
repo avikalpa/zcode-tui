@@ -7,9 +7,9 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 | class | binds |
 |---|---|
 | blocked-host | 20 |
-| covered | 165 |
+| covered | 166 |
 | law | 7 |
-| none | 48 |
+| none | 47 |
 | partial | 1 |
 
 Open surfaces (partial / none / blocked-host):
@@ -43,7 +43,6 @@ Open surfaces (partial / none / blocked-host):
 - `session.undo` (<leader>u) [blocked-host] — needs session/revert in the app-server
 - `session.redo` (<leader>r) [blocked-host] — needs session/revert in the app-server
 - `prompt.editor_context.clear` (none) [none] — n/a to the plain-text draft
-- `prompt.images.view` (<leader>i) [none] — protocol HAS v4/attachment verbs but this TUI speaks none — needs composer attach + turn-store image parts (future wave)
 - `composer.subagent.up` (up) [none] — subagent prompt switcher
 - `composer.subagent.down` (down) [none] — subagent prompt switcher
 - `composer.subagent.select` (return) [none] — subagent prompt switcher

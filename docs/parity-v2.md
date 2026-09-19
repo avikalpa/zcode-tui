@@ -28,6 +28,35 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- ~~**prompt.images.view / dialog-image-preview**~~ SHIPPED 0.6.35 — the
+  attachments family, ported off the vendored local-attachment.ts +
+  prompt/attachment.ts + dialog-image-preview.tsx with the host wire
+  MEASURED LIVE (begin/chunk/commit schemas extracted from the host bundle
+  and round-tripped: begin {connectionId, uploadId, sessionId, fileName,
+  mime, totalBytes<=20MB, totalChunks<=64, checksum sha256:…} -> chunk
+  {chunkIndex, dataBase64<=512KB} -> commit -> {ref zcode-artifact://…};
+  session/send takes attachments [{ref, fileName, mime, bytes}]).
+  Landed: pasted-path resolution (image/* + pdf <=20MB, svg-as-text, single
+  or multi filepath pastes, file:// decode — verbatim), pasteAttachment
+  ([Image N]/[PDF N] label grammar + the label leaves the text at submit),
+  the draft attachment strip (first 3 thumbs, height clamp 4..8 rows,
+  width 2x, +N more), prompt.images.view (leader i + palette) opening the
+  DialogImagePreview port (Image N of M, left/right cycle, esc, label
+  footer), and the upload funnel + session/send attachments array.
+  The <image> render is the v2 element VERBATIM (opentui was already our
+  stack): kitty/sixel when the terminal speaks them, the blocks fallback
+  otherwise, the v2 failed arm (No preview) on error.
+  MAPPING TRUTH: labels are virtual text in v2 (extmarks); our plain draft
+  syncs parts by label-presence (the submit/prune race — capture parts
+  BEFORE the draft clear — was found by the AT proof and fixed).
+  BLOCKED/RESIDUE: clipboard-IMAGE paste has no PTY read plane (text
+  paste + path resolution are the portable arms); v4/attachment/read +
+  previewSource are message-scoped preview channels (previewRef
+  authorization) — unused by the send path; the host does not echo
+  attachments back in conversation rows, so the label/name echo is ours
+  (resumed sessions show the text only); prompt-stash rides text-only
+  (upstream stash carries files); thumb/dialog mouse arms are mouse-only
+  upstream.
 - Surfaces: home, session transcript, composer, sidebar, leader grammar,
   ctrl+p palette, slash popup + @files autocomplete, permission card, toasts,
   help overlay (`?`/`/help`), sessions dialog (reference chrome, 0.6.8),
@@ -385,10 +414,6 @@ on the clean lane is what separates them.
   toggle/close, composer.terminal.*, dialog-shell-output. New v2 surface.
 - **composer.subagent.* / composer.shell.*** — subagent & shell prompt
   switchers. New v2 surface.
-- **prompt.images.view / dialog-image-preview** — ledger truth 0.6.34:
-  the protocol HAS the v4/attachment/* verbs but this TUI speaks none of
-  them (no composer attach surface, no image parts in the turn store) —
-  a TUI-side feature gap, not a host gap; a future wave of its own.
 - **permission.prompt.fullscreen** — ledger truth 0.6.34: a local UI
   toggle in v2 (expanded permission ask, ctrl+f, bind:false). Our ask
   surface has no expanded arm; small future wave, not half-done here.
