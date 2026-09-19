@@ -11,7 +11,7 @@ feature to keep. Audit pass 2026-09-17 filed the known deviations below
 (Deviation queue). The non-parities (model allowlist, provider_connect)
 remain the only exceptions.
 
-**Reference:** opencode **v2.0.8** (stable) — VENDORED in-repo at
+**Reference:** opencode **v2.0.9** (stable; repo renamed sst → anomalyco, 2026-09) — VENDORED in-repo at
 `tools/opencode-reference/` (pinned by `tools/sync-opencode.sh <tag>`;
 MIT, never compiled into our binary). The sync toolchain makes a parity
 wave a diff job: `parity-report.py --map/--stale/--gaps`,
@@ -366,7 +366,43 @@ run is untouched (the instrumentation is inert without the flags).
   verdicts agreeing with the full proof's series; full-run stability x2
   unchanged after the tooling change.
 
-## Remaining (v2.0.8 → us)
+### 0.6.39 — the v2.0.9 re-pin (maintenance law, zero parity delta)
+
+Upstream shipped v2.0.9 the morning after our pin (first release past it);
+re-pinned via `tools/sync-opencode.sh v2.0.9` (dev checkout already tracks
+anomalyco/opencode — the sst rename needs no in-repo URL surgery; the
+vendored README already says "anomalyco mirror"). Recon of the 81-file
+packages/tui diff: it is the THEME-SURFACE API refactor — tokens rename
+(`.default` → `.base` everywhere, `text.subdued` → `muted`, status colors →
+hue tokens), `useTheme()` loses the context overload, component themes go
+mode-less (`createComponentTheme(tokens)`), dialog theming centralizes into
+`ui/dialog.tsx` (`ThemeContextProvider context="dialog"`) with a cached
+`theme.surface(name)` accessor, terminalPalette/context-local hardcode the
+dark hues, and the upstream source of the "opencode" theme moves to a
+NEW v2-schema `assets/v2/opencode.json` (the v1 asset is still shipped and
+unchanged; palette anchors match — our v1-sourced generated arms stay
+correct). The only behavioral deltas live in surfaces we never ported (btw
+answers now render markdown via plugins.markdown; dialog-error-details
+loses its FRAME-measure scroll machinery; form review-height rework) or
+are internal re-expressions (StatusBadge raised? + theme.decrease,
+BlockToolContent merged into BlockTool — the hover pre-existed). Keybinds:
+241 binds, counts IDENTICAL to 0.6.38, lint clean (0 lies, 0 warnings).
+Zero runtime delta beyond generated-file stamps — NO ynpm ride.
+
+- Gates (2026-09-19, dev, dist at lane ee9714a+pin): typecheck clean;
+  110+1known (the auth-sync red re-verified on the stashed clean tree);
+  full proof 114+9F then 118+5F — F0 persistent + the documented X2/CX/S
+  timing class, run 2 a strict subset of run 1 (the release-gate shape).
+- REAL FIND (environment, not the wave): S1 (jump-to-latest affordance)
+  failed ISOLATED `--stage STHEMES` runs on BOTH this binary AND the
+  untouched v0.6.38 release binary (bisected via a throwaway-worktree
+  build) — while `--stage CSPINE` went green 68/0 on a quiet re-run. The
+  dev host session catalog reached 100 entries today; the class degrades
+  with host load. NEXT SITTING: re-needle S1 per the poll law (its
+  affordance check is the frailest in the battery) and consider catalog
+  weight (the proof seeds real sessions on dev).
+
+## Remaining (v2.0.9 → us)
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
   — category groups, current value per row, ←/→ cycles + enter steps —
