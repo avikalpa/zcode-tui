@@ -7,9 +7,9 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 | class | binds |
 |---|---|
 | blocked-host | 20 |
-| covered | 166 |
+| covered | 167 |
 | law | 7 |
-| none | 47 |
+| none | 46 |
 | partial | 1 |
 
 Open surfaces (partial / none / blocked-host):
@@ -62,7 +62,6 @@ Open surfaces (partial / none / blocked-host):
 - `dialog.move_session.move` (ctrl+m) [none]
 - `dialog.move_session.delete` (ctrl+d) [none]
 - `dialog.move_session.refresh` (ctrl+r) [none]
-- `permission.prompt.fullscreen` (ctrl+f) [none] — local expanded-ask toggle; our ask surface has no expanded arm — future small wave
 - `dialog.mcp.toggle` (space) [blocked-host] — zcode protocol has no mcp connect/disconnect verbs (0.6.23 finding)
 - `dialog.plugins.error` (space) [blocked-host] — no plane: plugins/list carries no error or outdated fields (0.6.34 measured) — error/check/update omitted per the Revert-row precedent
 - `dialog.plugins.install` (shift+i) [blocked-host] — no install surface in the v2.0.8 plugins dialog; host has plugins/install but the marketplace flow stays host-side

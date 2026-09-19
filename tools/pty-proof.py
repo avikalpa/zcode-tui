@@ -1186,5 +1186,86 @@ else:
                 "AT7 the turn completes over the attachment"):
         check(at_pid, lbl, False)
 
+# ---- PF-series: permission.prompt.fullscreen (the v2 SessionQuestion arm,
+# 0.6.36). One tiny real turn forces a shell permission ask (the I-series
+# precedent); the series then drives the expanded arm: ctrl+f toggles the
+# ask card between the inline card and the full-viewport overlay, escape
+# MINIMIZES first (the v2 dismiss law), and only a collapsed escape
+# dismisses (deny + stop, the owner interrupt law).
+
+PF_LABELS = (
+    "PF-pre the fullscreen-ask TUI boots",
+    "PF0 the ask card paints collapsed (ctrl+f fullscreen hint)",
+    "PF1 ctrl+f expands (minimize hint + card at viewport top)",
+    "PF2 escape minimizes (card stays, hint flips back)",
+    "PF3 second escape dismisses (deny + stop)",
+)
+
+pf_pid, pf_master, pf_screen, pf_stream = spawn()
+read_for(pf_master, pf_stream, 9)
+pf_boot = "Ask anything" in "\n".join(pf_screen.display)
+check(pf_pid, PF_LABELS[0], pf_boot)
+
+if alive(pf_pid) and pf_boot:
+    os.write(pf_master, b"create the file /tmp/zct-proof-cwd/pf636.txt containing just ok\r")
+    pf0 = False
+    for _ in range(90):                                    # poll, never fixed-settle
+        read_for(pf_master, pf_stream, 1.0)
+        d_pf = "\n".join(pf_screen.display)
+        if "Permission required" in d_pf and "ctrl+f fullscreen" in d_pf:
+            pf0 = True
+            break
+    check(pf_pid, PF_LABELS[1], pf0)
+    if not pf0:
+        print("---- PF0 FAIL SCREEN ----")
+        for line in pf_screen.display:
+            if line.strip():
+                print(f"|{line.rstrip()}")
+
+    os.write(pf_master, b"\x06")                           # ctrl+f
+    pf1 = False
+    for _ in range(10):
+        read_for(pf_master, pf_stream, 0.3)
+        d_pf = "\n".join(pf_screen.display)
+        if "ctrl+f minimize" in d_pf:
+            pf_top = next((i for i, line in enumerate(pf_screen.display)
+                           if "Permission required" in line), 99)
+            pf1 = pf_top <= 3
+            break
+    check(pf_pid, PF_LABELS[2], pf1)
+    if not pf1:
+        print("---- PF1 FAIL SCREEN ----")
+        for i, line in enumerate(pf_screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+
+    os.write(pf_master, b"\x1b")
+    pf2 = False
+    for _ in range(10):
+        read_for(pf_master, pf_stream, 0.3)
+        d_pf = "\n".join(pf_screen.display)
+        if "ctrl+f fullscreen" in d_pf and "Permission required" in d_pf:
+            pf2 = True
+            break
+    check(pf_pid, PF_LABELS[3], pf2)
+
+    os.write(pf_master, b"\x1b")
+    pf3 = False
+    for _ in range(10):
+        read_for(pf_master, pf_stream, 0.3)
+        if "Permission required" not in "\n".join(pf_screen.display):
+            pf3 = True
+            break
+    check(pf_pid, PF_LABELS[4], pf3)
+    if not pf3:
+        print("---- PF3 FAIL SCREEN (tail) ----")
+        for line in pf_screen.display[-14:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
+    kill(pf_pid)
+else:
+    for lbl in PF_LABELS:
+        check(pf_pid, lbl, False)
+
 print("RESULT:", "PASS" if all(ok for _, ok in verdicts) else "FAIL")
 sys.exit(0 if all(ok for _, ok in verdicts) else 1)

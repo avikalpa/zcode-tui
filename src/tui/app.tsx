@@ -1129,6 +1129,10 @@ export function App({
   const [themeLock, setThemeLock] = useState<ThemeMode | null>(null);
   const [ask, setAsk] = useState<{ toolName: string; detail: string; riskLevel: string; diff?: string; patch?: string } | null>(null);
   const [askSel, setAskSel] = useState(0);
+  // v2 SessionQuestion's fullscreen arm (routes/session/permission.tsx): the
+  // expanded ask renders as the full-viewport overlay instead of the inline
+  // card; ctrl+f toggles, escape minimizes before it dismisses.
+  const [askExpanded, setAskExpanded] = useState(false);
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
@@ -2456,6 +2460,7 @@ export function App({
           probe("permission-ask", `${toolName}:${detail.slice(0, 40)}`);
           askRef.current = resolve as (v: unknown) => void;
           setAsk({ toolName, detail, riskLevel, diff, patch });
+          setAskExpanded(false);
           setTyping(false);
           setStatus(`permission · ${toolName}`);
         });
@@ -2716,6 +2721,12 @@ export function App({
 
     if (askRef.current) {
       const resolve = askRef.current;
+      // v2 SessionQuestion: ctrl+f is the fullscreen toggle (keybind
+      // permission.prompt.fullscreen, ctrl+f default); with the ask expanded
+      // escape MINIMIZES first — only a collapsed escape dismisses (the
+      // deny+stop branch below, our interrupt law).
+      if (key.ctrl && key.name === "f") { setAskExpanded((v) => !v); return; }
+      if (askExpanded && key.name === "escape") { setAskExpanded(false); return; }
       // Every resolve path hands typing back to the composer — the banner
       // took it, and an unresolved typing gate eats all further input.
       if (key.name === "y") {
@@ -4224,7 +4235,26 @@ footerHints={[
         </box>
       ) : null}
       {ask ? (
-        <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+        <box
+          style={
+            askExpanded
+              ? // v2 expanded arm: full-viewport overlay, the status row
+                // reserved (bottom: 1 upstream) and 2-col insets — Portal +
+                // absolute upstream; explicit width/height per our
+                // ModalBackdrop idiom; ABOVE the toast (2000) — a modal ask outranks a
+                // transient toast — under the dialogs (3000).
+                {
+                  position: "absolute",
+                  top: 0,
+                  left: 2,
+                  width: dims.width - 4,
+                  height: dims.height - 1,
+                  zIndex: 2500,
+                  flexDirection: "row",
+                }
+              : { flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }
+          }
+        >
           <box
             style={{
               flexGrow: 1,
@@ -4238,6 +4268,7 @@ footerHints={[
               borderStyle: "single",
               border: ["left"],
               borderColor: ask.riskLevel === "high" ? C.error : C.warning,
+              ...(askExpanded ? { height: dims.height - 1 } : {}),
             }}
           >
             <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
@@ -4255,7 +4286,7 @@ footerHints={[
             {ask.diff ? (
               // v2 EditBody's diff branch (PatchDiff, unified under our card
               // width) — fires only when a permission payload carries a diff.
-              <box style={{ flexDirection: "column", flexShrink: 0, maxHeight: 10, marginTop: 1 }}>
+              <box style={{ flexDirection: "column", flexShrink: 0, marginTop: 1, ...(askExpanded ? {} : { maxHeight: 10 }) }}>
                 <PatchDiff
                   diff={ask.diff}
                   hunkFg={diffFor(theme, themeMode).diffHunkHeader}
@@ -4278,7 +4309,7 @@ footerHints={[
               </box>
             ) : ask.patch ? (
               // v2 EditBody's raw-patch branch: subdued patch text.
-              <box style={{ flexDirection: "column", flexShrink: 0, maxHeight: 10, marginTop: 1 }}>
+              <box style={{ flexDirection: "column", flexShrink: 0, marginTop: 1, ...(askExpanded ? {} : { maxHeight: 10 }) }}>
                 <text content={ask.patch} fg={C.faint} />
               </box>
             ) : null}
@@ -4303,6 +4334,20 @@ footerHints={[
                 </box>
               );
             })}
+            {/* v2 SessionQuestion footer grammar: the fullscreen hint flips
+                with the expanded arm; the spacer parks it at the card foot
+                when expanded. */}
+            <box style={{ flexGrow: askExpanded ? 1 : 0, flexShrink: 0 }} />
+            <box style={{ flexDirection: "row", flexShrink: 0, paddingTop: 1 }}>
+              <HintBits
+                text={
+                  askExpanded
+                    ? "ctrl+f minimize   ⇆ select   enter confirm"
+                    : "ctrl+f fullscreen   ⇆ select   enter confirm"
+                }
+                C={C}
+              />
+            </box>
           </box>
         </box>
       ) : null}

@@ -233,7 +233,7 @@ export const UPSTREAM_KEYBINDS: UpstreamKeybind[] = [
   { id: "prompt.autocomplete.hide", keys: "escape", description: "Hide autocomplete", coverage: "covered", note: "escape dismisses" },
   { id: "prompt.autocomplete.select", keys: "return", description: "Select autocomplete item", coverage: "covered", note: "enter" },
   { id: "prompt.autocomplete.complete", keys: "tab", description: "Complete autocomplete item", coverage: "covered", note: "tab completes" },
-  { id: "permission.prompt.fullscreen", keys: "ctrl+f", description: "Toggle permission prompt fullscreen", coverage: "none", note: "local expanded-ask toggle; our ask surface has no expanded arm — future small wave" },
+  { id: "permission.prompt.fullscreen", keys: "ctrl+f", description: "Toggle permission prompt fullscreen", coverage: "covered", note: "0.6.36 expanded permission ask — ctrl+f toggles the card between inline and the full-viewport overlay, esc minimizes first (collapsed esc = the deny+stop owner law), footer hint flips fullscreen/minimize (the v2 SessionQuestion fullscreen arm)" },
   { id: "plugins.toggle", keys: "return", description: "Toggle plugin", coverage: "covered", note: "0.6.34 — mapped onto plugins/setEnabled; v2 toggles its TUI arm, ours is the server enabled flag (the only toggle plane the host offers)" },
   { id: "dialog.mcp.toggle", keys: "space", description: "Toggle MCP server", coverage: "blocked-host", note: "zcode protocol has no mcp connect/disconnect verbs (0.6.23 finding)" },
   { id: "dialog.plugins.error", keys: "space", description: "View plugin error", coverage: "blocked-host", note: "no plane: plugins/list carries no error or outdated fields (0.6.34 measured) — error/check/update omitted per the Revert-row precedent" },

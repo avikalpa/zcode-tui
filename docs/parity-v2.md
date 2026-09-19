@@ -28,6 +28,18 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2
+  SessionQuestion fullscreen arm (routes/session/permission.tsx) onto our
+  ask card: ctrl+f toggles the ask between the inline card and the
+  full-viewport overlay (top 0, 2-col insets, status row reserved —
+  bottom: 1 upstream; explicit width/height per our ModalBackdrop idiom,
+  zIndex under the toast), the diff/patch maxHeight caps lift when
+  expanded, a flexGrow spacer parks the footer at the card foot, and the
+  footer hint grammar is verbatim (ctrl+f fullscreen|minimize flipping
+  with the arm, ⇆ select, enter confirm). Escape follows the v2 dismiss
+  law MINIMIZE-FIRST; a collapsed escape keeps our deny+stopTurn interrupt
+  law (owner, 2026-09-17) and the hidden y/a/n accelerators stay.
+  Collapsed card geometry unchanged.
 - ~~**prompt.images.view / dialog-image-preview**~~ SHIPPED 0.6.35 — the
   attachments family, ported off the vendored local-attachment.ts +
   prompt/attachment.ts + dialog-image-preview.tsx with the host wire
@@ -414,9 +426,9 @@ on the clean lane is what separates them.
   toggle/close, composer.terminal.*, dialog-shell-output. New v2 surface.
 - **composer.subagent.* / composer.shell.*** — subagent & shell prompt
   switchers. New v2 surface.
-- **permission.prompt.fullscreen** — ledger truth 0.6.34: a local UI
-  toggle in v2 (expanded permission ask, ctrl+f, bind:false). Our ask
-  surface has no expanded arm; small future wave, not half-done here.
+- ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 (see Shipped) — the
+  expanded ask arm is ours: ctrl+f toggle, full-viewport overlay,
+  minimize-first escape, footer hint grammar.
 - ~~**misc dialogs**~~ TRIAGED 0.6.34, the line dissolved into truth:
   - **plugins.*** SHIPPED 0.6.34 (see Shipped).
   - **experiments** — DEVTOOLS-ONLY upstream (opened from the v2 devtools
