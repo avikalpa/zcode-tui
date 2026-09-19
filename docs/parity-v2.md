@@ -11,7 +11,7 @@ feature to keep. Audit pass 2026-09-17 filed the known deviations below
 (Deviation queue). The non-parities (model allowlist, provider_connect)
 remain the only exceptions.
 
-**Reference:** opencode **v2.0.9** (stable; repo renamed sst → anomalyco, 2026-09) — VENDORED in-repo at
+**Reference:** opencode **v2.0.10** (stable; repo renamed sst → anomalyco, 2026-09) — VENDORED in-repo at
 `tools/opencode-reference/` (pinned by `tools/sync-opencode.sh <tag>`;
 MIT, never compiled into our binary). The sync toolchain makes a parity
 wave a diff job: `parity-report.py --map/--stale/--gaps`,
@@ -114,7 +114,11 @@ ports AROUND the logo, never over it).
   ctrl+shift+t = reopen, ctrl+i = history forward, ctrl+tab / alt+up+down =
   cycle (shift = unread walk). v2.0.7 RE-POINT: alt+up/down now walk tabs —
   the user-message walk keeps alt+end (its prev/next are palette commands
-  upstream). Tabs are in-memory for the TUI lifetime.
+  upstream). Tabs are in-memory for the TUI lifetime. v2.0.10 hue swap
+  PORTED 0.6.43: unread/attention take hue.accent, running takes
+  hue.interactive (upstream swapped the two roles in component/
+  session-tabs.tsx + mini/theme.ts; ours rides the C.accent/C.warning
+  adaptation — see the port header).
 - **Tool-call rows** — the v2 per-tool grammar (0.6.21): ToolPart
   dispatches on the display class (shell/glob/read/grep/webfetch/websearch/
   write/edit/subagent/patch/question/skill/generic) with the reference
@@ -466,7 +470,28 @@ now:
   the pinned tree — resolves v2.0.9, idempotent, the reference tree stays
   `git status`-clean. Tools-only wave — NO ynpm ride.
 
-## Remaining (v2.0.9 → us)
+### 0.6.43 — the v2.0.10 re-pin (maintenance law, SECOND live fire — the strip hue swap)
+
+Live ls-remote probe (2026-09-19) found v2.0.10 past our v2.0.9 pin; bare
+`tools/sync-opencode.sh` run (the 0.6.41 guard path) resolved v2.0.10
+(b8cedc1a) cleanly. The v2.0.9→v2.0.10 delta is ONE semantic change — the
+HUE SWAP — repeated across three files: unread/attention move from
+hue.interactive to hue.accent and running moves from hue.accent to
+hue.interactive (component/session-tabs.tsx ×3 sites, feature-plugins/
+prompt/btw.tsx spinner, mini/theme.ts running/question/permission map).
+Ported onto the ONE of our files that tracks it: src/tui/session/
+session-tabs.tsx (busy spinner → C.warning, unread dot + ! ? attention →
+C.accent; unread-error stays C.error) — through the C.accent=hue.accent /
+C.warning=hue.interactive token adaptation the 0.6.22 port established;
+header re-stamped v2.0.10. No /btw port exists (registry row only);
+storybook fixtures are dev-facing upstream; gen-themes map does not
+consume mini/theme.ts. Generators re-run: 241 binds, coverage identical
+(162/49/22/1/7), keybinds/themes deltas are version stamps only.
+which-key.* re-verified v2.0.10 — still definitions-only. Runtime delta
+is real (strip colours) → full gates; NO ynpm ride (post-release host
+convention: rides are owner-directed; 0.6.43 offered from the lane tip).
+
+## Remaining (v2.0.10 → us)
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
   — category groups, current value per row, ←/→ cycles + enter steps —
@@ -478,8 +503,8 @@ now:
   SelectDialog (every dialog): pageup/pagedown move ±10 (v2's step), home/
   end jump; prev/next/submit were already wired.
 - which-key.* (11 binds): STUB — definitions only, no implementation in
-  the vendored tree (grep-verified at v2.0.7; re-verified at v2.0.9,
-  2026-09-19). Nothing to copy.
+  the vendored tree (grep-verified at v2.0.7; re-verified at v2.0.9 and
+  v2.0.10, 2026-09-19). Nothing to copy.
 
 - ~~input.select.* (13 partials)~~ SHIPPED 0.6.25 — anchor-based selection
   on the hand-rolled composer: shift+left/right chars, shift+up/down VISUAL

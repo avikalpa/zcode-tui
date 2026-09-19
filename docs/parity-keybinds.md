@@ -1,6 +1,6 @@
 # Parity keybind coverage (GENERATED — do not edit by hand)
 
-Upstream reference: **v2.0.9** — 241 keybind definitions
+Upstream reference: **v2.0.10** — 241 keybind definitions
 (packages/tui/src/config/keybind.ts). Classes from
 tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 

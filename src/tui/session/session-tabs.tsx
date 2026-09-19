@@ -1,8 +1,13 @@
-// Ported from opencode v2.0.7 packages/tui/src/component/session-tabs.tsx
+// Ported from opencode v2.0.10 packages/tui/src/component/session-tabs.tsx
 // (HorizontalSessionTabs + TabIndicator) onto our React binding — the tab
 // strip above the transcript: adaptive widths, the number gutter (number /
 // running spinner / "!" permission / "?" question / • unread), elevated
 // active tab, ‹N / N› overflow markers, titles truncated to their slot.
+//
+// Upstream's v2.0.10 hue swap (unread/attention take hue.accent, running
+// takes hue.interactive) is ported through our two-token adaptation: C.accent
+// stands for hue.accent, C.warning stands for hue.interactive — the same
+// mapping the 0.6.22 port made when the roles were the other way around.
 //
 // Not ported (the binding has no plane for them, ledger deviation queue):
 // the animation framework (springs/marquee/shimmer/glow), mouse drag
@@ -71,10 +76,10 @@ export function SessionTabsStrip(props: {
     // TabIndicator label order (attention beats busy beats unread).
     let gutter = sessionTabNumberLabel(index);
     let gutterFg = selected ? C.accent : tint(C.subtle, C.bg, 0.55);
-    if (status.attention === "permission") { gutter = "!"; gutterFg = C.warning; }
-    else if (status.attention === "question") { gutter = "?"; gutterFg = C.warning; }
-    else if (status.busy) { gutter = props.spinnerChar || "◌"; gutterFg = C.accent; }
-    else if (status.unread) { gutter = TAB_UNREAD_MARKERS["small-dot"]; gutterFg = status.unread === "error" ? C.error : C.warning; }
+    if (status.attention === "permission") { gutter = "!"; gutterFg = C.accent; }
+    else if (status.attention === "question") { gutter = "?"; gutterFg = C.accent; }
+    else if (status.busy) { gutter = props.spinnerChar || "◌"; gutterFg = C.warning; }
+    else if (status.unread) { gutter = TAB_UNREAD_MARKERS["small-dot"]; gutterFg = status.unread === "error" ? C.error : C.accent; }
     const title = props.titles(tab.sessionID) || tab.title || "Untitled session";
     const titleWidth = Math.max(1, width - 1 - numberWidth);
     const shown = title.length > titleWidth ? title.slice(0, Math.max(1, titleWidth - 1)) + "…" : title;
