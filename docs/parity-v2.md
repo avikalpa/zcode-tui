@@ -553,7 +553,69 @@ fallback line — every branch paints) added to the ST family;
 planQuota.test.ts unit-covers the parsers and formatters against the
 live fixtures.
 
-## Remaining (v2.0.10 → us)
+### 0.6.47 — the v2.0.11 re-pin (maintenance law, third live fire)
+
+Upstream released v2.0.11 past the v2.0.10 pin; the bare sync-opencode.sh
+default path re-vendored cleanly (the 0.6.41 guard active). The delta is
+mostly desktop/core churn; the TUI surface is four commits:
+
+- PORTED — the autocomplete row rework (#50008 muted label text + #48551
+  label mention options) onto our SlashPopup: the fixed padEnd(12) name
+  column is gone; the display truncates MIDDLE to the popup budget
+  (truncateMiddle, the v2 Locale helper shape) and never overflows the
+  row; the description collapses whitespace, takes one leading space and
+  flexes (flexShrink + wrapMode none). N/A on our surface: the
+  right-aligned kind labels (skill/agent/reference) — our popup lists
+  slash commands and @cwd files only, and v2 file options carry no kind
+  either; the MCP-resources removal — we never listed MCP resources in
+  the popup.
+- N/A — #50037 question-form border token: no FormPrompt surface on our
+  dialog-era TUI (and zero hue.interactive token uses in our tree).
+- N/A — #49962 session-scoped plugin toasts (retitle + Open action for a
+  non-focused session): our toast host is the single-slot
+  message+variant overlay with no router and no session navigation; the
+  capability folds into the sessions-view footer-menu port line below.
+
+TH NEEDLE REPAIR (the 0.6.46 handoff): TH4 (theme first-cycle) failed
+IDENTICALLY on a clean binary — root cause: the needle window read the
+Color mode row HINT text ("dark mode / light mode / system theme"), so
+the light-absence half failed on every binary while TH3/TH5/TH7 were
+false-green on the same hint. All TH value asserts now read the VALUE
+token (the meta between the double-space separators); TH4 also proves
+the pin on disk (state.json theme.mode == dark — the TH6 consumption
+shape) and the cycle polls instead of fixed-settling.
+
+GATES, HONEST LEDGER: typecheck clean; bun 123 pass + the auth-sync red
+reproduced on the stashed clean lane this sitting (documented
+pre-existing); gen-keybinds regen stamp-only drift (v2.0.11 headers,
+241 binds, coverage identical 162/49/22/1/7); gen-themes stamp-only;
+lint 0 lies. Full runs on the 0.6.47 binary: 123/8, 121/11, 123/9 —
+every fail F0 (documented) or in the documented load-escalated
+X2/CX/S/PG/TG/TB rotating class, and every red family is green in
+another run on the SAME binary (CX green run 3; PG/TG/scroll green
+run 4; TB/stash green run 2); dev load 5.4-8.2 throughout (the
+documented escalation condition). TH 8/8 green in ALL runs — the
+needle repair is proven.
+
+THE ZOMBIE-STORE FINDING (0.6.47, tools-only hardening shipped same
+wave): the proof's own PF throwaway sessions are UNREMOVABLE (the
+session/close host-verb gap — 14+ pf636 rows, session/close answers
+"Session is not active"), and an interrupted turn's PENDING permission
+ask survives in the store: resuming that session REPAINTS the ask card
+and every later keystroke feeds the card, not the composer. Measured:
+a pf636 card hijacked the C-spine into X2/CX fails on a HEALTHY binary
+(control run: the clean 0.6.46 binary failed X2/CX5 on the same store
+minutes later; direct probes showed the port rendering correctly).
+This is the R34 burial debt biting the proof itself. Hardening shipped:
+(1) a de-zombifier at C-1 — dismiss OUR OWN leftover cards only
+(payload must carry the proof scope; a foreign ask is never touched,
+named instead) using the PF3 esc grammar; (2) a PF teardown witness —
+poll until no card paints for two consecutive windows before the kill,
+so new runs stop minting zombies. New harness law: a fail cluster in
+ASK-CARD-adjacent checks is store poisoning until the dumps prove
+otherwise — never a regression signal on its own.
+
+## Remaining (v2.0.11 → us)
 
 - ~~**plan-quota surface** (owner directive 2026-09-20: show the Z.AI
   Coding Plan quota, usage and weekly quota left)~~ SHIPPED 0.6.46 —

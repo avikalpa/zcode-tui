@@ -522,6 +522,24 @@ else:
 # ==== FAM:CSPINE requires B, D ==== (C/W/G/X/TL/I/Q/CX — the nested spine)
 if b0 and alive(pid):
     os.write(master, b"\r"); read_for(master, stream, 5.5)   # let open() settle fully
+    # Residual-ask de-zombifier (0.6.47): the store holds UNREMOVABLE proof
+    # throwaways (the session/close host-verb gap) whose interrupted turns
+    # left PENDING permission asks — resuming one repaints the ask card and
+    # every later keystroke feeds the CARD, not the composer (measured
+    # 2026-09-21: a pf636 card hijacked the spine into X2/CX/S fails on a
+    # healthy binary). Dismiss OUR OWN leftover cards — the payload must
+    # carry the proof scope, a foreign ask is never touched (named, and the
+    # run proceeds honestly) — using the PF3 grammar: esc on a collapsed
+    # card dismisses (deny + stop).
+    for _ in range(4):
+        d_ask = "\n".join(screen.display)
+        if "Permission required" not in d_ask:
+            break
+        if "pf636" not in d_ask and "zct-proof-cwd" not in d_ask:
+            print("---- C-1 FOREIGN ASK CARD (not ours — left untouched) ----")
+            break
+        os.write(master, b"\x1b"); read_for(master, stream, 1.2)
+    read_for(master, stream, 0.5)
     disp = "\n".join(screen.display)
     check(pid, "C-1 open() completed (messages witness)", "messages" in disp or "open failed" not in disp)
     os.write(master, b"ZCODE-PROOF-AFTER-OPEN")
@@ -1300,6 +1318,16 @@ def color_mode_seg(scr):
     d = "\n".join(scr.display)
     return d.split("Color mode")[1][:60] if "Color mode" in d else ""
 
+def color_mode_value(scr):
+    # The value (meta) paints between double spaces right after the label;
+    # the hint text follows. Read the token, never the window.
+    seg = color_mode_seg(scr)
+    for tok in seg.split("  "):
+        tok = tok.strip()
+        if tok:
+            return tok
+    return ""
+
 th_pid, th_m, th_scr, th_st = spawn_th()
 th_open = poll_paint(th_m, th_st, th_scr, ["Ask anything"])
 check(th_pid, "TH0 isolated-home boot renders", th_open)
@@ -1316,14 +1344,37 @@ if th_open:
     os.write(th_m, b"\r")
     set_open = poll_paint(th_m, th_st, th_scr, ["Settings", "Color mode"])
     check(th_pid, "TH2 settings dialog shows the Color mode row", set_open)
-    check(th_pid, "TH3 fresh home: Color mode reads system (unlocked)", set_open and "system" in color_mode_seg(th_scr))
+    check(th_pid, "TH3 fresh home: Color mode reads system (unlocked)", set_open and color_mode_value(th_scr) == "system")
 
-    # walk: row 0 Theme -> row 1 Color mode, then right: system -> dark -> light
+    # walk: row 0 Theme -> row 1 Color mode, then right: system -> dark ->
+    # light. The needle reads the VALUE token, never the hint text — the hint
+    # ("dark mode - light mode - system theme") poisoned the old 60-char
+    # window: TH4 failed on every binary while TH3/TH5/TH7 were false-green
+    # on the hint alone. TH4 also proves the pin on disk (the TH6
+    # consumption shape) and the cycle polls, never fixed-settles.
     os.write(th_m, b"\x1b[B"); read_for(th_m, th_st, 0.8)
-    os.write(th_m, b"\x1b[C"); read_for(th_m, th_st, 1.0)
-    check(th_pid, "TH4 right cycles system -> dark", set_open and "dark" in color_mode_seg(th_scr) and "light" not in color_mode_seg(th_scr))
-    os.write(th_m, b"\x1b[C"); read_for(th_m, th_st, 1.0)
-    check(th_pid, "TH5 right cycles dark -> light", set_open and "light" in color_mode_seg(th_scr))
+    os.write(th_m, b"\x1b[C")
+    th4_paint = False
+    for _ in range(10):
+        read_for(th_m, th_st, 0.4)
+        if color_mode_value(th_scr) == "dark":
+            th4_paint = True
+            break
+    th4_pin = False
+    try:
+        import json as _json4
+        th4_pin = _json4.loads(open(TH_HOME + "/.config/zcode-tui/state.json").read()).get("theme", {}).get("mode") == "dark"
+    except Exception:
+        pass
+    check(th_pid, "TH4 right cycles system -> dark (paint + pin)", set_open and th4_paint and th4_pin)
+    os.write(th_m, b"\x1b[C")
+    th5_paint = False
+    for _ in range(10):
+        read_for(th_m, th_st, 0.4)
+        if color_mode_value(th_scr) == "light":
+            th5_paint = True
+            break
+    check(th_pid, "TH5 right cycles dark -> light", set_open and th5_paint)
     os.write(th_m, b"\x1b"); read_for(th_m, th_st, 0.8)
 
     # read the pin while the writer is still alive (check() vetoes a dead pid)
@@ -1344,12 +1395,12 @@ if th_open:
     poll_paint(th_m2, th_st2, th_scr2, ["settings"])
     os.write(th_m2, b"\r")
     set2 = poll_paint(th_m2, th_st2, th_scr2, ["Settings", "Color mode"])
-    if not (set2 and "light" in color_mode_seg(th_scr2)):
+    if not (set2 and color_mode_value(th_scr2) == "light"):
         print("---- TH7 FAIL SCREEN ----")
         for i, line in enumerate(th_scr2.display):
             if line.strip():
                 print(f"{i:2}|{line.rstrip()}")
-    check(th_pid2, "TH7 restart restores the lock (Color mode reads light)", set2 and "light" in color_mode_seg(th_scr2))
+    check(th_pid2, "TH7 restart restores the lock (Color mode reads light)", set2 and color_mode_value(th_scr2) == "light")
     if alive(th_pid2):
         os.write(th_m2, b"\x1b"); read_for(th_m2, th_st2, 0.5)
     kill(th_pid2)
@@ -1611,6 +1662,24 @@ if alive(pf_pid) and pf_boot:
         for line in pf_screen.display[-14:]:
             if line.strip():
                 print(f"|{line.rstrip()}")
+    # Turn-really-stopped witness before the kill (0.6.47): a dismissed card
+    # does not prove the TURN ended — the agent retries with a new tool form
+    # and its next ask OUTLIVES the TUI (the pf636 zombie class: the store
+    # keeps the pending ask, and every later resume repaints it). Poll; deny
+    # retries of OUR OWN proof-scoped ask (the same grammar); kill only once
+    # no card has painted for two consecutive windows.
+    quiet = 0
+    for _ in range(16):
+        read_for(pf_master, pf_stream, 1.0)
+        d_pf = "\n".join(pf_screen.display)
+        if "Permission required" in d_pf:
+            quiet = 0
+            if "pf636" in d_pf or "zct-proof-cwd" in d_pf:
+                os.write(pf_master, b"\x1b")
+        else:
+            quiet += 1
+            if quiet >= 2:
+                break
     kill(pf_pid)
 else:
     for lbl in PF_LABELS:

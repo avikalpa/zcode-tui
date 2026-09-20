@@ -1,4 +1,4 @@
-Vendored opencode TUI reference — v2.0.10 (b8cedc1a7a5e2916bbb65dc1d4b620729c261638)
+Vendored opencode TUI reference — v2.0.11 (9eb6902aaf3c35ce985b67c605a775992249066b)
 
 Source: github.com/sst/opencode (anomalyco mirror), packages/tui/src, pinned
 by tools/sync-opencode.sh. MIT License, Copyright (c) 2025 opencode — see

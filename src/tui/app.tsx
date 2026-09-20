@@ -860,6 +860,17 @@ function sortedThemes(): ThemeName[] {
 // typing "/" lists every command filtered as you type, directly above the
 // composer, with enter running the highlighted command. Borderless block,
 // selected row carries the primary highlight with background-coloured text.
+// v2 Locale.truncateMiddle: head...tail within the budget (the autocomplete
+// row never overflows — v2.0.11 #50008).
+function truncateMiddle(value: string, maxWidth: number): string {
+  if (value.length <= maxWidth) return value;
+  if (maxWidth <= 1) return value.slice(0, Math.max(0, maxWidth));
+  const keep = maxWidth - 1;
+  const head = Math.ceil(keep / 2);
+  const tail = keep - head;
+  return value.slice(0, head) + "\u2026" + (tail > 0 ? value.slice(value.length - tail) : "");
+}
+
 function SlashPopup({
   commands,
   files,
@@ -903,11 +914,17 @@ function SlashPopup({
     >
       {visible.map((item) => {
         const selected = items.indexOf(item) === sel;
+        // v2.0.11 autocomplete row (#50008, #48551): the display truncates
+        // middle to the popup budget so a long @path never overflows the
+        // row, and the description collapses whitespace with one leading
+        // space and flexes; the fixed padEnd column is gone.
+        const popupWidth = typeof width === "number" ? width : 100;
+        const contentWidth = Math.max(8, popupWidth - 6);
         return (
           <box key={item.key} style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: selected ? C.accent : undefined }}>
-            <text content={`${item.name.padEnd(12)}`} fg={selected ? C.accentText : C.fg} />
+            <text content={truncateMiddle(item.name, contentWidth)} fg={selected ? C.accentText : C.fg} wrapMode="none" flexShrink={0} />
             {item.description ? (
-              <text content={item.description} fg={selected ? C.accentText : C.subtle} />
+              <text content={` ${item.description.replace(/\s+/g, " ").trim()}`} fg={selected ? C.accentText : C.subtle} wrapMode="none" flexShrink={1} />
             ) : null}
           </box>
         );
