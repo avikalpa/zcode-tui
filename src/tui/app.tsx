@@ -19,6 +19,16 @@ import { randomUUID } from "node:crypto";
 import { probe } from "./probes";
 import { Announcer, type AnnouncePhase } from "./announce";
 import {
+  fetchPlanQuota,
+  formatCompact,
+  formatReset,
+  parseUsageStats,
+  quotaBar,
+  readStoredApiKey,
+  type PlanQuotaSnapshot,
+  type UsageStatsSummary,
+} from "./planQuota";
+import {
   formatDateHeading,
   formatContextLabel,
   formatTimeShort,
@@ -1254,6 +1264,9 @@ export function App({
   const [stashArm, setStashArm] = useState<number>();
   const [skillsState, setSkillsState] = useState<SkillsDialogState>({ kind: "idle" });
   const [mcpState, setMcpState] = useState<McpDialogState>({ kind: "idle" });
+  // Plan-quota Usage section state (0.6.46) — App-level for the same
+  // reconciler reason as the fetch states above; StatusDialog stays props-only.
+  const [usageState, setUsageState] = useState<UsageDialogState>({ kind: "idle" });
   // opencode v2 plugins dialog (0.6.34, feature-plugins/system/plugins.tsx):
   // rows off plugins/list, enter toggles enabled via plugins/setEnabled (the
   // mapping note lives in docs/parity-v2.md — v2 toggles its TUI arm, ours
@@ -1327,6 +1340,25 @@ export function App({
         .catch(() => {
           if (live) setMcpState({ kind: "ready", servers: [] });
         });
+      if (dialog === "status") {
+        setUsageState({ kind: "loading" });
+        const statsPromise = client
+          .request("usage/stats", { range: "7d" })
+          .then((res) => parseUsageStats(res))
+          .catch(() => null);
+        const key = readStoredApiKey();
+        const quotaPromise: Promise<PlanQuotaSnapshot | { error: string }> = key
+          ? fetchPlanQuota(key).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
+          : Promise.resolve({ error: "no plan key synced" });
+        void Promise.all([statsPromise, quotaPromise]).then(([stats, quota]) => {
+          if (!live) return;
+          if ("error" in quota) {
+            setUsageState({ kind: "ready", quota: null, quotaError: quota.error, stats });
+          } else {
+            setUsageState({ kind: "ready", quota, quotaError: null, stats });
+          }
+        });
+      }
       return () => {
         live = false;
       };
@@ -3553,7 +3585,54 @@ footerHints={[
 // error text on failed/needs_auth rows — the zcode protocol carries no
 // error text (host gap recorded 0.6.23), so the suffix renders only when a
 // payload ever provides one.
-function StatusDialog({ C, onClose, mcpState, width, height }: { C: ThemeTokens; onClose: () => void; mcpState: McpDialogState; width: number; height: number }) {
+type UsageDialogState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ready"; quota: PlanQuotaSnapshot | null; quotaError: string | null; stats: UsageStatsSummary | null };
+
+// The plan-quota Usage section (owner directive 2026-09-20; fork (b) —
+// the TUI reads the desktop monitor endpoints with the synced coding-plan
+// key, live-probed; see docs/parity-v2.md 0.6.46). Module top-level per
+// the remount hazard law; state lives in App, this stays props-only.
+function UsageSection({ C, state }: { C: ThemeTokens; state: UsageDialogState }) {
+  if (state.kind !== "ready") {
+    return (
+      <box style={{ flexDirection: "column", flexShrink: 0 }}>
+        <text content="PLAN QUOTA" fg={C.faint} />
+        <text content={state.kind === "loading" ? "Reading usage ..." : "Usage unavailable"} fg={C.subtle} />
+      </box>
+    );
+  }
+  const now = Date.now();
+  const pctColor = (pct: number) => (pct >= 85 ? C.error : pct >= 60 ? C.warning : C.success);
+  const limits = state.quota?.limits ?? [];
+  return (
+    <box style={{ flexDirection: "column", flexShrink: 0 }}>
+      <text content="PLAN QUOTA" fg={C.faint} />
+      {state.quota?.planName ? (
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+          <text content={state.quota.planName} fg={C.fg} attributes={TextAttributes.BOLD} />
+          <text content={(state.quota.level ? " · " + state.quota.level : "") + (state.quota.planRenews ? " · renews " + state.quota.planRenews : "")} fg={C.subtle} />
+        </box>
+      ) : null}
+      {limits.map((limit, i) => (
+        <box key={limit.label + String(i)} style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+          <text content={(limit.label + " ").padEnd(9)} fg={C.fg} />
+          <text content={quotaBar(limit.percentage)} fg={pctColor(limit.percentage)} />
+          <text content={" " + String(limit.percentage).padStart(3) + "%  " + formatCompact(limit.used) + "/" + formatCompact(limit.total) + (limit.nextResetMs !== null ? " · resets " + formatReset(limit.nextResetMs, now) : "")} fg={C.subtle} />
+        </box>
+      ))}
+      {state.quota === null ? (
+        <text content={"Plan quota unavailable: " + (state.quotaError ?? "unknown")} fg={C.faint} />
+      ) : null}
+      {state.stats ? (
+        <text content={"Usage 7d  " + formatCompact(state.stats.totalTokens) + " tok · " + formatCompact(state.stats.totalSessions) + " sessions · " + formatCompact(state.stats.totalTurns) + " turns · " + String(state.stats.activeDays) + " active day" + (state.stats.activeDays === 1 ? "" : "s")} fg={C.subtle} />
+      ) : null}
+    </box>
+  );
+}
+
+function StatusDialog({ C, onClose, mcpState, usageState, width, height }: { C: ThemeTokens; onClose: () => void; mcpState: McpDialogState; usageState: UsageDialogState; width: number; height: number }) {
   useKeyboard((key) => {
     if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
   });
@@ -3588,6 +3667,8 @@ function StatusDialog({ C, onClose, mcpState, width, height }: { C: ThemeTokens;
           <text content="Status" fg={C.fg} attributes={TextAttributes.BOLD} />
           <text content="esc" fg={C.faint} />
         </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <UsageSection C={C} state={usageState} />
         <box style={{ height: 1, flexShrink: 0 }} />
         {servers === null ? (
           <text content="Connecting …" fg={C.subtle} />
@@ -4066,7 +4147,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     );
   }
   if (dialog === "status") {
-    return <StatusDialog C={C} mcpState={mcpState} onClose={closeDialog} width={dims.width} height={dims.height} />;
+    return <StatusDialog C={C} mcpState={mcpState} usageState={usageState} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
   if (dialog === "export") {
     return <ExportDialog C={C} onClose={closeDialog} onConfirm={(opts) => void runExport(opts)} width={dims.width} height={dims.height} />;

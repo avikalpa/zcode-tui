@@ -514,25 +514,60 @@ which-key.* re-verified v2.0.10 — still definitions-only. Runtime delta
 is real (strip colours) → full gates; NO ynpm ride (post-release host
 convention: rides are owner-directed; 0.6.43 offered from the lane tip).
 
+### 0.6.46 — the plan-quota surface (fork (b) resolved live — TUI-owned)
+
+The owner directive (2026-09-20: show the Z.AI Coding Plan quota, usage
+and weekly quota left) had a design fork: (a) a host verb vs (b) the TUI
+calling the Z.AI endpoints with the synced coding-plan key. RESOLVED by
+probe: the synced key authenticates the desktop's own monitor plane —
+api.z.ai/api/monitor/usage/quota/limit (envelope {code,msg,data};
+data.limits[] rows {type, unit, number, usage=denominator,
+currentValue=consumed, remaining, percentage, nextResetTime};
+data.level; live: 5-hour 1063/12000 8% + weekly 47172/60000 78%, level
+pro) and api.z.ai/api/biz/subscription/list (VALID rows carry
+productName/valid/nextRenewTime/autoRenew — GLM Coding Pro, renews
+2026-11-27). The desktop's quota plumbing (buildZaiQuotaUrl /
+buildBigModelQuotaUrl, zcodejwttoken/oauth credentials, 15s timeouts)
+was decoded from app.asar as the MAP, not the dependency: the TUI goes
+straight to the endpoint with its own key. /api/v1/coding-plan/reset
+404s on GET — not needed.
+
+Shipped: src/tui/planQuota.ts (fetch/parse/format, fail-soft, key never
+renders or logs); the Status dialog (leader s) gains the PLAN QUOTA
+section — plan row, per-window bar rows (bar / percent / used / total /
+resets-in), and the usage/stats 7d summary line; the fetch fires on
+dialog open only (mirrors the mcp/list pattern) and every failure
+branch paints an honest fallback line (no key synced, HTTP error,
+network failure). StatusDialog stays STATELESS and props-only — state
+lives in App beside mcpState (remount hazard law).
+
+STALE-NOTE REPAIR (stale-doc law): the seat door's React-hazard note
+claimed StatusDialog/HelpDialog/DiffHelpDialog are "still nested-in-App"
+— FALSE since the thin-App split (App ends at its compose; all three
+dialogs are module top-level, verified this sitting). The LAW stands
+(state in App, dialogs props-only); the stale nesting claim is
+corrected here and in the seat door.
+
+Proof: ST2 (PLAN QUOTA paints) + ST3 (resolves to data or an honest
+fallback line — every branch paints) added to the ST family;
+planQuota.test.ts unit-covers the parsers and formatters against the
+live fixtures.
+
 ## Remaining (v2.0.10 → us)
 
-- **plan-quota surface (owner directive 2026-09-20: show the Z.AI Coding
-  Plan / Start Plan quota, usage and weekly quota left)** — PROBED
-  2026-09-20: `usage/stats {range:"7d"|"30d"|"all"}` carries the USAGE half
-  (totalTokens, sessions, turns, toolCallCount, activeDays, streaks, peak
-  day, favourite model, a day-level heatmap — live-measured on dev: 31.9M
-  tokens / 181 sessions / 7d). The LIMIT half (plan quota denominators,
-  weekly reset) is NOT in the client protocol: session/usage is per-session
-  counters, workspace/readState is the catalog only, and the host bundle
-  (/opt/ZCode/resources/glm/zcode.cjs) maps provider quota ERROR codes but
-  serves no quota-remaining surface — the desktop renders it from its own
-  account service. DESIGN FORK: (a) host verb (usage/quota or a
-  coding-plan/overview pass-through) — cleaner, host campaign owns it;
-  (b) the TUI calls the Z.AI coding-plan usage endpoint directly with the
-  synced coding-plan-api-key (the key already reaches the TUI via
-  syncAuthAtStartup) — TUI-owned, no host dependency. Surface: a Usage
-  section in the Status dialog (leader s) fed by usage/stats 7d, with the
-  limit/remaining row gated on which fork lands. NEXT WAVE.
+- ~~**plan-quota surface** (owner directive 2026-09-20: show the Z.AI
+  Coding Plan quota, usage and weekly quota left)~~ SHIPPED 0.6.46 —
+  the design fork RESOLVED (b): the synced coding-plan api key
+  authenticates the desktop's own monitor endpoints DIRECTLY (live probe
+  2026-09-20: Bearer key -> api.z.ai/api/monitor/usage/quota/limit 200
+  with the two CREDIT_LIMIT windows {5-hour, weekly} + level, and
+  api.z.ai/api/biz/subscription/list 200 with GLM Coding Pro
+  VALID/renew) — TUI-owned, no host verb. Usage section in the Status
+  dialog (leader s): plan row (name / level / renews), per-window bars
+  (used/total, percent, resets-in), and the usage/stats 7d summary
+  line; the USAGE half rides the protocol verb, the LIMIT half the
+  monitor endpoints, both fail-soft (no key or network -> honest
+  unavailable lines). See the 0.6.46 wave section below.
 - **agent permission asks die in ~10s (CRITICAL, host-side — the relay's
   maiden-run TLDR, owner-confirmed 2026-09-20)** — in a yggterm zcode-tui
   row, every agent permission ask errors "Permission request failed" after

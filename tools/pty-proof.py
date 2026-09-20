@@ -402,6 +402,28 @@ if not st0:
         if line.strip():
             print(f"{i:2}|{line.rstrip()}")
 check(pid, "ST0 leader s opens the status dialog", st0)
+
+# ST2/ST3: the plan-quota Usage section (0.6.46, fork (b) — the TUI
+# reads the desktop monitor endpoints with the synced coding-plan key).
+# The PLAN QUOTA header paints deterministically; the data lines depend
+# on network+key, and EVERY branch paints an honest fallback, so the
+# resolve check accepts either. st3 polls past the 15s fetch timeout so
+# the fail path is reached, not assumed.
+st2 = False
+for _ in range(16):
+    read_for(master, stream, 0.6)
+    if "PLAN QUOTA" in "\n".join(screen.display):
+        st2 = True
+        break
+check(pid, "ST2 status dialog paints the PLAN QUOTA section", st2)
+st3 = False
+for _ in range(30):
+    read_for(master, stream, 0.6)
+    d = "\n".join(screen.display)
+    if re.search(r"resets|unavailable|no plan key|Usage 7d", d):
+        st3 = True
+        break
+check(pid, "ST3 usage section resolves to data or an honest fallback", st3)
 os.write(master, b"\x1b")
 st1 = False
 for _ in range(6):                                         # poll: the close repaint
