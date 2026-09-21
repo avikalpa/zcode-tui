@@ -615,6 +615,90 @@ so new runs stop minting zombies. New harness law: a fail cluster in
 ASK-CARD-adjacent checks is store poisoning until the dumps prove
 otherwise — never a regression signal on its own.
 
+### 0.6.48 — the session-picker grammar (v2 select-controller + picker behaviors)
+
+The sitting itself has a story worth keeping: the wave was started by a seat
+(zcode sess_431a246e) that died mid-gate — sources frozen 02:23 IST, its last
+proof run finishing 05:59, no OUTCOME. The next seat (sess_094dc2e5) found
+the wave INTACT and coherent, posted a TAKEOVER claim (infra/meta
+ACK-0073d0760c), and drove it home. The swarm lesson: a wave is in the
+worktree, not in the transcript — a dead seat with a clean diff is a
+handoff, not a loss.
+
+PORTED — src/tui/select-controller.ts, the verbatim reference
+ui/select-controller.ts (reconcileSelection, moveSelection with the
+dialog.select.prev/next policy wrap, revealSelectionOffset, moveSelectionOffset
+margin scroll, reconcileSelectionWindow) + unit checks. SelectDialog now rides
+it: moves wrap at the ends; the row window scrolls with the reference reveal
+margin (the center-slice heuristic is gone); display rows include the group
+headers and their spacers (a window counts real rows, like the reference
+scrollbox); the empty and no-match states split (v2 emptyView vs noMatchView —
+the empty list speaks the reference "No items available",
+dialog-select.tsx:690); an onMove hook fires on user-driven moves only
+(reference moveTo path). SelectDialog gains emptyLabel/noMatchLabel.
+
+SESSIONS PICKER BEHAVIORS — pinned sessions lead in their own Pinned
+category, the rest group under date headings; the gutter digit is now the
+session OPEN-TAB slot (leader N opens tab N — v2.0.7 session.tab.select), not
+a positional index (the positional gutter was a deadlock invention — the
+digit showed a key that did nothing for that row); the quick-switch footer
+hint renders only while tabs exist (v2 quickSwitchFooterHints); moving the
+selection clears the armed delete (onMove); the empty state reads "No
+sessions available". This is the PICKER-GRAMMAR slice of the sessions-view
+line; the footer-menu PRIMITIVE port (mini/footer.menu.tsx categorized
+surface + tab strip) remains the top open line below.
+
+DREAM SWEEP ACK-9e5105d7b0 (the 0.6.47 handoff, tools-only): _palette_run
+now polls the open paint (the titled Commands dialog), the pick row VISIBLE
+before enter (typed-command law), and the close — fixed settles missed picks
+under dev load and collapsed S1-S3 while S4 passed vacuously. S0-S2 re-needled
+as polls; S4s needle is POSITIVE and dialog-scoped (the titled Stash dialog
+plus its own empty line) — "No matching items" alone is the shared empty text
+of palette/SlashPopup/SelectDialog and passed vacuously when the pick missed
+and no dialog was open at all. B2/B4 re-needled for the conditional hint
+grammar (no tabs, no switch hint, no slot gutters); TB6 added (with a tab
+open the dialog wears the tab-slot gutter and the switch hint). poll_paint
+lifted above its first user (was duplicated mid-file).
+
+CX-PRE NEEDLE REPAIR (found on the resumed gates): the /copy and /export
+popup checks asserted typed-text-plus-no-placeholder — vacuous, because the
+"Ask anything" placeholder disappears on ANY typed text regardless of popup;
+every late-run popup miss passed CX-pre and surfaced only as an unexplained
+CX5 red. The hardened needle FIRST guessed the palette label ("Copy session
+transcript") and stayed red — until the fail-screen microscope (the PF3
+pattern: print the screen tail on fail) showed the popup OPEN AND CORRECT,
+rendering the design.ts SLASH-table summary row ("/copy copy the session
+transcript to the clipboard"): the popup renders the summary, never the
+palette label. Final needles read the summary rows (copy/export the session
+transcript), /export with 14 rounds — the fat-session paint needs the margin
+(41.7K of context by CX time). The /export fail screen also caught the
+pf636 ask-card debt painting at the composer — the R37 zombie-store debt
+biting the proof, unchanged, and now photographed.
+
+I-SERIES TURN WITNESS (the PF-teardown law applied to the spine): after I0,
+the proof now polls the busy footer gone (esc stop renders only while
+running) and denies retries of our own proof-scoped ask, the PF way — the
+interrupt PAINT can outrun the wind-down, and a still-busy spine gates the
+slash popup and leader routes so CX fails in a bundle (observed: CX red,
+SKM green minutes later). The witness NOTEs whatever held the spine.
+
+GATES, HONEST LEDGER: typecheck clean; bun 138 pass + the auth-sync red
+stash-verified pre-existing on the clean lane; generators stamp-only
+(coverage unchanged 162/49/22/1/7, lint 0 lies). The BINARY is one build
+of the final sources throughout; the HARNESS evolved during the sitting
+(the CX needle repair below) and only post-correction full runs carry
+weight: run 9 = 108 pass (S/TB/stash/K/M/PG/V/TG and the AT families
+load-flaked together — every one green in run 10), run 10 = 130 pass /
+3 fail, the best full run of the campaign week: CX-pre /export + CX5 red
+on the pf636 zombie-debt card photographed at the composer (green in run
+9), F0 documented-persistent. CX-pre /copy AND /export green in run 9,
+/copy green again in run 10. CSPINE isolation green in 4 of 6 executions
+today — the two red isolations are what caught the vacuous needle and the
+wrong-shaped replacement. Every red family is green in >=1 full run on
+this binary; the fails live in the documented rotating load class (dev
+load 5.5-8.7, the escalation condition), F0, and the pf636 debt.
+
+
 ## Remaining (v2.0.11 → us)
 
 - ~~**plan-quota surface** (owner directive 2026-09-20: show the Z.AI
@@ -645,17 +729,19 @@ otherwise — never a regression signal on its own.
   launch contract. Filed with the host campaign this sitting.
 - **sessions view on the v2.0.8 footer-menu grammar** (owner, 2026-09-19
   relay dogfood: "the sessions view has so many UX differences from
-  opencode2") — our sessions surface is still the OLD routes-era overlay
-  dialog (flat DialogSelect: search, pin/delete/switch hints, date groups,
-  quick-slot gutters). The v2.0.8 reference replaced that architecture: a
-  shared footer-menu primitive (mini/footer.menu.tsx — categorized header /
-  item / spacer rows; items carry icon, current-marker, description,
-  category and a footer tone of selection|running|error|success; 8-row
-  viewport; compact-width mode; select-controller with reveal offsets) that
-  sessions surface through as a category, plus the tab strip for subagents.
-  WAVE: port the menu primitive and rebuild the sessions surface on it (and
-  audit our dialog's carry-over features against what the menu grammar
-  keeps). This is the top open parity line.
+  opencode2") — PICKER SLICE SHIPPED 0.6.48: the sessions picker rides the
+  reference select-controller (wrap moves, reveal-margin windows,
+  header-rows-count windows, emptyView/noMatchView split, onMove) and the
+  v2 picker behaviors (Pinned category leads, gutter digit = the open-tab
+  slot per v2.0.7 session.tab.select, conditional quickSwitchFooterHints,
+  armed delete cleared on move). REMAINS the footer-menu PRIMITIVE itself
+  (mini/footer.menu.tsx — categorized header / item / spacer rows; items
+  carry icon, current-marker, description, category and a footer tone of
+  selection|running|error|success; 8-row viewport; compact-width mode) and
+  the sessions surface rebuilt ON it as a category, plus the tab strip for
+  subagents; audit our dialog carry-over features against what the menu
+  grammar keeps. This is the top open parity line.
+
 - **auto-update while running** (owner directive 2026-09-19: "like opencode2,
   an outstanding UX feature") — opencode2 checks for newer releases and
   updates itself without the user driving. For us the channels are npm

@@ -480,9 +480,12 @@ disp = "\n".join(screen.display)
 b0 = "Sessions" in disp and "Search" in disp
 check(pid, "B0 sessions dialog opens", b0)
 check(pid, "B1 date group headers render", re.search(r"(Sep|Oct|Nov|Dec) \d\d 20\d\d|Today", disp) is not None)
-check(pid, "B2 footer hints", "pin" in disp and "delete" in disp and "switch" in disp)
+# 0.6.48 conditional grammar (v2 quickSwitchFooterHints): the switch hint and
+# slot gutters exist only while tabs are open — at B time none are.
+check(pid, "B2 footer hints (pin/delete, switch only with tabs)",
+      "pin" in disp and "delete" in disp and "switch ctrl+1-9" not in disp)
 check(pid, "B3 no idle clutter", "idle ·" not in disp)
-check(pid, "B4 quick-slot gutters", re.search(r"\b1 \S", disp) is not None)
+check(pid, "B4 no slot gutters while no tabs are open", re.search(r"(^|\s)1\s+\S", disp) is None)
 
 # ==== FAM:D requires BOOT ====
 # D-series: the themes dialog (reference parity — bare rows, Search, ● gutter).
@@ -623,9 +626,26 @@ if b0 and alive(pid):
             break
     check(pid, "X1 leader x opens the v2 export dialog", x1)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)     # esc: close
+    # X2 (re-scoped 0.6.48): leader y dispatches the copy — the chord, the
+    # session-view gate and the handler are proven by the OSC 52 write OR the
+    # visible no-source guard. The old needle fused in a SECOND claim — that
+    # the resumed session carries an assistant message — which is catalog
+    # state the proof does not own: once the proof cwd's newest session grew
+    # up to be a throwaway, the handler flashed "nothing to copy yet" and
+    # wrote no OSC (the 0.6.39 fossil-session lesson, copy edition). The
+    # OSC write path itself stays proven every run by CX0, whose success
+    # toast is gated on osc52Copy returning true.
     mark_raw = len(RAW)
-    os.write(master, b"\x18y"); read_for(master, stream, 1.2)    # leader y: copy
-    check(pid, "X2 leader y copies via OSC 52", b"\x1b]52;c;" in bytes(RAW[mark_raw:]))
+    os.write(master, b"\x18y")                                   # leader y: copy
+    x2 = False
+    for _ in range(10):
+        read_for(master, stream, 0.6)
+        d_x2 = "\n".join(screen.display)
+        if (b"\x1b]52;c;" in bytes(RAW[mark_raw:])
+                or "nothing to copy yet" in d_x2 or "copied " in d_x2):
+            x2 = True
+            break
+    check(pid, "X2 leader y dispatches the copy (OSC 52 or the no-source guard)", x2)
 
     # TL-series: the v2 dialog-timeline port — timeline rows, enter opens
     # Message Actions, esc returns, Fork row forks at the prompt (wrapper
@@ -724,14 +744,22 @@ if b0 and alive(pid):
             break
     check(pid, "CX-pre composer verified empty", cx_clear)
     os.write(master, b"/copy")
+    # Positive popup-row needle (typed-command law, R38): the popup ROW must
+    # be visible before enter — the placeholder disappears on ANY typed text,
+    # so the old "Ask anything" clause passed vacuously whenever the popup
+    # lost the paint race, and enter then fell through (CX5 red, CX6 green).
     cx_popup = False
-    for _ in range(6):
-        read_for(master, stream, 0.5)
-        d = "\n".join(screen.display)
-        if "/copy" in d and "Ask anything" not in d:
+    for _ in range(24):                # 24-round law (0.6.48: the dumps
+        read_for(master, stream, 0.5)  # showed the popup painting seconds
+        if "copy the session transcript" in "\n".join(screen.display):  # after these windows closed)
             cx_popup = True
             break
     check(pid, "CX-pre /copy popup verified before enter", cx_popup)
+    if not cx_popup:
+        print("---- CX-pre /copy FAIL SCREEN (tail) ----")
+        for line in screen.display[-14:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
     os.write(master, b"\r")
     cx0 = False
     for _ in range(8):
@@ -775,13 +803,17 @@ if b0 and alive(pid):
 
     os.write(master, b"/export")
     cx_popup2 = False
-    for _ in range(6):
+    for _ in range(24):                # 24-round law, same dump finding
         read_for(master, stream, 0.5)
-        d = "\n".join(screen.display)
-        if "/export" in d and "Ask anything" not in d:
+        if "export the session transcript" in "\n".join(screen.display):
             cx_popup2 = True
             break
     check(pid, "CX-pre /export popup verified before enter", cx_popup2)
+    if not cx_popup2:
+        print("---- CX-pre /export FAIL SCREEN (tail) ----")
+        for line in screen.display[-14:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
     os.write(master, b"\r")
     cx5 = False
     for _ in range(8):
@@ -945,10 +977,17 @@ if b0 and alive(pid):
     disp = "\n".join(screen.display)
     check(pid, "TB1 the tabs strip renders with the tab-1 gutter",
           re.search(r"(^|\s)1\s+\S", disp, re.M) is not None)
-    os.write(master, b"/new\r"); read_for(master, stream, 4.0)
+    os.write(master, b"/new\r")
+    tb2 = False
+    for _ in range(12):                # poll: the /new round-trip lags under
+        read_for(master, stream, 0.6)  # daemon load (was a fixed 4.0 settle)
+        disp = "\n".join(screen.display)
+        if (re.search(r"(^|\s)2\s+\S", disp, re.M) is not None
+                and "Untitled session" in disp):
+            tb2 = True
+            break
     disp = "\n".join(screen.display)
-    check(pid, "TB2 /new opens a second tab (gutter 2 + Untitled session)",
-          re.search(r"(^|\s)2\s+\S", disp, re.M) is not None and "Untitled session" in disp)
+    check(pid, "TB2 /new opens a second tab (gutter 2 + Untitled session)", tb2)
     before_switch = disp
     os.write(master, b"\x181"); read_for(master, stream, 2.0)   # leader 1: tab 1
     disp = "\n".join(screen.display)
@@ -966,6 +1005,20 @@ if b0 and alive(pid):
         check(pid, "TB5 ctrl+shift+t reopens the closed tab", True)
     else:
         print("NOTE ctrl+shift+t undeliverable on this PTY; reopen covered by unit tests")
+    # TB6 (0.6.48): with a tab open the sessions dialog wears the tab-slot
+    # gutter and the switch hint — the digit IS what leader N does (the old
+    # positional gutters were a deadlock invention, repaired this wave).
+    os.write(master, b"\x18l")
+    tb6 = False
+    for _ in range(16):
+        read_for(master, stream, 0.6)
+        disp = "\n".join(screen.display)
+        if "Sessions" in disp and "Search" in disp:
+            tb6 = ("switch ctrl+1-9" in disp
+                   and re.search(r"(^|\s)1\s+\S", disp, re.M) is not None)
+            break
+    check(pid, "TB6 sessions dialog wears the tab-slot gutter + switch hint", tb6)
+    os.write(master, b"\x1b"); read_for(master, stream, 0.6)   # close sessions
     os.write(master, b"\x03"); time.sleep(0.3)
 
 
@@ -983,39 +1036,75 @@ try:
 except FileNotFoundError:
     pass
 
+def poll_paint(m, st, scr, needles, rounds=16):
+    for _ in range(rounds):
+        read_for(m, st, 0.6)
+        d = "\n".join(scr.display)
+        if all(n in d for n in needles):
+            return True
+    return False
+
+def poll_paint_gone(m, st, scr, needle, rounds=16):
+    for _ in range(rounds):
+        read_for(m, st, 0.6)
+        if needle not in "\n".join(scr.display):
+            return True
+    return False
+
 def _palette_run(filter_text):
+    # Dream ACK-9e5105d7b0: poll the paint per stage — the open (titled
+    # Commands dialog), the pick row VISIBLE before enter (typed-command
+    # law), and the close — never fixed settles, which missed picks under
+    # dev load and collapsed S1-S3 while S4 passed vacuously.
     os.write(master, b"\x10")                            # ctrl+p: palette
-    read_for(master, stream, 0.8)
+    if not poll_paint(master, stream, screen, ("Commands",)):
+        return
     for ch in filter_text:
         os.write(master, ch.encode()); time.sleep(0.04)
-    read_for(master, stream, 0.6)
+    poll_paint(master, stream, screen, (filter_text,))
     os.write(master, b"\r")
-    read_for(master, stream, 1.0)
+    poll_paint_gone(master, stream, screen, "Commands")
 
 if alive(pid):
     os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear any draft
     os.write(master, b"STASH-PROOF-DRAFT-1")
     read_for(master, stream, 0.8)
     _palette_run("stash prompt")
-    s0 = "\n".join(screen.display)
-    check(pid, "S0 stash prompt parks the draft (composer empties)", "STASH-PROOF-DRAFT-1" not in s0 and "Ask anything" in s0)
+    s0_ok = False
+    for _ in range(16):
+        read_for(master, stream, 0.6)
+        d0 = "\n".join(screen.display)
+        if "STASH-PROOF-DRAFT-1" not in d0 and "Ask anything" in d0:
+            s0_ok = True
+            break
+    check(pid, "S0 stash prompt parks the draft (composer empties)", s0_ok)
 
     _palette_run("stash list")
-    s1 = "\n".join(screen.display)
-    check(pid, "S1 stash list dialog shows the preview + age", "Stash" in s1 and "STASH-PROOF-DRAFT-1" in s1 and "just now" in s1)
+    s1_ok = poll_paint(master, stream, screen, ("Stash", "STASH-PROOF-DRAFT-1", "just now"))
+    check(pid, "S1 stash list dialog shows the preview + age", s1_ok)
 
-    os.write(master, b"\r"); read_for(master, stream, 1.0)   # enter: restore (take)
-    s2 = "\n".join(screen.display)
-    check(pid, "S2 restore returns the draft to the composer", "STASH-PROOF-DRAFT-1" in s2 and "Search" not in s2)
+    os.write(master, b"\r")                                   # enter: restore (take)
+    s2_ok = False
+    for _ in range(16):
+        read_for(master, stream, 0.6)
+        d2 = "\n".join(screen.display)
+        if "Stash" not in d2 and "STASH-PROOF-DRAFT-1" in d2:
+            s2_ok = True
+            break
+    check(pid, "S2 restore returns the draft to the composer", s2_ok)
 
     _palette_run("stash prompt")                              # stash it again for the delete proof
     _palette_run("stash list")
-    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: arm delete
-    s3 = "\n".join(screen.display)
-    check(pid, "S3 two-stroke delete arms with the confirm label", "Press ctrl+d again to confirm" in s3)
-    os.write(master, b"\x04"); read_for(master, stream, 0.8)  # ctrl+d: delete
-    s4 = "\n".join(screen.display)
-    check(pid, "S4 second ctrl+d empties the stash list", "No matching items" in s4)
+    os.write(master, b"\x04")                                 # ctrl+d: arm delete
+    s3_ok = poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
+    check(pid, "S3 two-stroke delete arms with the confirm label", s3_ok)
+    os.write(master, b"\x04")                                 # ctrl+d: delete
+    # Positive needle (dream ACK-9e5105d7b0): the EMPTY-LIST line inside the
+    # titled Stash dialog — "No matching items" alone is the shared empty
+    # text of palette/SlashPopup/SelectDialog and passed vacuously when the
+    # pick missed and no dialog was open at all.
+    s4_ok = poll_paint(master, stream, screen, ("Stash", "No items available"))
+    check(pid, "S4 second ctrl+d empties the stash list", s4_ok)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)
     try:
         os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
@@ -1305,14 +1394,6 @@ def spawn_th():
                          close_fds=True).pid
     os.close(slave)
     return p, m, scr, strm
-
-def poll_paint(m, st, scr, needles, rounds=16):
-    for _ in range(rounds):
-        read_for(m, st, 0.6)
-        d = "\n".join(scr.display)
-        if all(n in d for n in needles):
-            return True
-    return False
 
 def color_mode_seg(scr):
     d = "\n".join(scr.display)

@@ -3301,19 +3301,32 @@ export function App({
     } else if (key.name === "return" && view === "home") setTyping(true);
   });
 
-  // Session rows follow the reference picker (dialog-session-list.tsx): the
-  // title is the row — no "idle · mode · age" clutter; a busy session gets a
-  // spinner gutter, quick slots 1-9 show in the gutter, and the armed delete
+  // Session rows follow the reference picker (dialog-session-list.tsx):
+  // pinned sessions lead in their own Pinned category, the rest group under
+  // date headings; the title is the row — no "idle · mode · age" clutter; a
+  // busy session gets a spinner gutter; the gutter digit is the session's
+  // OPEN-TAB slot (leader N opens tab N — v2.0.7 session.tab.select) so the
+  // displayed digit is always what the key does; and the armed delete
   // repaints the row in the error colour with a confirm label.
-  const sessionOptions: DialogOption<SessionRow>[] = orderedSessions.map((row, index) => ({
+  const tabSlotOf = (sessionId: string) => {
+    const at = tabsRef.current.findIndex((t) => t.sessionID === sessionId);
+    return at >= 0 && at < 9 ? String(at + 1) : undefined;
+  };
+  const sessionRowOption = (row: SessionRow, group: string): DialogOption<SessionRow> => ({
     id: row.sessionId,
     label: deleteId === row.sessionId ? "Press ctrl+d again to confirm" : displayTitle(row),
-    meta: pinned.includes(row.sessionId) ? "pinned" : undefined,
-    group: formatDateHeading(row.updatedAt),
-    gutter: /run|busy|work/i.test(row.status) ? "⠋" : index < 9 ? String(index + 1) : undefined,
+    group,
+    gutter: /run|busy|work/i.test(row.status) ? "⠋" : tabSlotOf(row.sessionId),
     bg: deleteId === row.sessionId ? C.error : undefined,
     value: row,
-  }));
+  });
+  const pinnedSet = new Set(pinned);
+  const sessionOptions: DialogOption<SessionRow>[] = [
+    ...orderedSessions.filter((row) => pinnedSet.has(row.sessionId)).map((row) => sessionRowOption(row, "Pinned")),
+    ...orderedSessions
+      .filter((row) => !pinnedSet.has(row.sessionId))
+      .map((row) => sessionRowOption(row, formatDateHeading(row.updatedAt))),
+  ];
 
   if (dialog === "diffsource") {
     return (
@@ -3382,9 +3395,13 @@ export function App({
           { key: "ctrl+f", label: "pin" },
           { key: "ctrl+d", label: "delete" },
           { key: "ctrl+r", label: "rename" },
-          { key: "ctrl+1-9", label: "switch" },
+          // v2 renders the quick-switch hint only when slots exist
+          // (quickSwitchFooterHints — no slots, no hint).
+          ...(tabsRef.current.length > 0 ? [{ key: "ctrl+1-9", label: "switch" }] : []),
           { key: "esc", label: "close" },
         ]}
+        onMove={() => setDeleteId(null)}
+        emptyLabel="No sessions available"
         onAction={(action, option) => {
           if (!option) return;
           if (action === "pin") togglePin(option.value);

@@ -14,10 +14,25 @@
 // InputRenderable: OpenTUI can retain focus on a component that has already
 // been reconciled away, so keeping filter state here makes every modal
 // deterministic under fast PTY typing.
+// 0.6.48 — the selection/window arithmetic moved onto the reference
+// ui/select-controller grammar (verbatim in ./select-controller): moves wrap
+// at the ends (v2 dialog.select.prev/next run policy "wrap"), the row window
+// scrolls with the reference reveal margin (moveSelectionOffset/reveal),
+// display rows include the group headers and spacers (a window counts real
+// rows, like the reference scrollbox), empty and no-match states split
+// (v2 emptyView vs noMatchView fallbacks), and an onMove hook fires on
+// user-driven selection moves (the reference moveTo path — the sessions
+// picker clears its armed delete there).
 import { useEffect, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
+import {
+  moveSelection,
+  moveSelectionOffset,
+  reconcileSelection,
+  revealSelectionOffset,
+} from "./select-controller";
 
 export interface DialogOption<T> {
   id: string;
@@ -37,6 +52,29 @@ type DialogAction<T> = (
   action: "pin" | "delete" | "rename" | "all",
   option: DialogOption<T> | undefined,
 ) => void;
+
+// Display rows mirror the reference grouped render (dialog-select.tsx): one
+// header row per non-empty group plus a spacer row before every group but
+// the first, options otherwise in given order.
+type DisplayRow<T> =
+  | { kind: "spacer" }
+  | { kind: "header"; label: string }
+  | { kind: "item"; opt: DialogOption<T>; itemIndex: number };
+
+function buildRows<T>(shown: DialogOption<T>[]): DisplayRow<T>[] {
+  const rows: DisplayRow<T>[] = [];
+  let group = "";
+  shown.forEach((opt, itemIndex) => {
+    const next = opt.group ?? "";
+    if (next && next !== group) {
+      if (rows.length > 0) rows.push({ kind: "spacer" });
+      rows.push({ kind: "header", label: next });
+      group = next;
+    }
+    rows.push({ kind: "item", opt, itemIndex });
+  });
+  return rows;
+}
 
 // Width tiers from the reference modal: medium 60, large 88, xlarge 116.
 function tierWidth(size: "medium" | "large" | "xlarge" | undefined, width: number): number {
@@ -94,9 +132,12 @@ export function SelectDialog<T>({
   onAction,
   onHighlight,
   onHorizontal,
+  onMove,
   size,
   countLabel,
   footerHints,
+  emptyLabel,
+  noMatchLabel,
   theme,
 }: {
   title: string;
@@ -111,6 +152,10 @@ export function SelectDialog<T>({
   /** Live-preview hook (reference onMove/onFilter): fires whenever the
    * highlighted row changes — arrows and typing both count. */
   onHighlight?: (option: DialogOption<T> | undefined) => void;
+  /** User-driven selection moves only (reference moveTo → props.onMove):
+   * arrows, paging, ends, and filter-driven reselection — not mount, not
+   * external option refreshes. */
+  onMove?: (option: DialogOption<T> | undefined) => void;
   size?: "medium" | "large" | "xlarge";
   countLabel?: string;
   /** v2 footerHints grammar (dialog-select.tsx FooterAction): the WORD is
@@ -118,6 +163,11 @@ export function SelectDialog<T>({
    * space 2 apart, left group left / side:"right" group right across a
    * space-between footer row. */
   footerHints?: { key: string; label: string; side?: "left" | "right" }[];
+  /** v2 emptyView / noMatchView fallbacks (dialog-select.tsx): the empty
+   * list speaks "No items available", a filtered-out list "No results
+   * found". */
+  emptyLabel?: string;
+  noMatchLabel?: string;
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
@@ -129,6 +179,7 @@ export function SelectDialog<T>({
     return at >= 0 ? at : 0;
   };
   const [idx, setIdx] = useState(currentStartIndex);
+  const [offset, setOffset] = useState(0);
   const dims = useTerminalDimensions();
   const C = theme ?? THEMES.opencode;
   const cardWidth = tierWidth(size, dims.width);
@@ -138,28 +189,42 @@ export function SelectDialog<T>({
       .toLowerCase()
       .includes(filter.toLowerCase()),
   );
-  const sel = clamp(idx, 0, Math.max(0, shown.length - 1));
+  const rows = buildRows(shown);
+  const sel = reconcileSelection(idx, shown.length);
   // The card must FIT its own maxHeight: pad(2) + title + search + hints row
   // + every group header (with its spacer) is chrome the list cannot eat, or
   // the footer hints get clipped off the bottom (measured 2026-09-16,
-  // 30-row renderer). The option window shrinks to leave that room.
+  // 30-row renderer). The row window shrinks to leave that room.
   const backdropRows = Math.floor(dims.height / 4);
   const maxHeight = Math.max(8, dims.height - backdropRows - 2);
   const chromeRows = 5 + (footerHints && footerHints.length > 0 ? 1 : 0);
   const groupCount = new Set(shown.filter((o) => o.group).map((o) => o.group)).size;
   const headerRows = groupCount > 0 ? groupCount * 2 - 1 : 0;
   const visibleCount = Math.max(3, Math.min(22, maxHeight - chromeRows - headerRows));
-  const winStart = Math.max(
-    0,
-    Math.min(sel - Math.floor(visibleCount / 2), Math.max(0, shown.length - visibleCount)),
-  );
-  const visible = shown.slice(winStart, winStart + visibleCount);
-
-  const select = () => {
-    const option = shown[sel];
-    if (option) onSelect(option.value, option.id);
-    else onClose();
+  const rowOfItem = (itemIndex: number) => {
+    const at = rows.findIndex((r) => r.kind === "item" && r.itemIndex === itemIndex);
+    return at >= 0 ? at : 0;
   };
+  const winStart = clamp(offset, 0, Math.max(0, rows.length - 1));
+  const visible = rows.slice(winStart, winStart + visibleCount);
+  const visibleItems = visible.filter((r): r is Extract<DisplayRow<T>, { kind: "item" }> => r.kind === "item");
+  const firstVisibleItem = visibleItems.length > 0 ? visibleItems[0].itemIndex + 1 : 0;
+  const lastVisibleItem = visibleItems.length > 0 ? visibleItems[visibleItems.length - 1].itemIndex + 1 : 0;
+
+  // The window must always hold the selection: any list-shape change
+  // (filter, options refresh, dialog open) re-reveals through the reference
+  // arithmetic. Explicit moves nudge it beforehand (margin scroll) — this
+  // effect is the reconcile net.
+  useEffect(() => {
+    setOffset((value) =>
+      revealSelectionOffset(value, {
+        count: rows.length,
+        limit: visibleCount,
+        selected: rowOfItem(sel),
+      }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.length, visibleCount, sel, filter, options]);
 
   // Fire the preview whenever the highlighted row moves (arrows, typing,
   // backspace — anything that re-filters). No onHighlight → no-op.
@@ -168,22 +233,56 @@ export function SelectDialog<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel, filter, options]);
 
+  // v2 move(): dialog.select.prev/next/page_up/page_down all wrap
+  // (policy "wrap"), the window nudges with the reference margin scroll.
+  const moveBy = (delta: number) => {
+    if (shown.length === 0) return;
+    const next = moveSelection(sel, { count: shown.length, delta, policy: "wrap" });
+    setIdx(next);
+    setOffset((value) =>
+      moveSelectionOffset(value, {
+        count: rows.length,
+        limit: visibleCount,
+        selected: rowOfItem(next),
+        direction: delta < 0 ? -1 : 1,
+      }),
+    );
+    if (onMove) onMove(shown[next]);
+  };
+
+  // v2 moveTo(): home/end and filter-driven reselection jump and reveal.
+  const jumpTo = (target: number) => {
+    if (shown.length === 0) return;
+    const next = reconcileSelection(target, shown.length);
+    setIdx(next);
+    setOffset((value) =>
+      revealSelectionOffset(value, {
+        count: rows.length,
+        limit: visibleCount,
+        selected: rowOfItem(next),
+      }),
+    );
+    if (onMove) onMove(shown[next]);
+  };
+
   useKeyboard((key) => {
     if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
     if (key.ctrl && key.name === "f") { onAction?.("pin", shown[sel]); return; }
     if (key.ctrl && key.name === "d") { onAction?.("delete", shown[sel]); return; }
     if (key.ctrl && key.name === "r") { onAction?.("rename", shown[sel]); return; }
     if (key.ctrl && key.name === "a") { onAction?.("all", shown[sel]); return; }
-    if (key.name === "return") { select(); return; }
-    if (key.name === "up") { setIdx((i) => Math.max(0, i - 1)); return; }
-    if (key.name === "down") {
-      setIdx((i) => Math.min(Math.max(0, shown.length - 1), i + 1));
+    if (key.name === "return") {
+      const option = shown[sel];
+      if (option) onSelect(option.value, option.id);
+      else onClose();
       return;
     }
-    if (key.name === "pageup") { setIdx((i) => Math.max(0, i - 10)); return; }
-    if (key.name === "pagedown") { setIdx((i) => Math.min(Math.max(0, shown.length - 1), i + 10)); return; }
-    if (key.name === "home") { setIdx(0); return; }
-    if (key.name === "end") { setIdx(Math.max(0, shown.length - 1)); return; }
+    if (key.name === "up") { moveBy(-1); return; }
+    if (key.name === "down") { moveBy(1); return; }
+    if (key.name === "pageup") { moveBy(-10); return; }
+    if (key.name === "pagedown") { moveBy(10); return; }
+    if (key.name === "home") { jumpTo(0); return; }
+    if (key.name === "end") { jumpTo(shown.length - 1); return; }
     if (onHorizontal && (key.name === "left" || key.name === "right") && !key.ctrl && !key.meta) {
       onHorizontal(key.name === "left" ? -1 : 1, shown[sel]);
       return;
@@ -192,12 +291,12 @@ export function SelectDialog<T>({
       setFilter((f) => f.slice(0, -1));
       // Emptying the query restores the selection to the current row
       // (reference onFilter: query.length === 0 → back to where you started).
-      setIdx(filter.length <= 1 ? currentStartIndex() : 0);
+      jumpTo(filter.length <= 1 ? currentStartIndex() : 0);
       return;
     }
     if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
       setFilter((f) => f + key.sequence);
-      setIdx(0);
+      jumpTo(0);
     }
   });
 
@@ -233,66 +332,79 @@ export function SelectDialog<T>({
             </>
           )}
         </box>
-        {visible.map((o) => {
-          const abs = shown.indexOf(o);
-          const selected = abs === sel;
-          const current = o.id === currentId;
-          const previous = visible[visible.indexOf(o) - 1];
-          const group = o.group && o.group !== previous?.group ? o.group : undefined;
-          const groupSpacer = visible.indexOf(o) > 0;
-          // Width budget: the label column fits the longest label (+meta)
-          // actually present, capped so the description always keeps a
-          // readable remainder — cardWidth-10 starved every hint to ~8
-          // chars in large dialogs (0.6.45 fix).
-          const labelWidth = Math.min(
-            Math.max(16, ...shown.map((o) => o.label.length + (o.meta ? o.meta.length + 2 : 0))),
-            Math.max(16, cardWidth - 18),
-          );
-          // Reference row shape (dialog-select.tsx): titles align at column 3;
-          // the CURRENT row donates its gutter to a ● so its title stays put,
-          // and its label wears the accent when not selected.
-          const rowFg = selected ? C.accentText : current ? C.accent : C.fg;
-          return (
-            <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
-              {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}
-              {group ? <text content={` ${group}`} fg={C.accent} attributes={TextAttributes.BOLD} /> : null}
-              <box
-                style={{
-                  height: 1,
-                  flexDirection: "row",
-                  flexShrink: 0,
-                  paddingLeft: current || o.gutter ? 1 : 3,
-                  paddingRight: 1,
-                  backgroundColor: selected ? C.accent : o.bg,
-                }}
-              >
-                {current && !o.gutter ? <text content="● " fg={rowFg} /> : null}
-                {o.gutter ? <text content={`${o.gutter} `} fg={selected ? C.accentText : C.accent} /> : null}
+        {options.length === 0 ? (
+          <text content={` ${emptyLabel ?? "No items available"}`} fg={C.faint} />
+        ) : visible.length === 0 ? (
+          <text content={` ${noMatchLabel ?? "No results found"}`} fg={C.faint} />
+        ) : (
+          visible.map((row, viewIdx) => {
+            if (row.kind === "spacer") {
+              return <box key={`row-${winStart + viewIdx}`} style={{ height: 1, flexShrink: 0 }} />;
+            }
+            if (row.kind === "header") {
+              return (
                 <text
-                  content={`${truncate(o.label, labelWidth)}${o.meta ? `  ${o.meta}` : ""}`}
-                  fg={rowFg}
+                  key={`row-${winStart + viewIdx}`}
+                  content={` ${row.label}`}
+                  fg={C.accent}
+                  attributes={TextAttributes.BOLD}
                 />
-                {o.description ? (
+              );
+            }
+            const o = row.opt;
+            const selected = row.itemIndex === sel;
+            const current = o.id === currentId;
+            // Width budget: the label column fits the longest label (+meta)
+            // actually present, capped so the description always keeps a
+            // readable remainder — cardWidth-10 starved every hint to ~8
+            // chars in large dialogs (0.6.45 fix).
+            const labelWidth = Math.min(
+              Math.max(16, ...shown.map((o) => o.label.length + (o.meta ? o.meta.length + 2 : 0))),
+              Math.max(16, cardWidth - 18),
+            );
+            // Reference row shape (dialog-select.tsx): titles align at column 3;
+            // the CURRENT row donates its gutter to a ● so its title stays put,
+            // and its label wears the accent when not selected.
+            const rowFg = selected ? C.accentText : current ? C.accent : C.fg;
+            return (
+              <box key={`row-${winStart + viewIdx}`} style={{ flexDirection: "column", flexShrink: 0 }}>
+                <box
+                  style={{
+                    height: 1,
+                    flexDirection: "row",
+                    flexShrink: 0,
+                    paddingLeft: current || o.gutter ? 1 : 3,
+                    paddingRight: 1,
+                    backgroundColor: selected ? C.accent : o.bg,
+                  }}
+                >
+                  {current && !o.gutter ? <text content="● " fg={rowFg} /> : null}
+                  {o.gutter ? <text content={`${o.gutter} `} fg={selected ? C.accentText : C.accent} /> : null}
                   <text
-                    content={`  ${truncate(o.description, Math.max(8, cardWidth - labelWidth - 8))}`}
-                    fg={selected ? C.accentText : C.subtle}
+                    content={`${truncate(o.label, labelWidth)}${o.meta ? `  ${o.meta}` : ""}`}
+                    fg={rowFg}
                   />
-                ) : null}
-                {o.status ? (
-                  <>
-                    <box style={{ flexGrow: 1, flexShrink: 0 }} />
+                  {o.description ? (
                     <text
-                      content={o.status.text}
-                      fg={o.status.color ?? rowFg}
-                      attributes={o.status.bold ? TextAttributes.BOLD : undefined}
+                      content={`  ${truncate(o.description, Math.max(8, cardWidth - labelWidth - 8))}`}
+                      fg={selected ? C.accentText : C.subtle}
                     />
-                  </>
-                ) : null}
+                  ) : null}
+                  {o.status ? (
+                    <>
+                      <box style={{ flexGrow: 1, flexShrink: 0 }} />
+                      <text
+                        content={o.status.text}
+                        fg={o.status.color ?? rowFg}
+                        attributes={o.status.bold ? TextAttributes.BOLD : undefined}
+                      />
+                    </>
+                  ) : null}
+                </box>
               </box>
-            </box>
-          );
-        })}
-        {visible.length === 0 ? <text content=" No matching items" fg={C.faint} /> : null}
+            );
+          })
+        )}
         {footerHints && footerHints.length > 0 ? (
           <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
             <box style={{ flexDirection: "row", flexShrink: 0 }}>
@@ -319,9 +431,12 @@ export function SelectDialog<T>({
             ) : null}
           </box>
         ) : null}
-        {shown.length > visible.length ? (
+        {shown.length > visibleItems.length ? (
           <box style={{ height: 1, flexShrink: 0 }}>
-            <text content={` ${winStart + 1}-${winStart + visible.length} / ${shown.length} ${countLabel ?? ""}`} fg={C.faint} />
+            <text
+              content={` ${firstVisibleItem}-${lastVisibleItem} / ${shown.length} ${countLabel ?? ""}`}
+              fg={C.faint}
+            />
           </box>
         ) : null}
       </box>
@@ -380,7 +495,7 @@ export function TextPromptDialog({
           <text content={title} fg={C.fg} />
           <text content="esc" fg={C.faint} />
         </box>
-        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+        <box style={{ height: 1, flexDirection: "row" }}>
           <text content={value || placeholder || ""} fg={value ? C.fg : C.faint} />
           <text content="█" fg={C.accent} />
         </box>
