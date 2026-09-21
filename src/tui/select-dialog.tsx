@@ -23,10 +23,18 @@
 // (v2 emptyView vs noMatchView fallbacks), and an onMove hook fires on
 // user-driven selection moves (the reference moveTo path — the sessions
 // picker clears its armed delete there).
+// 0.6.49 — the menu paint path: `menu` renders the list body through the
+// reference mini/footer.menu.tsx grammar (ported in ./footer-menu) —
+// categorized header/item rows, icon column, aligned descriptions, and a
+// footer tone cell (current markers ride footer "current" + selection,
+// like the reference agent panel). The legacy scrollbox-style rows stay for
+// the surfaces that have not migrated yet (the carry-over audit in
+// docs/parity-v2.md tracks them).
 import { useEffect, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
+import { FooterMenu, type FooterMenuTone } from "./footer-menu";
 import {
   moveSelection,
   moveSelectionOffset,
@@ -42,6 +50,13 @@ export interface DialogOption<T> {
   /** Right-edge status cell — port of the v2.0.7 dialog-select option
    * footer + footerColor pair (the MCP dialog's Connected ✓ column). */
   status?: { text: string; color?: string; bold?: boolean };
+  /** Menu-grammar fields (footer.menu.tsx item shape) for the surfaces
+   * painted through the menu path: a 2-column icon cell, and a footer cell
+   * carrying a tone (current markers ride footer "current" + selection,
+   * like the reference agent panel). */
+  icon?: (color: string) => React.ReactNode;
+  footer?: string;
+  footerTone?: FooterMenuTone;
   group?: string;
   bg?: string;
   gutter?: string;
@@ -138,6 +153,7 @@ export function SelectDialog<T>({
   footerHints,
   emptyLabel,
   noMatchLabel,
+  menu,
   theme,
 }: {
   title: string;
@@ -168,6 +184,10 @@ export function SelectDialog<T>({
    * found". */
   emptyLabel?: string;
   noMatchLabel?: string;
+  /** Paint the list body through the v2 footer-menu grammar (./footer-menu)
+   * instead of the legacy dialog-select rows — the sessions-surface
+   * rebuild (owner dogfood directive, docs/parity-v2.md sessions line). */
+  menu?: boolean;
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
@@ -336,6 +356,30 @@ export function SelectDialog<T>({
           <text content={` ${emptyLabel ?? "No items available"}`} fg={C.faint} />
         ) : visible.length === 0 ? (
           <text content={` ${noMatchLabel ?? "No results found"}`} fg={C.faint} />
+        ) : menu ? (
+          <FooterMenu
+            C={C}
+            items={shown.map((o) => ({
+              display: o.meta ? `${o.label}  ${o.meta}` : o.label,
+              icon: o.icon,
+              current: o.id === currentId,
+              description: o.description,
+              category: o.group || undefined,
+              footer: o.footer,
+              footerTone: o.footerTone,
+              bg: o.bg,
+            }))}
+            selected={sel}
+            offset={offset}
+            rows={Math.max(1, Math.min(visibleCount, rows.length))}
+            limit={visibleCount}
+            grouped
+            background={false}
+            border={false}
+            paddingLeft={1}
+            paddingRight={1}
+            width={cardWidth - 4}
+          />
         ) : (
           visible.map((row, viewIdx) => {
             if (row.kind === "spacer") {
@@ -431,7 +475,7 @@ export function SelectDialog<T>({
             ) : null}
           </box>
         ) : null}
-        {shown.length > visibleItems.length ? (
+        {!menu && shown.length > visibleItems.length ? (
           <box style={{ height: 1, flexShrink: 0 }}>
             <text
               content={` ${firstVisibleItem}-${lastVisibleItem} / ${shown.length} ${countLabel ?? ""}`}

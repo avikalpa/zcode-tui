@@ -3303,23 +3303,38 @@ export function App({
 
   // Session rows follow the reference picker (dialog-session-list.tsx):
   // pinned sessions lead in their own Pinned category, the rest group under
-  // date headings; the title is the row — no "idle · mode · age" clutter; a
-  // busy session gets a spinner gutter; the gutter digit is the session's
-  // OPEN-TAB slot (leader N opens tab N — v2.0.7 session.tab.select) so the
-  // displayed digit is always what the key does; and the armed delete
-  // repaints the row in the error colour with a confirm label.
+  // date headings; the title is the row — no "idle · mode · age" clutter.
+  // The list paints through the footer-menu grammar (0.6.49): the gutter
+  // column becomes the menu icon cell (busy spinner, else the session's
+  // OPEN-TAB slot — leader N opens tab N, v2.0.7 session.tab.select), and
+  // the CURRENT session marks itself with the menu's footer cell ("current"
+  // in the selection tone, suppressed while the row is selected — the
+  // reference agent-panel pattern). The armed delete keeps its destructive
+  // background and confirm label (v2 dialog-session-list bg — the one field
+  // the menu grammar gains).
   const tabSlotOf = (sessionId: string) => {
     const at = tabsRef.current.findIndex((t) => t.sessionID === sessionId);
     return at >= 0 && at < 9 ? String(at + 1) : undefined;
   };
-  const sessionRowOption = (row: SessionRow, group: string): DialogOption<SessionRow> => ({
-    id: row.sessionId,
-    label: deleteId === row.sessionId ? "Press ctrl+d again to confirm" : displayTitle(row),
-    group,
-    gutter: /run|busy|work/i.test(row.status) ? "⠋" : tabSlotOf(row.sessionId),
-    bg: deleteId === row.sessionId ? C.error : undefined,
-    value: row,
-  });
+  const sessionRowOption = (row: SessionRow, group: string): DialogOption<SessionRow> => {
+    const busy = /run|busy|work/i.test(row.status);
+    const slot = tabSlotOf(row.sessionId);
+    const current = row.sessionId === activeId;
+    return {
+      id: row.sessionId,
+      label: deleteId === row.sessionId ? "Press ctrl+d again to confirm" : displayTitle(row),
+      group,
+      icon: busy
+        ? (color) => <text content="⠋" fg={color} />
+        : slot
+          ? (color) => <text content={slot} fg={color} />
+          : undefined,
+      footer: current ? "current" : undefined,
+      footerTone: current ? "selection" : undefined,
+      bg: deleteId === row.sessionId ? C.error : undefined,
+      value: row,
+    };
+  };
   const pinnedSet = new Set(pinned);
   const sessionOptions: DialogOption<SessionRow>[] = [
     ...orderedSessions.filter((row) => pinnedSet.has(row.sessionId)).map((row) => sessionRowOption(row, "Pinned")),
@@ -3387,6 +3402,7 @@ export function App({
       <SelectDialog
         title="Sessions"
         size="large"
+        menu
         options={sessionOptions}
         currentId={activeId ?? undefined}
         theme={C}
