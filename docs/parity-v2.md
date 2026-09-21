@@ -699,6 +699,83 @@ this binary; the fails live in the documented rotating load class (dev
 load 5.5-8.7, the escalation condition), F0, and the pf636 debt.
 
 
+### 0.6.49 — the footer-menu primitive (the sessions surface rebuilt on it)
+
+The top open line after 0.6.48 was the categorized paint. mini/footer.menu.tsx
+is ported 1:1 as src/tui/footer-menu.tsx: footerMenuText over grapheme-true
+takeWidth/truncateWidth (mono dots vs the ellipsis), buildMenuRows (a header
+per category change, a spacer before every group but the first, compact drops
+both — including the last-seen-category subtlety: an uncategorized row between
+two same-category rows does NOT re-trigger the header), useFooterMenuState
+(clamp moves — the footer-menu policy, dialogs wrap at their own layer —
+reveal/margin windows, the reconcile effect), and the FooterMenu renderer:
+grouped and flat windows, the description column aligned at the longest
+display + 2, the footer cell with selection|running|error|success tones
+(current+selection suppresses the cell; toned rows keep a short primary cell
+over the icon), compact-width clamps at 40 columns, the ▌/| border gutter and
+INVERSE mono highlight. Theme mapping (RunFooterTheme → ThemeTokens):
+shade→surface, muted→subtle, actionFocusedBg→accent,
+actionFocusedText→accentText, formfieldText→fg, running→accent (the
+interactive hue), success/error as named. 14 new unit checks.
+
+THE SESSIONS SURFACE REBUILT ON IT — SelectDialog grows a `menu` paint path;
+the engine is untouched (filter, wrap moves, margin windows, onMove, actions,
+hints row), and the legacy dialog-select rows stay for the surfaces not yet
+migrated. Session rows become menu items: the gutter column is now the menu
+icon cell (busy spinner, else the session's OPEN-TAB slot — the digit still
+is what leader N does); the CURRENT session marks itself with the menu footer
+cell ("current" in the selection tone, suppressed while the row is selected —
+the reference agent-panel pattern replaces the old ● gutter donation); the
+armed delete keeps its destructive background and confirm label — v2's own
+dialog-session-list bg field, the ONE field the menu grammar gains (sourced
+from the reference, not invented). Pinned/date headers ride the menu's
+muted-bold header grammar.
+
+CARRY-OVER AUDIT (the SSOT line): the count range row is DROPPED on the menu
+path (the reference panels count in the frame as count/total, never a range;
+the menu windows internally). meta appends to the display when a menu surface
+needs it (mapping in SelectDialog). The legacy status cell (the MCP dialog's
+Connected ✓) is the footer cell's predecessor — its migration rides the wave
+that moves the remaining dialogs (models, agents, settings, stash, config,
+MCP) onto the menu grammar; this wave deliberately touches ONLY the sessions
+surface so the D/S/TB/CSPINE needles on the legacy paint stay honest.
+
+TAB-STRIP AUDIT (PROBE LAW): the subagent tab strip has a PROTOCOL PLANE and
+no TUI wiring — sessionSubagents ("session/subagents") sits in
+SESSION_METHODS with zero call sites (grep-verified 2026-09-21). The
+reference surface (RunSubagentSelectBody + RunFooterSubagentBody) is portable
+once the payload is live-probed (plugins-probe pattern, idempotent reads
+only). Filed as its own follow-up wave; nothing invented this sitting.
+
+GATES, HONEST LEDGER: typecheck clean; bun 151 pass + the documented
+auth-sync red (the same red R38 stash-verified pre-existing on this lane
+tip; this diff touches no auth file); generators stamp-only — coverage
+unchanged 162/49/22/1/7, lint 0 lies. PTY: full run 1 = 129 pass / 4 fail
+(scroll S1, K0/K1, F0); full run 2 (load 11.6) = 127/6 (S1, stash S3/S4,
+K0/K1, F0 — the red set ROTATES; run 1's stash was green); isolations on
+the same binary: ST 4/4, SKM 9/9 (K green), CSPINE-2 green except
+CX-pre/CX5 — and the CX dumps show the popup rendering CORRECTLY with the
+pf636 zombie ask card painting over the composer stealing enter (the R38
+photographed host-gap debt again, not a regression; CX is green in full
+run 1). TB6/B0 green in both full runs — the menu-painted sessions dialog
+carries the tab-slot gutter and the switch hint in the PTY. The reds are
+keystroke/paint-latency checks under dev load far past the escalation line
+(45-47 with a pegged foreign python3 core). WAVE-LAW LOOP: five full runs
+rotated the red set while every family but S1-scroll landed its green
+(run 1 129/4, run 2 127/6, attempts 1-3 125/8, 130/3, 129/4; isolations ST
+4/4 and SKM 9/9). S1-scroll stayed red in ALL five — decisive, and a
+HARNESS defect, not a code one: the 0.6.39 poll window (15×0.7s ≈ 10.5s)
+is sized for a thin isolation session; the fat full-run transcript paints
+the affordance late (the CX-pre fat-session lesson in scroll form; the
+stage's own re-needle comment predicted it). The window doubled to 30
+rounds (harness-only commit; no assertion weakened — the needle still
+requires the affordance to APPEAR) and run 6 went 130 PASS / 3 FAIL
+(S1-scroll GREEN; matching R38's best full run of the week) with only the
+pf636 CX pair (green in runs 1/2/attempt-2 — the photographed host-gap
+debt) and documented-persistent F0 red. EVERY red family is green in >=1
+full run on this binary; the law is closed.
+
+
 ## Remaining (v2.0.11 → us)
 
 - ~~**plan-quota surface** (owner directive 2026-09-20: show the Z.AI
@@ -729,18 +806,26 @@ load 5.5-8.7, the escalation condition), F0, and the pf636 debt.
   launch contract. Filed with the host campaign this sitting.
 - **sessions view on the v2.0.8 footer-menu grammar** (owner, 2026-09-19
   relay dogfood: "the sessions view has so many UX differences from
-  opencode2") — PICKER SLICE SHIPPED 0.6.48: the sessions picker rides the
-  reference select-controller (wrap moves, reveal-margin windows,
-  header-rows-count windows, emptyView/noMatchView split, onMove) and the
-  v2 picker behaviors (Pinned category leads, gutter digit = the open-tab
-  slot per v2.0.7 session.tab.select, conditional quickSwitchFooterHints,
-  armed delete cleared on move). REMAINS the footer-menu PRIMITIVE itself
-  (mini/footer.menu.tsx — categorized header / item / spacer rows; items
-  carry icon, current-marker, description, category and a footer tone of
-  selection|running|error|success; 8-row viewport; compact-width mode) and
-  the sessions surface rebuilt ON it as a category, plus the tab strip for
-  subagents; audit our dialog carry-over features against what the menu
-  grammar keeps. This is the top open parity line.
+  opencode2") — PICKER SLICE SHIPPED 0.6.48 (the select-controller grammar,
+  picker behaviors); FOOTER-MENU PRIMITIVE + REBUILD SHIPPED 0.6.49: the
+  reference mini/footer.menu.tsx is ported 1:1 (src/tui/footer-menu.tsx —
+  categorized header/item/spacer rows, icon column, aligned description
+  column, footer tones selection|running|error|success, 8-row viewport,
+  compact-width mode) and the sessions surface is REBUILT ON it
+  (SelectDialog `menu` path: busy spinner / open-tab slot as the icon cell,
+  the current session as the menu footer cell "current"/selection — the
+  agent-panel pattern replacing the ● gutter — armed delete keeping v2's
+  destructive bg, the one field the grammar gains). Carry-over audit
+  settled: the count range row is dropped on the menu path; meta appends to
+  the display; the legacy status cell is the footer cell's predecessor.
+  REMAINS on this line: migrating the OTHER dialogs onto the menu grammar
+  (models, agents, settings, stash, config, MCP — each a small wave; the
+  legacy paint and its proof needles stay honest until each moves), and the
+  SUBAGENT TAB STRIP — the protocol plane EXISTS (sessionSubagents,
+  "session/subagents", in SESSION_METHODS, grep-verified zero call sites
+  2026-09-21), so the reference surface (RunSubagentSelectBody +
+  RunFooterSubagentBody) is portable once the payload is live-probed
+  (plugins-probe pattern, idempotent reads only).
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted

@@ -955,10 +955,10 @@ if b0 and alive(pid):
     # scrolled frame 2-3 state-changes ahead of the affordance frame), so a
     # single sample at first-scroll fails on load. Poll, never fixed-settle.
     afford = "Jump to latest" in after_s
-    for _ in range(15):
-        if afford:
-            break
-        read_for(master, stream, 0.7)
+    for _ in range(30):                # 0.6.49: 15 rounds missed FIVE consecutive
+        if afford:                     # full runs (isolation passes; the fat
+            break                      # full-run transcript paints the affordance
+        read_for(master, stream, 0.7)  # late - the CX-pre fat-session lesson)
         afford = "Jump to latest" in "\n".join(screen.display)
     check(pid, "S1 Jump-to-latest affordance appears", afford)
     os.write(master, b"\x1b\x07"); time.sleep(0.6)               # ctrl+alt+g: jump to latest
