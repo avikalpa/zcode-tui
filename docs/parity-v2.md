@@ -741,6 +741,19 @@ load 5.5-8.7, the escalation condition), F0, and the pf636 debt.
   the sessions surface rebuilt ON it as a category, plus the tab strip for
   subagents; audit our dialog carry-over features against what the menu
   grammar keeps. This is the top open parity line.
+- **quick_switch persistent slots** (split out of the sessions line,
+  0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
+  session.quick_switch.1-9 bound to local.session.slots() (a persisted
+  session-to-slot store), and the sessions dialog gutter renders THOSE
+  slots. Our 1-9 are the v2.0.7 session.tab.select keys (owner re-point
+  0.6.22) and the picker now renders tab slots to match (the digit is
+  what the key does). The persistent slot plane itself is unported — a
+  wave if the owner wants v2's full quick-switch grammar.
+- **fuzzysort weighted filter** (0.6.48 audit) — v2.0.11 DialogSelect
+  filters with fuzzysort (title weight 2x, category/searchText weight 1,
+  threshold option); ours is substring over label/description/meta/group.
+  Same shape, weaker recall. Port when a wave touches filtering (needs
+  the fuzzysort dep in bun).
 
 - **auto-update while running** (owner directive 2026-09-19: "like opencode2,
   an outstanding UX feature") — opencode2 checks for newer releases and
