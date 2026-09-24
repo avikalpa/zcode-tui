@@ -351,6 +351,25 @@ if alive(pid):
             se1 = True
             break
     check(pid, "SE1 right cycles the highlighted setting", se1)
+    # SE3 (0.6.57): searchText is filter-only — typing a keyword narrows the
+    # menu to the matching row while the matched text itself never renders
+    # ("scheme" matches only the Theme row's keywords at v2.0.16 field
+    # mapping; "Animations" must drop out of the flat filtered list).
+    for ch in b"scheme":
+        os.write(master, bytes([ch])); time.sleep(0.05)
+    se3 = False
+    for _ in range(30):                                        # poll: fat-session window
+        read_for(master, stream, 0.3)
+        d = "\n".join(screen.display)
+        if "Theme" in d and "Animations" not in d:
+            se3 = True
+            break
+    if not se3:
+        print("---- SE3 FAIL SCREEN ----")
+        for i, line in enumerate(screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    check(pid, "SE3 keyword search narrows to the Theme row (searchText)", se3)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)
     check(pid, "SE2 settings dialog closes", "Settings" not in "\n".join(screen.display))
     os.write(master, b"\x03"); time.sleep(0.3)
