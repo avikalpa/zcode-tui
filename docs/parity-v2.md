@@ -28,6 +28,14 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **the agents dialog onto the menu grammar** SHIPPED 0.6.56 — the second
+  small-wave dialog migration. Reference component/dialog-agent.tsx: a flat
+  dialog, title "Select agent", rows render the agent id VERBATIM with its
+  description, current marked (upstream marks it by starting the selection
+  there — our menu path initializes selection from currentId the same way).
+  Ours rides the zcode permission modes over that surface (the agents<->modes
+  mapping is protocol-bound); the capitalize invention retires
+  (deviation-drain). See the 0.6.56 shipped section.
 - **the models dialog onto the menu grammar** SHIPPED 0.6.54 — the first of
   the small-wave dialog migrations. Reference component/dialog-model.tsx:
   sections verbatim (Favorites; Recent minus favorites; the rest grouped by
@@ -1000,6 +1008,42 @@ re-merge tested this wave's interim dist (md5 8a2caf7c) — their reds were
 all known classes (the pf636 CX pair, documented F0, the rotating S1/TB
 set); their S1 clean-window corroboration leg folds into this wave's runs.
 
+### 0.6.56 — the agents dialog onto the menu grammar (second small-wave dialog migration)
+
+Reference component/dialog-agent.tsx (v2.0.16): a flat DialogSelect titled
+"Select agent" whose options map agent.list() to { value: id, title: id,
+description } — the id VERBATIM, no casing invention — with `current`
+marking the active agent. Upstream's `current` mechanism starts the
+SELECTION at the current row and scrolls to it; our menu path initializes
+selection from currentId the same way (a ● gutter is a legacy-paint notion
+— in the menu grammar the current row IS the selected row on open).
+
+OUR SURFACE: the mode dialog (leader-a, /agents, the shift+tab hint) rides
+that reference over the zcode protocol permission MODES (plan, build, edit,
+yolo, auto) — the agents<->modes mapping is protocol-bound and the MODES
+audit line stays open (our modes are permission modes, not opencode
+prompt+model agent bundles). The invented capitalize on row labels RETIRES
+(upstream renders item.id verbatim); the per-mode descriptions keep their
+honest data-slot role (upstream's come from agent.description data the
+zcode protocol does not expose); title "Agent mode" -> "Select agent";
+footer hints unchanged (select enter / close esc). Dialog dumps verified
+the paint: five verbatim rows + descriptions + the hint footer, selection
+starting on the current mode.
+
+PROOF: needle L1 follows the surface truth ("Agent mode" -> "Select agent"
+— the R45 L0 needle-vs-truth lesson applied pre-emptively); TABL green in
+isolation. Two load-gated full runs on one md5-pinned binary (dist 0f607758,
+  launcher /tmp/r46-launcher.log, logs /tmp/r46-proof-{1,2}.log):
+  run 1 131/2 {S1-scroll, F0}, run 2 128/5 {CX-pre + CX5, S3/S4 stash,
+  F0} — every red family green in the OTHER run on the same binary
+  (S1, the CX pair, the stash pair), F0 the documented persistent fail.
+  Wave law MET. The S3/S4 stash reds sit in the known rotating timing
+  class (R39/R41 stash reds). THE pf636 ZOMBIE PHOTOGRAPHED A SIXTH
+  TIME: run 2's CX-pre fail screen shows the pf636.txt ask card parked
+  above the composer stealing enter; run 1's CX pair green on the same
+  binary — store poisoning, never the wave — the session/delete
+  host-verb filing strengthens again.
+
 ## Remaining (v2.0.16 → us)
 
 - ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
@@ -1070,10 +1114,10 @@ set); their S1 clean-window corroboration leg folds into this wave's runs.
   settled: the count range row is dropped on the menu path; meta appends to
   the display; the legacy status cell is the footer cell's predecessor.
   REMAINS on this line: migrating the OTHER dialogs onto the menu grammar
-  (agents, settings, stash, config, MCP — each a small wave; the legacy
-  paint and its proof needles stay honest until each moves). SHIPPED: the
-  sessions slice 0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS
-  dialog 0.6.54.
+  (settings, stash, MCP — each a small wave; the legacy paint and its proof
+  needles stay honest until each moves). SHIPPED: the sessions slice
+  0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS dialog 0.6.54,
+  the AGENTS dialog 0.6.56.
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted
