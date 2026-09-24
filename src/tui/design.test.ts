@@ -100,6 +100,11 @@ describe("OpenCode-shaped zcode-tui design model", () => {
     expect(parseSlashCommand("/sessions")).toBe("sessions");
     expect(parseSlashCommand("/sessions search words")).toBe("sessions");
     expect(parseSlashCommand("/new")).toBe("new");
+    // v2.0.16 #50524: /clear is its OWN command (close tab + front page),
+    // no longer reachable as an alias of /new — the exact confusion the
+    // upstream split removed.
+    expect(parseSlashCommand("/clear")).toBe("clear");
+    expect(parseSlashCommand("/clear")).not.toBe("new");
     expect(parseSlashCommand("plain prompt")).toBeNull();
   });
 
