@@ -370,7 +370,7 @@ os.write(master, b"\x18m"); read_for(master, stream, 1.2)
 check(pid, "L0 leader m opens the model dialog", "Select model" in "\n".join(screen.display))
 os.write(master, b"\x1b"); time.sleep(0.3)
 os.write(master, b"\x18a"); read_for(master, stream, 1.2)
-check(pid, "L1 leader a opens the agents dialog", "Agent mode" in "\n".join(screen.display))
+check(pid, "L1 leader a opens the agents dialog", "Select agent" in "\n".join(screen.display))
 os.write(master, b"\x1b"); time.sleep(0.3)
 
 st_path = os.path.expanduser("~/.config/zcode-tui/state.json")
