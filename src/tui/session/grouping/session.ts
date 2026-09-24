@@ -8,8 +8,9 @@
 // refactor family: model only, unwired.
 import { groupEntries, mergeGroups, splitGroups, type GroupNode } from "./tree"
 
-/** Wiring seam: upstream `SessionMessageAssistant["model"]` (ModelRef). */
-type ModelRef = unknown
+/** Wiring seam, FILLED in slice 2 (the rows layer): upstream
+ * `SessionMessageAssistant["model"]` (ModelRef) — our model ref shape. */
+export type ModelRef = { providerID: string; id: string; variant?: string }
 
 export type PartRef = {
   messageID: string

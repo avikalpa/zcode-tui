@@ -66,6 +66,19 @@ import {
 import { DiffViewer, diffSourceLabel, filetypeOf, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
 import { PatchDiff } from "./diff/patch-diff";
 import { ToolPart } from "./session/tool-parts";
+import {
+  messageBoundaryIDs,
+  normalizeRawMessage,
+  reduceSessionRows,
+  resolvePart,
+  turnDuration,
+  type NormMessage,
+  type NormPart,
+  type RawMessageRecord,
+  type SessionRow as TranscriptRow,
+} from "./session/rows";
+import { SessionGroupView, type GroupViewCtx } from "./session/group-view";
+import { EntryAnchor, timelineAnchors } from "./session/anchor-view";
 import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
 import {
@@ -689,103 +702,287 @@ function HintBits({ text, C }: { text: string; C: ThemeTokens }) {
   );
 }
 
-// The message transcript voice, measured off the OpenCode reference: the user
-// block is a filled panel with a bright left edge, the assistant speaks as
-// plain markdown with a metrics footer, tools are single dim lines.
-const MessageView = memo(function MessageView({
-  m,
-  running,
-  thinking,
-  C,
-  mdStyle,
-  isTail,
-  width,
-  toolsExpanded,
-  spinnerChar,
-}: {
-  m: TurnMessage;
-  running: boolean;
-  thinking: string;
+// ---- The transcript ROW views (slice 2, the render half of the
+// transcript-render refactor family; upstream SessionRowView +
+// SessionEntryView translated). One row per SessionRow: user blocks and part
+// views re-home the v2.0.7-era MessageView branches verbatim; groups render
+// through session/group-view.tsx; footers become their own rows (upstream
+// AssistantFooter). The spacing rhythm stays ours (paddingTop inside each
+// row's view rather than marginTop on the row wrapper) so unchanged grammar
+// keeps the pixel voice. ----
+
+// Raw-mirror helpers: the flat TurnMessage list keeps the copy/export/stream
+// voice; these apply the same event payloads to the RAW records that feed
+// reduceSessionRows. Each patch site in App is one adjacent call.
+function appendRawDeltaPart(records: RawMessageRecord[], kind: "text" | "reasoning", delta: string): RawMessageRecord[] {
+  if (records.length === 0) return records;
+  const last = records[records.length - 1];
+  if (String(last.info?.role) !== "assistant") return records;
+  const parts = [...last.parts];
+  const lastPart = parts[parts.length - 1] as Record<string, unknown> | undefined;
+  if (lastPart && lastPart.type === kind && !(lastPart.time as { completed?: number } | undefined)?.completed) {
+    parts[parts.length - 1] = { ...lastPart, text: String(lastPart.text ?? "") + delta };
+  } else {
+    parts.push({ type: kind, text: delta, time: { created: Date.now() } });
+  }
+  return [...records.slice(0, -1), { ...last, parts }];
+}
+
+function patchRawToolResult(records: RawMessageRecord[], callID: string, result: Record<string, unknown>): RawMessageRecord[] {
+  return records.map((rec) => {
+    if (String(rec.info?.role) !== "assistant") return rec;
+    let touched = false;
+    const parts = rec.parts.map((p) => {
+      const part = p as Record<string, unknown>;
+      if (part.type !== "tool" || part.callID !== callID) return p;
+      touched = true;
+      const state = (part.state ?? {}) as Record<string, unknown>;
+      const ok = result.success !== false;
+      return {
+        ...part,
+        state: {
+          ...state,
+          status: ok ? "completed" : "error",
+          // The flat voice truncates at 220 in the result patch; the row view
+          // keeps the same economy (ToolPart collapses beyond this anyway).
+          output: String(result.content ?? "").slice(0, 220) || undefined,
+          error: ok ? undefined : String(result.error ?? "failed"),
+        },
+      };
+    });
+    return touched ? { ...rec, parts } : rec;
+  });
+}
+
+function finalizeRawAssistant(records: RawMessageRecord[], patch: {
+  content?: string;
+  completed?: number;
+  durationMs?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  interrupted?: boolean;
+}): RawMessageRecord[] {
+  if (records.length === 0) return records;
+  const last = records[records.length - 1];
+  if (String(last.info?.role) !== "assistant") return records;
+  const now = patch.completed ?? Date.now();
+  const created = Number((last.info.time as Record<string, unknown> | undefined)?.created ?? now);
+  const meta = {
+    ...((last.info.meta ?? {}) as Record<string, unknown>),
+    ...(patch.durationMs !== undefined ? { durationMs: patch.durationMs } : {}),
+    ...(patch.outputTokens !== undefined ? { outputTokens: patch.outputTokens } : {}),
+    ...(patch.reasoningTokens !== undefined ? { reasoningTokens: patch.reasoningTokens } : {}),
+    ...(patch.interrupted !== undefined ? { interrupted: patch.interrupted } : {}),
+  };
+  let parts = last.parts.map((p) => {
+    const part = p as Record<string, unknown>;
+    if (part.type === "reasoning" && !(part.time as { completed?: number } | undefined)?.completed) {
+      return { ...part, time: { ...(part.time as Record<string, unknown> ?? {}), completed: now } };
+    }
+    if (part.type === "tool" && (part.state as Record<string, unknown> | undefined)?.status === "running") {
+      return { ...part, state: { ...(part.state as Record<string, unknown>), status: "error", error: "interrupted" } };
+    }
+    return p;
+  });
+  if (patch.content !== undefined) {
+    parts = parts.map((p) => {
+      const part = p as Record<string, unknown>;
+      if (part.type !== "text") return p;
+      const time = (part.time ?? {}) as Record<string, unknown>;
+      return { ...part, text: patch.content, time: { ...time, completed: now } };
+    });
+  }
+  const info = { ...last.info, time: { ...(last.info.time as Record<string, unknown> ?? {}), completed: now }, meta };
+  void created;
+  return [...records.slice(0, -1), { info, parts }];
+}
+
+function rowKey(row: TranscriptRow, index: number): string {
+  if (row.type === "part") return `p:${row.ref.messageID}:${row.ref.partID}`;
+  if (row.type === "message") return `m:${row.messageID}`;
+  if (row.type === "assistant-footer") return `f:${row.messageID}`;
+  if (row.type === "turn-usage") return `u:${row.messageIDs.join(",")}`;
+  if (row.type === "compaction-queued") return `q:${row.inboxID}`;
+  return `g:${index}`;
+}
+
+function UserBlock(props: { m: NormMessage; C: ThemeTokens; width: number }) {
+  return (
+    <box style={{ flexDirection: "column", paddingLeft: 2, paddingRight: 2, paddingTop: 1, flexShrink: 0 }}>
+      <box style={{ flexDirection: "row", flexShrink: 0 }}>
+        <box style={{ width: 1, flexShrink: 0, backgroundColor: props.C.user }} />
+        <box style={{ flexGrow: 1, flexShrink: 0, backgroundColor: props.C.panel, paddingLeft: 2, paddingRight: 2 }}>
+          <text content={wrapText(props.m.text, Math.max(20, props.width - 8)).join("\n")} fg={props.C.fg} />
+        </box>
+      </box>
+    </box>
+  );
+}
+
+function AssistantTextBlock(props: {
+  content: string;
+  streaming: boolean;
   C: ThemeTokens;
   mdStyle: SyntaxStyle;
-  isTail: boolean;
   width: number;
-  toolsExpanded: boolean;
-  spinnerChar: string;
 }) {
-  if (m.role === "tool") {
-    // The v2 tool row (deviation queue 1 re-port): per-tool icon + title
-    // grammar, block shells/edits, collapsible output, expandable detail.
+  if (!props.streaming && props.content.trim()) {
     return (
-      <box style={{ flexDirection: "column", paddingLeft: 0, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
-        <ToolPart
-          C={C}
-          syntaxStyle={mdStyle}
-          width={width}
-          expanded={toolsExpanded}
-          spinnerChar={spinnerChar}
-          m={{
-            tool: m.toolName ?? "tool",
-            status: m.toolStatus || (m.toolOk === false ? "error" : m.toolOk === true ? "completed" : "running"),
-            input: m.toolInput ?? {},
-            output: m.toolOut,
-            error: m.toolError,
-            metadata: m.toolMeta,
-          }}
+      <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+        <markdown
+          content={breakLongTokens(props.content, Math.max(24, props.width - 8))}
+          syntaxStyle={props.mdStyle}
+          streaming={true}
+          internalBlockMode="top-level"
+          tableOptions={{ style: "grid" }}
+          conceal={true}
         />
       </box>
     );
   }
-
-  const isUser = m.role === "user";
-  if (isUser) {
-    return (
-      <box style={{ flexDirection: "column", paddingLeft: 2, paddingRight: 2, paddingTop: 1, flexShrink: 0 }}>
-        <box style={{ flexDirection: "row", flexShrink: 0 }}>
-          <box style={{ width: 1, flexShrink: 0, backgroundColor: C.user }} />
-          <box style={{ flexGrow: 1, flexShrink: 0, backgroundColor: C.panel, paddingLeft: 2, paddingRight: 2 }}>
-            <text content={wrapText(m.text, Math.max(20, width - 8)).join("\n")} fg={C.fg} />
-          </box>
-        </box>
-      </box>
-    );
-  }
-
-  const streaming = running && isTail;
-  const footer = m.durationMs !== undefined && !streaming
-    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, m.interrupted)
-    : null;
   return (
     <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
-      {m.thinking ? (
-        <text content={`+ Thought${m.thinkingMs ? ` · ${(m.thinkingMs / 1000).toFixed(1)}s` : ""}`} fg={C.faint} />
-      ) : null}
-      {streaming && thinking ? (
-        <text content={wrapText(thinking.slice(-160), Math.max(20, width - 6)).join("\n")} fg={C.faint} />
-      ) : null}
-      {!streaming ? (
-        m.text.trim() ? (
-          <markdown
-            content={breakLongTokens(m.text, Math.max(24, width - 8))}
-            syntaxStyle={mdStyle}
-            streaming={true}
-            internalBlockMode="top-level"
-            tableOptions={{ style: "grid" }}
-            conceal={true}
-          />
-        ) : null
-      ) : (
-        <text content={wrapText(m.text || "…", Math.max(20, width - 6)).join("\n")} fg={C.fg} />
-      )}
+      <text content={wrapText(props.content || "…", Math.max(20, props.width - 6)).join("\n")} fg={props.C.fg} />
+    </box>
+  );
+}
+
+function ToolRowBlock(props: {
+  part: Extract<NormPart, { type: "tool" }>;
+  C: ThemeTokens;
+  mdStyle: SyntaxStyle;
+  width: number;
+  expanded: boolean;
+  spinnerChar: string;
+}) {
+  return (
+    <box style={{ flexDirection: "column", paddingLeft: 0, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+      <ToolPart
+        C={props.C}
+        syntaxStyle={props.mdStyle}
+        width={props.width}
+        expanded={props.expanded}
+        spinnerChar={props.spinnerChar}
+        m={{
+          tool: props.part.name,
+          status: props.part.state.status,
+          input: props.part.state.input,
+          output: props.part.state.output,
+          error: props.part.state.error,
+          metadata: {},
+        }}
+      />
+    </box>
+  );
+}
+
+function FooterRowBlock(props: { m: NormMessage; norms: NormMessage[]; C: ThemeTokens; width: number }) {
+  const footer = formatTurnFooter(
+    "auto",
+    props.m.model?.id,
+    turnDuration(props.m, props.norms),
+    props.m.meta?.outputTokens,
+    props.m.meta?.reasoningTokens,
+    props.width,
+    props.m.meta?.interrupted,
+  );
+  return (
+    <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+      {props.m.error ? <text content={`Error: ${props.m.error}`} fg={props.C.error} /> : null}
       {footer ? (
         <box style={{ flexDirection: "row", paddingTop: 0, flexShrink: 0 }}>
-          <text content={footer.head} fg={C.user} />
-          <text content={footer.rest ? ` · ${footer.rest}` : ""} fg={C.subtle} />
+          <text content={footer.head} fg={props.C.user} />
+          <text content={footer.rest ? ` · ${footer.rest}` : ""} fg={props.C.subtle} />
         </box>
       ) : null}
     </box>
   );
-});
+}
+
+function TranscriptRowView(props: {
+  row: TranscriptRow;
+  norms: NormMessage[];
+  normById: Map<string, NormMessage>;
+  groupCtx: GroupViewCtx;
+  running: boolean;
+  isTail: boolean;
+  C: ThemeTokens;
+  mdStyle: SyntaxStyle;
+  width: number;
+  toolsExpanded: boolean;
+  spinnerChar: string;
+}) {
+  const row = props.row;
+  if (row.type === "group") {
+    return <SessionGroupView ctx={props.groupCtx} row={row} />;
+  }
+  const body = (() => {
+    if (row.type === "message") {
+      const m = props.normById.get(row.messageID);
+      if (!m) return null;
+      if (m.type === "compaction") {
+        return (
+          <box style={{ paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+            <text content="Compacting context…" fg={props.C.subtle} />
+          </box>
+        );
+      }
+      return <UserBlock m={m} C={props.C} width={props.width} />;
+    }
+    if (row.type === "part") {
+      const m = props.normById.get(row.ref.messageID);
+      if (!m || m.type !== "assistant") return null;
+      const part = resolvePart(m, row.ref.partID);
+      if (!part) return null;
+      if (part.type === "tool") {
+        return (
+          <ToolRowBlock
+            part={part}
+            C={props.C}
+            mdStyle={props.mdStyle}
+            width={props.width}
+            expanded={props.toolsExpanded}
+            spinnerChar={props.spinnerChar}
+          />
+        );
+      }
+      return (
+        <AssistantTextBlock
+          content={part.text}
+          streaming={props.running && props.isTail}
+          C={props.C}
+          mdStyle={props.mdStyle}
+          width={props.width}
+        />
+      );
+    }
+    if (row.type === "assistant-footer") {
+      const m = props.normById.get(row.messageID);
+      if (!m || m.type !== "assistant") return null;
+      return <FooterRowBlock m={m} norms={props.norms} C={props.C} width={props.width} />;
+    }
+    if (row.type === "turn-usage") {
+      // Upstream gates this debug surface behind config.debug.turn_tokens and
+      // renders a collapsible per-step table; our reduce passes false so the
+      // row never emits — the collapsed summary is the only arm ported.
+      const total = row.messageIDs.reduce((t, id) => t + (props.normById.get(id)?.tokens?.output ?? 0), 0);
+      return (
+        <box style={{ paddingLeft: 3, paddingTop: 1, flexShrink: 0 }}>
+          <text content={`turn tokens · ${total.toLocaleString()}`} fg={props.C.faint} />
+        </box>
+      );
+    }
+    return null;
+  })();
+  // Non-group rows register their renderable in the timeline-anchors
+  // registry (upstream SessionRowView's useEntryAnchor); whole messages use
+  // the canonical body part, footers/usage fall through entryRef.
+  return (
+    <EntryAnchor entry={row}>
+      {body}
+    </EntryAnchor>
+  );
+}
 
 // opencode v2 submit semantics (component/prompt/index.tsx: isCommand is an
 // EXACT registered-command-name match; there is no refusal path — unknown
@@ -1144,6 +1341,22 @@ export function App({
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sel, setSel] = useState(0);
   const [msgs, setMsgs] = useState<TurnMessage[]>([]);
+  // The RAW host records behind the transcript rows (slice 2): the flat
+  // TurnMessage list above stays the copy/export/stream voice; this mirror
+  // feeds the row model (reduceSessionRows → the row transcript). Every
+  // event site patches both, from the same payload, adjacent lines.
+  const [rawMsgs, setRawMsgs] = useState<RawMessageRecord[]>([]);
+  const rawLocalSeq = useRef(0);
+  const normMsgs = useMemo<NormMessage[]>(
+    () => rawMsgs.map(normalizeRawMessage).filter((m): m is NormMessage => m !== null),
+    [rawMsgs],
+  );
+  const rows = useMemo<TranscriptRow[]>(() => reduceSessionRows(normMsgs), [normMsgs]);
+  const rowsRef = useRef<TranscriptRow[]>([]);
+  rowsRef.current = rows;
+  const normRef = useRef<NormMessage[]>([]);
+  normRef.current = normMsgs;
+  const normById = useMemo(() => new Map(normMsgs.map((m) => [m.id, m])), [normMsgs]);
   const [status, setStatus] = useState("connecting…");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -1614,9 +1827,10 @@ export function App({
       || classicBottom;
     if (bottom !== atBottomRef.current) { atBottomRef.current = bottom; setAtBottom(bottom); }
     // At the content top with older messages off-window: prepend a block.
-    const end = windowEndRef.current ?? msgsRef.current.length;
+    // (Slice 2: the window counts transcript ROWS, not flat messages.)
+    const end = windowEndRef.current ?? rowsRef.current.length;
     const maxScroll = Math.max(0, (box.scrollHeight ?? 0) - (box.viewport?.height ?? 0));
-    if ((box.scrollTop ?? 0) <= 2 && end < msgsRef.current.length) {
+    if ((box.scrollTop ?? 0) <= 2 && end < rowsRef.current.length) {
       anchor.current = box.scrollHeight ?? 0;
       setWindowEnd(Math.max(0, end - SCROLL_WINDOW));
     }
@@ -1641,6 +1855,15 @@ export function App({
   // ctrl+o: the keyboard adapter for upstream's mouse-only tool-row
   // expansion (no mouse plane here) — toggles every expandable row.
   const [toolsExpanded, setToolsExpanded] = useState(false);
+  // Group expansion (upstream #48489 persisted per-group state): the map is
+  // per-group toggle state, groupsOverride is the ctrl+o global cycle (null
+  // = follow the map). In-memory for the TUI lifetime, like the tab strip.
+  const [groupExpand, setGroupExpand] = useState<Record<string, boolean>>({});
+  const [groupsOverride, setGroupsOverride] = useState<boolean | null>(null);
+  const groupsOverrideRef = useRef<boolean | null>(null);
+  groupsOverrideRef.current = groupsOverride;
+  const toolsExpandedRef = useRef(false);
+  toolsExpandedRef.current = toolsExpanded;
 
   const orderedSessions = [...sessions].sort((a, b) => {
     const ap = pinned.includes(a.sessionId) ? 1 : 0;
@@ -1913,6 +2136,7 @@ export function App({
       const rawMessages = res.messages ?? [];
       const turns: TurnMessage[] = rawMessages.flatMap((m) => partsToTurns(m as Record<string, unknown>));
       setMsgs(turns);
+      setRawMsgs(rawMessages as RawMessageRecord[]);
       setActiveId(row.sessionId);
       setMode(row.mode ?? "build");
       // A session whose turn is ALREADY running (desktop or another client
@@ -1971,6 +2195,7 @@ export function App({
       setSessions((current) => [row, ...current.filter((x) => x.sessionId !== row.sessionId)]);
       setSel(0);
       setMsgs([]);
+      setRawMsgs([]);
       setActiveId(row.sessionId);
       setMode(launchMode ?? "build");
       resetToTail();
@@ -2004,7 +2229,23 @@ export function App({
     resetToTail();
     setHistory((h) => [content, ...h.filter((x) => x !== content)]);
     historyIdx.current = -1;
+    const rawNow = Date.now();
     setMsgs((m) => [...m, { role: "user", text: echoText }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
+    // Raw mirror: optimistic user + assistant records. The host never echoes
+    // the user prompt back (measured — the flat path has no echo patch), so
+    // local ids keep the records unique.
+    const seq = ++rawLocalSeq.current;
+    setRawMsgs((current) => [
+      ...current,
+      {
+        info: { role: "user", id: `local-u${seq}`, time: { created: rawNow } },
+        parts: [{ type: "text", text: echoText }],
+      },
+      {
+        info: { role: "assistant", id: `local-a${seq}`, time: { created: rawNow }, model: { modelId: activeModel?.modelId ?? "" } },
+        parts: [],
+      },
+    ]);
     let attachments: { ref: string; fileName: string; mime: string; bytes: number }[] | undefined;
     if (parts.length > 0) {
       setStatus(`uploading ${parts.length} attachment${parts.length === 1 ? "" : "s"}…`);
@@ -2265,6 +2506,11 @@ export function App({
           durationMs: last.durationMs ?? (last.turnStart ? Date.now() - last.turnStart : undefined),
         }];
       });
+      // Raw mirror: stamp the interruption + close the open parts.
+      setRawMsgs((current) => {
+        const created = Number((current[current.length - 1]?.info?.time as Record<string, unknown> | undefined)?.created ?? Date.now());
+        return finalizeRawAssistant(current, { interrupted: true, durationMs: Date.now() - created });
+      });
       flashStatus(dropped > 0 ? `turn interrupted · ${dropped} queued dropped` : "turn interrupted", "warning");
       probe("turn-stop", id.slice(0, 18));
     } catch (e) {
@@ -2327,10 +2573,21 @@ export function App({
   // opencode session.message.next/previous (+ user.*): the walk generalized
   // to ALL messages (0.6.24) — the reference ships these as palette-only
   // commands; ours keeps alt+end (last user message) from 0.6.18.
+  // Slice 2: the walk runs over transcript ROWS using the message-boundary
+  // dedupe (upstream messageBoundaryIDs) — one jump target per message.
   const messageJump = (dir: 1 | -1 | "last", usersOnly: boolean) => {
-    const msgs = msgsRef.current;
+    const rowList = rowsRef.current;
+    const boundaries = messageBoundaryIDs(rowList, normRef.current);
     const rows: number[] = [];
-    msgs.forEach((m, i) => { if (!usersOnly || m.role === "user") rows.push(i); });
+    rowList.forEach((row, i) => {
+      const bid = boundaries[i];
+      if (!bid) return;
+      if (usersOnly) {
+        const m = normRef.current.find((x) => x.id === bid);
+        if (m?.type !== "user") return;
+      }
+      rows.push(i);
+    });
     if (rows.length === 0) return;
     const at = userJumpIdxRef.current;
     let target: number;
@@ -2353,16 +2610,26 @@ export function App({
   const jumpToMessage = (idx: number) => {
     const box = scrollRef.current as unknown as { getChildren?: () => unknown[]; viewport?: { y: number }; scrollBy?: (d: { y: number }) => void } | null;
     if (!box) return;
-    const ve = windowEndRef.current ?? msgsRef.current.length;
+    const ve = windowEndRef.current ?? rowsRef.current.length;
     if (idx < ve - SCROLL_WINDOW) setWindowEnd(idx + 1); // pull it into the window
     // two frames: one for a possible window re-base to commit, one to settle
     setTimeout(() => setTimeout(() => {
-      const children = (scrollRef.current as unknown as { getChildren?: () => unknown[] } | null)?.getChildren?.() ?? [];
-      const ve2 = windowEndRef.current ?? msgsRef.current.length;
-      const start2 = Math.max(0, ve2 - SCROLL_WINDOW);
-      const header = ve2 < msgsRef.current.length ? 1 : 0;
-      const child = children[header + (idx - start2)] as { y?: number } | undefined;
+      // Prefer the timeline anchor's exact geometry (upstream jumpToMessage);
+      // rows mounted before a window re-base fall through to the positional
+      // child math below.
+      const boundary = messageBoundaryIDs(rowsRef.current, normRef.current)[idx];
+      const anchored = boundary ? timelineAnchors.forMessage(boundary) : undefined;
       const vp = (scrollRef.current as unknown as { viewport?: { y: number } } | null)?.viewport?.y ?? 0;
+      if (anchored && typeof anchored.node.y === "number" && !anchored.node.isDestroyed) {
+        (scrollRef.current as unknown as { scrollBy?: (d: { y: number }) => void } | null)?.scrollBy?.({ y: anchored.node.y - vp });
+        syncAtBottom();
+        return;
+      }
+      const children = (scrollRef.current as unknown as { getChildren?: () => unknown[] } | null)?.getChildren?.() ?? [];
+      const ve2 = windowEndRef.current ?? rowsRef.current.length;
+      const start2 = Math.max(0, ve2 - SCROLL_WINDOW);
+      const header = ve2 < rowsRef.current.length ? 1 : 0;
+      const child = children[header + (idx - start2)] as { y?: number } | undefined;
       if (child && typeof child.y === "number") {
         (scrollRef.current as unknown as { scrollBy?: (d: { y: number }) => void } | null)?.scrollBy?.({ y: child.y - vp });
         syncAtBottom();
@@ -2501,6 +2768,7 @@ export function App({
         ? msgsRef.current.find((m) => m.messageId === messageId && m.role === "user")
         : undefined;
       setMsgs([]);
+      setRawMsgs([]);
       setActiveId(fid);
       await subscribe(fid);
       if (src?.text) setDraft(src.text);
@@ -2513,10 +2781,12 @@ export function App({
   const forkActive = () => forkSessionAt();
 
   // v2 DialogTimeline onMove preview: live-jump the transcript to the row
-  // under the dialog cursor.
+  // under the dialog cursor. Slice 2: the row index comes from the
+  // message-boundary dedupe over transcript ROWS.
   const previewMessage = (messageId: string) => {
     if (!messageId) return;
-    const at = msgsRef.current.findIndex((m) => m.messageId === messageId);
+    const boundaries = messageBoundaryIDs(rowsRef.current, normRef.current);
+    const at = boundaries.indexOf(messageId);
     if (at >= 0) jumpToMessage(at);
   };
 
@@ -2557,6 +2827,7 @@ export function App({
       if (activeId === row.sessionId) {
         setActiveId(null);
         setMsgs([]);
+        setRawMsgs([]);
         setView("home");
         setTyping(true);
       }
@@ -2627,6 +2898,25 @@ export function App({
             toolName: String(payload.toolName ?? "tool"),
             toolCallId: String(payload.toolCallId ?? ""),
           }]);
+          // Raw mirror: a tool part on the last assistant record (creating
+          // the record when the tail is not one — mirrors the flat append).
+          setRawMsgs((current) => {
+            const part: Record<string, unknown> = {
+              type: "tool",
+              tool: String(payload.toolName ?? "tool"),
+              callID: String(payload.toolCallId ?? ""),
+              state: { status: "running", input: input ?? {} },
+            };
+            if (current.length > 0 && String(current[current.length - 1].info?.role) === "assistant") {
+              const last = current[current.length - 1];
+              return [...current.slice(0, -1), { ...last, parts: [...last.parts, part] }];
+            }
+            const seq = ++rawLocalSeq.current;
+            return [...current, {
+              info: { role: "assistant", id: `local-a${seq}`, time: { created: Date.now() } },
+              parts: [part],
+            }];
+          });
         } else if (type === "result" && payload.toolCallId) {
           const result = (payload.result ?? {}) as Record<string, unknown>;
           setMsgs((current) => current.map((x) => x.toolCallId === payload.toolCallId ? {
@@ -2635,12 +2925,25 @@ export function App({
             toolOk: result.success !== false,
             toolMs: Number((result.perf as Record<string, unknown> | undefined)?.totalMs ?? 0) || undefined,
           } : x));
+          // Raw mirror: settle the tool part by callID.
+          setRawMsgs((current) => patchRawToolResult(current, String(payload.toolCallId), result));
         } else if (type === "text_delta") {
           const delta = (payload.delta ?? payload.text ?? payload.content) as string | undefined;
-          if (delta) appendTail(delta);
+          if (delta) {
+            appendTail(delta);
+            // Raw mirror: the text part on the last assistant record. Unlike
+            // the flat tail (which drops text following tool rows), the row
+            // model keeps content order — upstream's grammar.
+            setRawMsgs((current) => appendRawDeltaPart(current, "text", delta));
+          }
         } else if (type === "reasoning_delta") {
           const delta = (payload.delta ?? payload.text ?? payload.content) as string | undefined;
-          if (delta) setThinking((current) => current + delta);
+          if (delta) {
+            setThinking((current) => current + delta);
+            // Raw mirror: the reasoning part (the group header + expanded
+            // body render from it live).
+            setRawMsgs((current) => appendRawDeltaPart(current, "reasoning", delta));
+          }
         } else if (typeof payload.content === "string" && payload.stopReason) {
           const usage = payload.usage as Record<string, unknown> | undefined;
           if (typeof payload.contextWindow === "number" && typeof usage?.inputTokens === "number") {
@@ -2662,6 +2965,19 @@ export function App({
               thinkingMs: thinkingRef.current && last.turnStart ? Date.now() - last.turnStart : undefined,
             }];
           });
+          // Raw mirror: finalize the record — final text, completed time,
+          // usage meta; open parts close (the footer row reads these).
+          setRawMsgs((current) => {
+            const now = Date.now();
+            const created = Number((current[current.length - 1]?.info?.time as Record<string, unknown> | undefined)?.created ?? now);
+            return finalizeRawAssistant(current, {
+              content: payload.content as string,
+              completed: now,
+              durationMs: now - created,
+              outputTokens,
+              reasoningTokens,
+            });
+          });
           setThinking("");
           setRunning(false);
           if (usage && typeof usage.totalTokens === "number") {
@@ -2674,6 +2990,14 @@ export function App({
             const last = current[current.length - 1];
             if (last.role !== "assistant" || last.text) return current;
             return [...current.slice(0, -1), { ...last, text: payload.response as string }];
+          });
+          // Raw mirror: an empty assistant record gains its text part.
+          setRawMsgs((current) => {
+            if (current.length === 0) return current;
+            const last = current[current.length - 1];
+            if (String(last.info?.role) !== "assistant") return current;
+            if (last.parts.some((p) => (p as { type?: string }).type === "text")) return current;
+            return appendRawDeltaPart(current, "text", payload.response as string);
           });
         } else if (payload.title && activeIdRef.current) {
           setSessions((current) => current.map((row) => row.sessionId === activeIdRef.current ? { ...row, title: String(payload.title) } : row));
@@ -3056,13 +3380,20 @@ export function App({
       openSessions();
       return;
     }
-    // ctrl+o: expand/collapse the tool rows (the adapter for upstream's
-    // mouse-only expand; ledger deviation queue 1).
-    if (key.ctrl && key.name === "o") { setToolsExpanded((v) => !v); return; }
+    // ctrl+o: the deviation-queue-1 keyboard adapter, evolved for slice 2 —
+    // one cycle over collapsed → groups open → groups+tool outputs open →
+    // collapsed (upstream expands groups and tool rows by mouse only).
+    if (key.ctrl && key.name === "o") {
+      const stage = groupsOverrideRef.current === true ? (toolsExpandedRef.current ? 2 : 1) : 0;
+      if (stage === 0) { setGroupsOverride(true); setToolsExpanded(false); }
+      else if (stage === 1) { setGroupsOverride(true); setToolsExpanded(true); }
+      else { setGroupsOverride(null); setToolsExpanded(false); }
+      return;
+    }
     // The OpenCode messages_* scroll grammar (pageup/pagedown, half-page,
     // line, first/last) — these keys can never be composer input, so they are
     // handled before the typing branch and work mid-draft.
-    if (view === "session" && msgsRef.current.length > 0 && scrollRef.current) {
+    if (view === "session" && rowsRef.current.length > 0 && scrollRef.current) {
       // The reference messages_* scroll grammar. pageup/pagedown and these
       // extras can never be composer input, so they work mid-draft.
       const vp = ((scrollRef.current.viewport?.height as number | undefined) ?? 26) - 2;
@@ -4439,8 +4770,38 @@ footerHints={[
     );
   }
 
-  const visibleEnd = windowEnd ?? msgs.length;
-  const visibleMsgs = msgs.slice(Math.max(0, visibleEnd - SCROLL_WINDOW), visibleEnd);
+  // Slice 2: the transcript renders ROWS — the slice-2 row model
+  // (reduceSessionRows over the raw records) with groups, part views and
+  // footer rows; the window counts rows; the flat list stays the
+  // copy/export voice.
+  const visibleEnd = windowEnd ?? rows.length;
+  const visibleStart = Math.max(0, visibleEnd - SCROLL_WINDOW);
+  const visibleRows = rows.slice(visibleStart, visibleEnd);
+  const groupCtx: GroupViewCtx = {
+    C,
+    mdStyle,
+    width: dims.width,
+    spinnerChar: spinner,
+    toolsExpanded,
+    expanded: (id) => (groupsOverride !== null ? groupsOverride : groupExpand[id] ?? false),
+    toggle: (id) => setGroupExpand((cur) => ({ ...cur, [id]: !(groupsOverride ?? cur[id] ?? false) })),
+    message: (messageID) => normById.get(messageID),
+    entry: (entry) => (
+      <TranscriptRowView
+        row={entry}
+        norms={normMsgs}
+        normById={normById}
+        groupCtx={groupCtx}
+        running={running}
+        isTail={false}
+        C={C}
+        mdStyle={mdStyle}
+        width={dims.width}
+        toolsExpanded={toolsExpanded}
+        spinnerChar={spinner}
+      />
+    ),
+  };
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
       {view === "session" && tabs.length > 0 ? (
@@ -4455,7 +4816,7 @@ footerHints={[
         />
       ) : null}
       <box style={{ flexDirection: "row", flexGrow: 1, minHeight: 0 }}>
-        {msgs.length === 0 ? (
+        {rows.length === 0 ? (
           <box style={{ flexGrow: 1, flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 2 }}>
             <text content="No messages yet." fg={C.subtle} />
             <text content="i to type · Enter sends · /sessions opens the session browser" fg={C.faint} />
@@ -4468,18 +4829,20 @@ footerHints={[
             stickyScroll
             stickyStart="bottom"
           >
-            {visibleEnd < msgs.length ? (
-              <text content={`… ${msgs.length - visibleEnd} older messages — scroll up to load`} fg={C.faint} />
+            {visibleEnd < rows.length ? (
+              <text content={`… ${rows.length - visibleEnd} older messages — scroll up to load`} fg={C.faint} />
             ) : null}
-            {visibleMsgs.map((m, index) => (
-              <MessageView
-                key={`${m.messageId ?? index}-${m.role}`}
-                m={m}
+            {visibleRows.map((row, index) => (
+              <TranscriptRowView
+                key={rowKey(row, visibleStart + index)}
+                row={row}
+                norms={normMsgs}
+                normById={normById}
+                groupCtx={groupCtx}
                 running={running}
-                thinking={thinking}
+                isTail={index === visibleRows.length - 1}
                 C={C}
                 mdStyle={mdStyle}
-                isTail={index === visibleMsgs.length - 1}
                 width={dims.width}
                 toolsExpanded={toolsExpanded}
                 spinnerChar={spinner}

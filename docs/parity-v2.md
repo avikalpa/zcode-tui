@@ -918,6 +918,88 @@ debt) and documented-persistent F0 red. EVERY red family is green in >=1
 full run on this binary; the law is closed.
 
 
+### 0.6.55 — the transcript-render refactor, slice 2 (the render half: rows, groups, anchors WIRED)
+
+Slice 1 landed the grouping model unwired; slice 2 wires the transcript to
+it. The app transcript now renders SessionRows from reduceSessionRows — the
+rows layer ported from upstream rows.ts (the reducer plus the footer helpers
+turnDuration/turnTokensPerSecond/cacheReuseDrop/messageBoundaryIDs/
+sessionRowID/resolvePart) — fed by the RAW host records: the app keeps a raw
+mirror (setRawMsgs) patched at EVERY event site right beside the flat
+TurnMessage patch, same payload, adjacent lines. The flat list stays the
+copy/export/stream voice byte-for-byte; the rows derive from the mirror.
+
+The data boundary is the port's one adaptation surface (grammar upstream's,
+wiring ours): normalizeRawMessage lifts our {info, parts} records onto the
+shape the reducer walks (tool part ids ride the host callID; text/reasoning
+parts take content-order ordinals like upstream); terminality reads
+completed-or-error because our records carry no finish field — in our store
+the record's completed time IS the turn boundary; inputs pass empty (no
+queued-delivery plane) and permission partitioning runs on an empty set;
+turn_tokens passes false (upstream's debug gate). Consequence, measured: the
+assistant-footer row now emits for RESUMED history too (upstream parity —
+the flat model only ever footed the just-finished live turn), computed by
+upstream's turnDuration grammar from record times.
+
+THE RENDER SURFACES — src/tui/session/group-view.tsx translates
+group-view.tsx 1:1 where the stack allows: reasoning groups collapse to
+"Thought: {title} · N steps · {duration}" (upstream's running-title memo via
+ref; the +N-ms alpha drop renders as plain warning), exploration groups to
+"Explored — N searches" (toolDisplay counts, grep/glob fold into "search");
+children recurse through the same walker (thought mode = the muted
+left-border body — our plain-text voice; tool mode = ToolPart rows); pending
+entries render inside the group. src/tui/session/anchor-view.tsx translates
+anchor-view: EntryAnchor/GroupAnchor register mounted renderables into a
+timeline-anchors registry (module singleton — keys are session-unique,
+destroyed nodes filter; upstream's ctx-per-session isolation to the same
+effect). The InlineToolRow port and reasoningSummary port ride along. Slice
+1's ONE declared wiring seam is filled: CacheUsage.model is typed (ModelRef).
+
+EXPANSION (#48489): per-group state keyed by upstream's groupID formula
+(JSON[first ref, kind, level]), in-memory for the TUI lifetime; the
+keyboard adapter EVOLVES — ctrl+o now cycles collapsed → groups open →
+groups + tool outputs open → collapsed (upstream expands by mouse only; our
+ledgered deviation queue 1 adapter gains the group plane without a new
+keybind — the keybind surface is UNCHANGED, 241 binds).
+
+NAVIGATION: messageJump walks transcript ROWS through upstream's
+messageBoundaryIDs dedupe (one jump target per message); jumpToMessage
+prefers the timeline anchor's exact geometry (timelineAnchors.forMessage)
+with the positional child math as fallback; the DialogTimeline onMove
+preview resolves ids over boundaries. The scroll window counts ROWS.
+
+MEASURED GRAMMAR DELTAS vs the flat voice: the static "+ Thought · Ns" faint
+line is REPLACED by the live group header (spinner while running, title from
+reasoningSummary, expandable body); read/glob/grep tool runs fold into one
+exploration summary row instead of N sibling rows; assistant text FOLLOWING
+tool rows within a turn is no longer dropped (the flat tail-append no-oped
+on a tool tail — the row model keeps content order, upstream's grammar);
+footers render their own row. Everything else keeps the v2.0.7-era pixel
+voice (row spacing stays internal paddingTop, not upstream's marginTop).
+
+GATES: typecheck clean; bun 203 pass + the documented auth-sync red (clean
+tip verified 189+1 in a seat-private worktree; +7 this wave's rows.test.ts
+reducer checks; +7 from an UNCLAIMED seat's models-dialog test file present
+untracked on the shared floor — excluded from this commit, see the infra/meta
+hail of this sitting); gen-keybinds stamp-only (241 binds, 163/3/49/19/7),
+lint 0 lies; PTY on dist md5 7cf8bd72 — TWO gated full runs (mutex vs the R45 launcher,
+load-window law): run 1 (load 10.88) 123/9 {S2-scroll, stash S1-S4, TG0,
+TG1, F0}; run 2 (load 10.77) 130/3 {CX-pre/CX5, F0} — the accepted closing
+state exactly; every run-1 red family green in run 2 on the same binary,
+the CX pair green in run 1, F0 documented. Wave law MET.
+
+PROVENANCE NOTE (the sitting's version collision, resolved): R45 (the
+models dialog onto the menu grammar, sess-corrected numbering) shipped
+0.6.54 mid-sitting (0ce8945 + b0eaf81 + b6dde42) while this wave was
+uncommitted on the same floor; this wave's scp overwrote their dirty
+app.tsx in the worktree AFTER their commit landed, so their delta is
+re-merged here by hand and the wave re-versions to 0.6.55. The merged
+transcript renders rows UNDER their menu-grammar model dialog; their L0
+needle fix ("Select model") rides committed. Their proof runs before the
+re-merge tested this wave's interim dist (md5 8a2caf7c) — their reds were
+all known classes (the pf636 CX pair, documented F0, the rotating S1/TB
+set); their S1 clean-window corroboration leg folds into this wave's runs.
+
 ## Remaining (v2.0.16 → us)
 
 - ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
@@ -926,18 +1008,23 @@ full run on this binary; the law is closed.
   build time (tools/resolve-theme-v2.ts -> tools/theme-v2-opencode.json
   -> the gen-themes.py merge); measured delta two faint tokens. See the
   0.6.51 shipped section.
-- **transcript-render refactor family (v2.0.12..v2.0.16)** — SLICE 1
-  SHIPPED 0.6.53: the framework-free model layer verbatim (grouping/tree
-  + grouping/session + anchors + mount-budget #50936 + rows'
-  completeGroupBoundary #50930 re-homed to grouping/history.ts) with
-  their three ts-only test files — 14 checks, unwired by design. STILL
-  OPEN, slice 2: the React translation of the Solid render surfaces
-  (group-view.tsx 321 lines + anchor-view.tsx, persisted group expansion
-  #48489 + exact scroll anchors), the app.tsx/index integration and the
-  store-side rows layer (session/index.tsx reworked, 468 lines; rows.ts
-  reworked). The biggest upstream surface drift since the port began;
-  our transcript/tool-parts ports predate it (v2.0.7-era) and remain
-  functionally served.
+- ~~**transcript-render refactor family (v2.0.12..v2.0.16)**~~ SLICE 1
+  SHIPPED 0.6.53 (the framework-free model layer, unwired by design),
+  SLICE 2 SHIPPED 0.6.55 (the render half WIRED: the rows layer over our
+  raw records, the group-view/anchor-view React translations, persisted
+  group expansion #48489, the timeline-anchors registry feeding
+  jumpToMessage, jump-over-rows via messageBoundaryIDs, the ctrl+o
+  3-state cycle). Family follow-ups recorded, none blocking: upstream's
+  per-event append optimizations (createSessionRows' fine-grained
+  subscription) are replaced by wholesale re-reduce over the raw mirror —
+  same rows, their store split is theirs; the turn-usage verbose per-step
+  table stays unported (upstream gates the whole surface behind
+  config.debug.turn_tokens; ours renders the collapsed summary only);
+  upstream's session/index.tsx routed split is not ported (our app keeps
+  its monolith shape — a routing-level rework, no user-visible delta);
+  per-session expansion persistence rides in-memory module state, not the
+  session-tabs store; the hover/mouse plane and the tool-images slot have
+  no arm here (ledgered deviations).
 - **automatic tabs mode (#50456)** and **sidebar onboarding (#50475)** —
   new upstream surfaces, no plane here yet (the auto mode onto our strip
   model; onboarding — our sidebar keeps its own shape, deviation
