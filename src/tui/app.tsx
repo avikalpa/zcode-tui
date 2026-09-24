@@ -12,6 +12,7 @@ import { SelectDialog, TextPromptDialog, ModalBackdrop, type DialogOption } from
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { formatSessionTranscript } from "./session/transcript";
+import { errorMessage } from "./error";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -1310,7 +1311,7 @@ export function App({
         flashStatus(`${row.name} ${updated?.enabled === true ? "enabled" : "disabled"}`, "success");
       })
       .catch((e) => {
-        flashStatus(e instanceof Error ? e.message : String(e), "error");
+        flashStatus(errorMessage(e), "error");
       })
       .finally(() => {
         const rest = pluginPendingRef.current.filter((id) => id !== row.id);
@@ -1333,7 +1334,7 @@ export function App({
         })
         .catch((e) => {
           if (!live) return;
-          setSkillsState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+          setSkillsState({ kind: "error", message: errorMessage(e) });
         });
       return () => {
         live = false;
@@ -1365,7 +1366,7 @@ export function App({
           .catch(() => null);
         const key = readStoredApiKey();
         const quotaPromise: Promise<PlanQuotaSnapshot | { error: string }> = key
-          ? fetchPlanQuota(key).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
+          ? fetchPlanQuota(key).catch((e: unknown) => ({ error: errorMessage(e) }))
           : Promise.resolve({ error: "no plan key synced" });
         void Promise.all([statsPromise, quotaPromise]).then(([stats, quota]) => {
           if (!live) return;
@@ -1397,7 +1398,7 @@ export function App({
         })
         .catch((e) => {
           if (!live) return;
-          setPluginsState({ kind: "error", message: e instanceof Error ? e.message : String(e), plugins: [] });
+          setPluginsState({ kind: "error", message: errorMessage(e), plugins: [] });
         });
       return () => {
         live = false;
@@ -1726,7 +1727,7 @@ export function App({
         renderer?.suspend?.();
       } catch (e) {
         try { appendFileSync("/tmp/zct-keys.log", "suspend THROW " + String(e) + "\n"); } catch {}
-        flashStatus(`editor suspend failed: ${e instanceof Error ? e.message : e}`, "error");
+        flashStatus(`editor suspend failed: ${errorMessage(e)}`, "error");
         try { unlinkSync(file); } catch {}
         resolve(null);
         return;
@@ -1793,7 +1794,7 @@ export function App({
       probe("list-ok", `${rows.length} sessions`);
       setStatus(`${rows.length} sessions`);
     } catch (e) {
-      setStatus(`error: ${e instanceof Error ? e.message : e}`);
+      setStatus(`error: ${errorMessage(e)}`);
     }
   };
 
@@ -1835,7 +1836,7 @@ export function App({
         includeSnapshot: false,
       });
     } catch (e) {
-      setStatus(`subscribe failed: ${e instanceof Error ? e.message : e}`);
+      setStatus(`subscribe failed: ${errorMessage(e)}`);
     }
   };
 
@@ -1884,7 +1885,7 @@ export function App({
       setStatus(`${displayTitle(row)} · ${turns.length} messages`);
       probe("resume", row.sessionId.slice(0, 18));
     } catch (e) {
-      setStatus(`open failed: ${e instanceof Error ? e.message : e}`);
+      setStatus(`open failed: ${errorMessage(e)}`);
     } finally {
       // The composer is ALWAYS live once the session view settles — this is
       // the bug the owner hit 2026-09-16 ("cannot even type in a zcodetui
@@ -1927,7 +1928,7 @@ export function App({
       setStatus(`${displayTitle(row)} · ready`);
       return row.sessionId;
     } catch (e) {
-      setStatus(`create failed: ${e instanceof Error ? e.message : e}`);
+      setStatus(`create failed: ${errorMessage(e)}`);
       return null;
     }
   };
@@ -1961,7 +1962,7 @@ export function App({
           const ref = await uploadSessionAttachment(client, targetId, { mime: f.mime, bytes: f.bytes, filename: f.name ?? f.label });
           attachments.push({ ref, fileName: f.name ?? f.label, mime: f.mime, bytes: f.bytes.byteLength });
         } catch (e) {
-          setStatus(`attachment upload failed: ${e instanceof Error ? e.message : e}`);
+          setStatus(`attachment upload failed: ${errorMessage(e)}`);
           setRunning(false);
           return;
         }
@@ -1973,7 +1974,7 @@ export function App({
         ? { sessionId: targetId, content: clean, attachments }
         : { sessionId: targetId, content: clean });
     } catch (e) {
-      setStatus(`send failed: ${e instanceof Error ? e.message : e}`);
+      setStatus(`send failed: ${errorMessage(e)}`);
       setRunning(false);
     }
   };
@@ -1995,6 +1996,7 @@ export function App({
       if (command === "sessions") { setDeleteId(null); setDialog("sessions"); return; }
       if (command === "home") { setView("home"); return; }
       if (command === "new") { await newSession(); return; }
+      if (command === "clear") { clearSession(); return; }
       if (command === "model") { setDialog("model"); return; }
       if (command === "themes") { openThemes(); return; }
       if (command === "commands") { setDialog("palette"); return; }
@@ -2148,6 +2150,20 @@ export function App({
     if (result.next) tabOpenSession(result.next);
     else setView("home");
   };
+
+  // v2 /clear (session.clear, upstream #50524 — 0.6.50): close the active
+  // tab and land on the front page — /new creates, /clear closes. Upstream
+  // re-sets model/agent across the route change; ours are app-level, so
+  // the composer's model survives by construction.
+  const clearSession = () => {
+    if (activeId) {
+      const index = tabsRef.current.findIndex((t) => t.sessionID === activeId);
+      const result = closeSessionTab(tabsRef.current, activeId);
+      setTabs(result.tabs);
+      setClosedTabs((stack) => recordClosedSessionTab(stack, { sessionID: activeId, title: activeTitle || undefined }, index));
+    }
+    setView("home");
+  };
   const tabReopen = () => {
     const result = reopenSessionTab(closedTabs, tabsRef.current);
     if (!result.tabs || !result.sessionID) { flashStatus("no closed tab to reopen"); return; }
@@ -2200,7 +2216,7 @@ export function App({
       flashStatus(dropped > 0 ? `turn interrupted · ${dropped} queued dropped` : "turn interrupted", "warning");
       probe("turn-stop", id.slice(0, 18));
     } catch (e) {
-      flashStatus(`interrupt failed: ${e instanceof Error ? e.message : e}`, "error");
+      flashStatus(`interrupt failed: ${errorMessage(e)}`, "error");
     }
   };
 
@@ -2328,7 +2344,7 @@ export function App({
     if (!activeId) { flashStatus(`effort → ${e}`); return; }
     void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
       .then(() => flashStatus(`effort → ${e}`))
-      .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${err instanceof Error ? err.message : err}`));
+      .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${errorMessage(err)}`));
   };
 
   const cycleEffort = (dir: 1 | -1 = 1) => {
@@ -2350,7 +2366,7 @@ export function App({
       setMode(next);
       flashStatus(`mode → ${next}`);
     } catch (e) {
-      flashStatus(`setMode failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`setMode failed: ${errorMessage(e)}`);
     }
   };
 
@@ -2366,7 +2382,7 @@ export function App({
       setThoughtLevel(next);
       flashStatus(`thinking → ${next}`);
     } catch (e) {
-      flashStatus(`setThoughtLevel failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`setThoughtLevel failed: ${errorMessage(e)}`);
     }
   };
 
@@ -2439,7 +2455,7 @@ export function App({
       flashStatus(`fork ${fid.slice(0, 13)} · ready`);
       void refresh();
     } catch (e) {
-      flashStatus(`fork failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`fork failed: ${errorMessage(e)}`);
     }
   };
   const forkActive = () => forkSessionAt();
@@ -2470,7 +2486,7 @@ export function App({
       flashStatus(`compact: ${res.compact?.state ?? "done"}`);
       void open({ sessionId: activeId, title: activeTitle, status: "", updatedAt: Date.now(), mode });
     } catch (e) {
-      flashStatus(`compact failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`compact failed: ${errorMessage(e)}`);
     }
   };
 
@@ -2494,7 +2510,7 @@ export function App({
       }
       flashStatus(`deleted ${displayTitle(row)}`);
     } catch (e) {
-      flashStatus(`delete failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`delete failed: ${errorMessage(e)}`);
     }
   };
 
@@ -2694,7 +2710,7 @@ export function App({
         if (!launchMode) return;
         void client.request("session/setMode", { sessionId: resumeId, mode: launchMode })
           .then(() => setMode(launchMode))
-          .catch((e) => flashStatus(`setMode failed: ${e instanceof Error ? e.message : e}`));
+          .catch((e) => flashStatus(`setMode failed: ${errorMessage(e)}`));
       });
   }, [resumeId]);
 
@@ -3476,7 +3492,7 @@ export function App({
           if (!activeId) { flashStatus(`model → ${modelLabel(choice)}`); return; }
           void client.request("session/setModel", { sessionId: activeId, model: { providerId: choice.providerId, modelId: choice.modelId } })
             .then(() => flashStatus(`model → ${modelLabel(choice)}`))
-            .catch((e) => flashStatus(`setModel failed: ${e instanceof Error ? e.message : e}`));
+            .catch((e) => flashStatus(`setModel failed: ${errorMessage(e)}`));
         }}
         onClose={closeDialog}
       />
@@ -3499,7 +3515,7 @@ footerHints={[
           if (!activeId) { setMode(m); flashStatus(`mode → ${m}`); return; }
           void client.request("session/setMode", { sessionId: activeId, mode: m })
             .then(() => { setMode(m); flashStatus(`mode → ${m}`); })
-            .catch((e) => flashStatus(`setMode failed: ${e instanceof Error ? e.message : e}`));
+            .catch((e) => flashStatus(`setMode failed: ${errorMessage(e)}`));
         }}
         onClose={closeDialog}
       />
@@ -4215,6 +4231,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     const commands: DialogOption<() => void>[] = [
       { id: "sessions", label: "sessions", description: "browse and resume conversations", value: openSessions },
       { id: "new", label: "new session", description: "start a fresh ZCode session", value: () => void newSession() },
+      { id: "clear", label: "clear session", description: "close this tab · v2 /clear", value: clearSession },
       { id: "model", label: "switch model…", description: "choose from the safe model allowlist", value: () => setDialog("model") },
       { id: "effort", label: "reasoning effort…", description: "low · high · max", value: () => setDialog("effort") },
       { id: "mode", label: "switch mode…", description: "plan · build · edit · yolo · auto", value: () => setDialog("mode") },

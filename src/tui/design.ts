@@ -312,6 +312,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "agents", aliases: ["agent", "mode"], description: "switch agent mode" },
   { name: "sessions", aliases: ["session"], description: "browse and resume conversations" },
   { name: "new", aliases: ["new-session"], description: "start a fresh ZCode session" },
+  { name: "clear", aliases: [], description: "close this tab and return to the front page" },
   { name: "home", aliases: [], description: "return to the zcodetui front page" },
   { name: "model", aliases: [], description: "choose from the safe model allowlist" },
   { name: "themes", aliases: ["theme"], description: "OpenCode plus terminal colour arms" },
@@ -343,7 +344,7 @@ export function matchSlashCommands(prefix: string): SlashCommandSpec[] {
 }
 
 export type SlashCommand =
-  | "agents" | "sessions" | "new" | "home" | "model" | "themes" | "commands"
+  | "agents" | "sessions" | "new" | "clear" | "home" | "model" | "themes" | "commands"
   | "status" | "effort" | "thinking" | "fork" | "compact" | "quit" | "help" | "timeline"
   | "copy" | "export"
   | "diff"
