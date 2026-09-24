@@ -28,6 +28,35 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **the theme-v2 default-theme plane** SHIPPED 0.6.51 — upstream's live
+  default theme is the v2 document (theme/assets/v2/opencode.json),
+  resolved at runtime by their @opencode/theme package; we baked the v1
+  assets/opencode.json. The port: tools/sync-opencode.sh now also
+  vendors the engine source verbatim (packages/theme/src/tui ->
+  tools/opencode-reference/theme-pkg/), and tools/resolve-theme-v2.ts
+  runs it VERBATIM under bun at build time (parseThemeDocument ->
+  resolveThemeDocument per mode; effect 4.0.0-rc.112 devDependency,
+  build-time only) to emit tools/theme-v2-opencode.json; gen-themes.py
+  merges it as the "opencode" theme in both arms. Every token read
+  cites upstream: map() in the reference mini/theme.ts (bg/fg/subtle/
+  borders/feedback colors; accent = hue.interactive[200], the doc's own
+  $selected action ref; user = categorical[0][200] — the live app tints
+  agent identities from the categorical cycle, slot 0 is Build;
+  selected = formfield.selected) and the v1->v2 correspondence
+  (v1-migrate.ts) for panel/surface/borderActive/assistant; faint takes
+  hue.neutral[500] — the doc's mid neutral — because the v1
+  borderSubtle has no v2 successor (the one judgment row, recorded).
+  MEASURED DELTA vs the v1 bake: exactly two tokens — faint dark
+  #3c3c3c->#4c4c4c, light #d4d4d4->#bebebe; every other token
+  (18+19+12 x 2 arms) the v1 asset already carries the v2 document's
+  values (upstream keeps the v1 opencode.json in lockstep). The win is
+  the ENGINE: from this pin on, every re-pin re-resolves the default
+  through upstream's own code, so v2-doc drift flows into the bake
+  automatically instead of riding a hand-synced v1 shadow. New pins in
+  design.test.ts (accent/user/faint, both arms). No user-custom theme
+  documents exist in this tree (the legacy flat theme-id file only), so
+  v2 custom-document PARSING stays unported — recorded, not a gap.
+
 - **the v2.0.16 re-pin (maintenance law, fourth live fire)** SHIPPED
   0.6.50 — upstream released v2.0.12..v2.0.16 in the three days after
   R39's recon (28 TUI commits, 34 files, +1146/-581). The vendored
@@ -815,19 +844,12 @@ full run on this binary; the law is closed.
 
 ## Remaining (v2.0.16 → us)
 
-- **theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit) —
-  upstream's LIVE default theme is now the v2 document
-  (theme/assets/v2/opencode.json: $hue.* refs, base/categorical
-  structure, light/dark mode definitions), re-based dark-first (#50412)
-  and parsed with dynamic hue-name support (#50728); the bright terminal
-  palette derives from it (#50433, terminal-pane). Our theme plane bakes
-  the v1 assets/*.json (gen-themes.py SRC glob) — unchanged this bump,
-  correctly in sync with everything we consume — but the default theme
-  we render drifts from upstream's with every v2-doc change. WAVE:
-  teach the generator (or a runtime parser) the v2 document — $hue
-  resolution, dark/light defs — or pin the parity statement that we
-  render the v1 opencode palette by owner law (the zcodetui home-logo
-  class of non-parities).
+- ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
+  SHIPPED 0.6.51 — the default "opencode" theme resolves from the v2
+  document through the vendored @opencode/theme engine run verbatim at
+  build time (tools/resolve-theme-v2.ts -> tools/theme-v2-opencode.json
+  -> the gen-themes.py merge); measured delta two faint tokens. See the
+  0.6.51 shipped section.
 - **transcript-render refactor family (v2.0.12..v2.0.16)** — group-view
   (+321 lines, persisted group expansion #48489 + exact scroll
   anchors), history-until-oldest-group-complete (#50930), mount budget
