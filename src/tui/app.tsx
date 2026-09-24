@@ -3921,14 +3921,22 @@ export function App({
     );
   }
   if (dialog === "mode") {
+    // Reference dialog-agent.tsx (v2.0.16): a flat dialog titled "Select
+    // agent" whose rows render the agent id verbatim with its description,
+    // the current agent marked. Ours rides the same surface over the zcode
+    // protocol permission modes (the agents<->modes mapping is
+    // protocol-bound); the descriptions are our data-slot stand-in for
+    // agent.description. Painted through the menu grammar like the
+    // sessions (0.6.49) and models (0.6.54) migrations.
     return (
       <SelectDialog
-        title="Agent mode"
-        options={MODES.map((m) => ({ id: m, label: m.charAt(0).toUpperCase() + m.slice(1), description: m === "auto" ? "ride the default agent (Build)" : m === "yolo" ? "no permission prompts" : "agent mode", value: m }))}
+        title="Select agent"
+        menu
+        options={MODES.map((m) => ({ id: m, label: m, description: m === "auto" ? "ride the default agent (Build)" : m === "yolo" ? "no permission prompts" : "agent mode", value: m }))}
         currentId={mode}
         theme={C}
         countLabel="mode"
-footerHints={[
+        footerHints={[
           { key: "enter", label: "select" },
           { key: "esc", label: "close" },
         ]}
