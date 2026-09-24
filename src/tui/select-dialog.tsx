@@ -215,7 +215,9 @@ export function SelectDialog<T>({
       .toLowerCase()
       .includes(filter.toLowerCase()),
   );
-  const rows = buildRows(shown);
+  // The reference flatten (dialog-select.tsx): a non-empty query collapses
+  // the grouped view into one flat list — no headers, no spacers (0.6.53).
+  const rows = filter ? shown.map((opt, itemIndex) => ({ kind: "item" as const, opt, itemIndex })) : buildRows(shown);
   const sel = reconcileSelection(idx, shown.length);
   // The card must FIT its own maxHeight: pad(2) + title + search + hints row
   // + every group header (with its spacer) is chrome the list cannot eat, or

@@ -37,6 +37,7 @@ import {
   type PickerFilter,
   type SubagentTab,
 } from "./session/subagents";
+import { modelDialogOptions } from "./model-dialog";
 import { SubagentInspector, subagentStatusColor, subagentStatusIcon } from "./subagent-strip";
 import {
   formatDateHeading,
@@ -3549,35 +3550,26 @@ export function App({
     );
   }
   if (dialog === "model") {
-    // Reference model dialog: favorites first, then the recent list order,
-    // then the rest; rows wear their star/recent meta.
-    const recentKeys = uiState.current.recent.map(modelKey);
-    const favKeys = uiState.current.favorite.map(modelKey);
-    const orderedModels = [...models].sort((a, b) => {
-      const af = favKeys.includes(modelKey(a)) ? 0 : 1;
-      const bf = favKeys.includes(modelKey(b)) ? 0 : 1;
-      if (af !== bf) return af - bf;
-      const ar = recentKeys.indexOf(modelKey(a));
-      const br = recentKeys.indexOf(modelKey(b));
-      if (ar !== -1 || br !== -1) return (ar === -1 ? 999 : ar) - (br === -1 ? 999 : br);
-      return 0;
-    });
-    const modelOpts = orderedModels.map((m) => {
-      const metas: string[] = [];
-      if (favKeys.includes(modelKey(m))) metas.push("★");
-      if (recentKeys.includes(modelKey(m))) metas.push("recent");
-      return { id: m.modelId, label: modelLabel(m), description: `${m.providerId}/${m.modelId}`, meta: metas.join(" · ") || undefined, value: m };
-    });
+    // Reference model dialog (0.6.53, component/dialog-model.tsx): the
+    // Favorites / Recent / provider-group sections through the menu grammar,
+    // groups collapsing to a flat list while filtering (their flatten).
+    const modelOpts = modelDialogOptions(
+      models.map((m) => ({ ...m, label: modelLabel(m) })),
+      uiState.current.favorite,
+      uiState.current.recent,
+    );
     return (
       <SelectDialog
-        title="Model"
+        title="Select model"
+        size="large"
+        menu
         options={modelOpts}
         footerHints={[
           { key: "enter", label: "select" },
           { key: "ctrl+f", label: "favorite" },
           { key: "esc", label: "close" },
         ]}
-        currentId={activeModel?.modelId}
+        currentId={activeModel ? `${activeModel.providerId}/${activeModel.modelId}` : undefined}
         theme={C}
         countLabel="model"
         onAction={(action, option) => {
