@@ -28,6 +28,25 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **the transcript-render family, slice 1 (model layer)** SHIPPED
+  0.6.53 — the framework-free core of upstream's #48489/#50930/#50936
+  rework, ported verbatim from the v2.0.16 reference and UNWIRED by
+  design: grouping/tree.ts (groupEntries/mergeGroups/splitGroups),
+  grouping/session.ts (SessionEntry/SessionNode/SessionGroup,
+  projectEntries/append/completePrevious/groupRefs/partitionPending/
+  hasPart; one wiring seam — CacheUsage.model typed unknown until slice
+  2's rows layer re-homes it), anchors.ts (AnchorTarget/anchorKey/
+  entryRef/groupID/containsAnchor/createTimelineAnchors), mount-budget.ts
+  (rowWeight/rowsBefore/rowsAfter — #50936), grouping/history.ts
+  (completeGroupBoundary — #50930's pure async core, re-homed from
+  rows.ts until the render rework gives it its rows home). Tests
+  verbatim with re-homed imports: anchors + mount-budget + history,
+  14 checks. Tool-name note: partPath's exploration class matches
+  ["read","glob","grep"] via toLowerCase — our Read/Glob/Grep group
+  correctly verbatim; Bash/Edit-class stay ungrouped, upstream
+  semantics preserved. No runtime wiring, no render change; slice 2
+  (the React translation of group-view/anchor-view + the app
+  integration + the rows store) remains the open half in Remaining.
 - **the subagent tab strip** SHIPPED 0.6.52 — the R39-audit line, landed
   as the UI half of the HOST's session/subagents verb (live-probed
   2026-09-25, tools/subagents-probe.ts: params { sessionId }; payload
@@ -885,13 +904,18 @@ full run on this binary; the law is closed.
   build time (tools/resolve-theme-v2.ts -> tools/theme-v2-opencode.json
   -> the gen-themes.py merge); measured delta two faint tokens. See the
   0.6.51 shipped section.
-- **transcript-render refactor family (v2.0.12..v2.0.16)** — group-view
-  (+321 lines, persisted group expansion #48489 + exact scroll
-  anchors), history-until-oldest-group-complete (#50930), mount budget
-  by rendered entries (#50936), session/index.tsx reworked (468 lines),
-  rows.ts reworked. The biggest upstream surface drift since the port
-  began; a wave (or waves) of its own — our transcript/tool-parts ports
-  predate it (v2.0.7-era) and remain functionally served.
+- **transcript-render refactor family (v2.0.12..v2.0.16)** — SLICE 1
+  SHIPPED 0.6.53: the framework-free model layer verbatim (grouping/tree
+  + grouping/session + anchors + mount-budget #50936 + rows'
+  completeGroupBoundary #50930 re-homed to grouping/history.ts) with
+  their three ts-only test files — 14 checks, unwired by design. STILL
+  OPEN, slice 2: the React translation of the Solid render surfaces
+  (group-view.tsx 321 lines + anchor-view.tsx, persisted group expansion
+  #48489 + exact scroll anchors), the app.tsx/index integration and the
+  store-side rows layer (session/index.tsx reworked, 468 lines; rows.ts
+  reworked). The biggest upstream surface drift since the port began;
+  our transcript/tool-parts ports predate it (v2.0.7-era) and remain
+  functionally served.
 - **automatic tabs mode (#50456)** and **sidebar onboarding (#50475)** —
   new upstream surfaces, no plane here yet (the auto mode onto our strip
   model; onboarding — our sidebar keeps its own shape, deviation
