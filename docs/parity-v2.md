@@ -1044,6 +1044,41 @@ isolation. Two load-gated full runs on one md5-pinned binary (dist 0f607758,
   binary — store poisoning, never the wave — the session/delete
   host-verb filing strengthens again.
 
+### 0.6.57 — the settings dialog onto the menu grammar (third small-wave dialog migration)
+
+Reference component/dialog-config.tsx (v2.0.16): a DialogSelect titled
+"Settings" whose options map the settings[] table to { title, category,
+searchText: keywords.join(" "), footer: display(setting) } — the row is
+title + category header + the CURRENT VALUE in the menu footer cell; the
+keywords are SEARCH-ONLY (their filter keys are title/category/searchText —
+matched text never renders); one footer hint (left/right = change); enter
+steps forward (onSelect = change(+1)), arrows cycle (left/right bindings);
+`current` starts the selection at a deep-linked row, default 0.
+
+OUR SURFACE: the settings dialog (/settings, palette "Open settings") rides
+that reference with the row set UNCHANGED per the 0.6.27 owner law — our
+rows map only to real setters (theme, color mode, animations, editor
+context, diff wrapping, thinking, sidebar, mode, effort, tool output); the
+v2 rows without a plane here (scrollbar, markdown, TPS, permissions,
+notifications…) stay out. The value moves from the inline meta to the menu
+FOOTER cell (upstream's option.footer); the hint text retires from the
+paint into SEARCHTEXT (upstream keywords — searchable, never displayed);
+footer hints trim to the upstream single "←/→ change". SHARED ADDITIVE
+CHANGE: DialogOption gains `searchText` and the SelectDialog filter
+predicate extends with it — no existing dialog's fields or behavior change.
+Fuzzysort/filterThreshold stays on the fuzzysort open line (skipped+
+recorded, R45 pattern). SE proof needles survive verbatim (title + category
+headers render in the menu grammar's grouped mode; the value-flash and
+esc-close asserts are untouched).
+
+PROOF: new unit check (searchText is filter-only — the paint shows title +
+category + footer value, never the keywords); new harness stage SE3
+(typing "scheme" narrows the menu to the Theme row while "Animations"
+drops out — the searchText filter inclusion proven end-to-end and the
+search-only paint with it). GATES: typecheck clean; generators stamp-only
+(241 binds 163/3/49/19/7, lint 0 lies); PTY two load-gated md5-pinned
+full runs (launcher /tmp/r47-launcher.log, logs /tmp/r47-proof-{1,2}.log).
+
 ## Remaining (v2.0.16 → us)
 
 - ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
@@ -1114,10 +1149,10 @@ isolation. Two load-gated full runs on one md5-pinned binary (dist 0f607758,
   settled: the count range row is dropped on the menu path; meta appends to
   the display; the legacy status cell is the footer cell's predecessor.
   REMAINS on this line: migrating the OTHER dialogs onto the menu grammar
-  (settings, stash, MCP — each a small wave; the legacy paint and its proof
-  needles stay honest until each moves). SHIPPED: the sessions slice
+  (stash, MCP — each a small wave; the legacy paint and its proof needles
+  stay honest until each moves). SHIPPED: the sessions slice
   0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS dialog 0.6.54,
-  the AGENTS dialog 0.6.56.
+  the AGENTS dialog 0.6.56, the SETTINGS dialog 0.6.57.
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted
