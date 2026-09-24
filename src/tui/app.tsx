@@ -30,6 +30,15 @@ import {
   type UsageStatsSummary,
 } from "./planQuota";
 import {
+  mapHostSubagents,
+  pickerTabs,
+  subagentStatusLabel,
+  tabIndex as subagentTabIndex,
+  type PickerFilter,
+  type SubagentTab,
+} from "./session/subagents";
+import { SubagentInspector, subagentStatusColor, subagentStatusIcon } from "./subagent-strip";
+import {
   formatDateHeading,
   formatContextLabel,
   formatTimeShort,
@@ -197,7 +206,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | "imagepreview" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | "imagepreview" | "subagents" | null;
 
 // v2 PromptInput.FileAttachment as our draft carries it: the data-uri,
 // its mime and bytes (the upload needs both), the filename, and the
@@ -1292,6 +1301,14 @@ export function App({
   const [pluginsState, setPluginsState] = useState<PluginsDialogState>({ kind: "idle", plugins: [] });
   const [pluginPending, setPluginPending] = useState<string[]>([]);
   const pluginPendingRef = useRef<string[]>([]);
+  // Subagent tab plane (0.6.52): tabs poll session/subagents for the active
+  // session; inspectId opens the non-modal inspector card; pickerFilter is
+  // the picker's tab active/inactive toggle. The ref mirrors tabs for the
+  // composer key closure (the reconciler remount law — closures read refs).
+  const [subagentTabs, setSubagentTabs] = useState<SubagentTab[]>([]);
+  const subagentTabsRef = useRef<SubagentTab[]>([]);
+  const [inspectId, setInspectId] = useState<string | null>(null);
+  const [pickerFilter, setPickerFilter] = useState<PickerFilter>("active");
   const togglePlugin = (row: PluginRow) => {
     if (pluginPendingRef.current.includes(row.id)) return;
     const next: string[] = [...pluginPendingRef.current, row.id];
@@ -1470,6 +1487,40 @@ export function App({
     const timer = setInterval(() => setCursorBlink((b) => !b), 530);
     return () => clearInterval(timer);
   }, [typing, animations]);
+  // Subagent tab poll (0.6.52): session/subagents per active session, on a
+  // slow interval while a session is open — the payload is small and the
+  // host keeps the revision. Kept polling even when idle-ended so the tabs
+  // (and the picker) survive turn completion, like upstream's tracker state.
+  useEffect(() => {
+    if (!activeId) {
+      setSubagentTabs([]);
+      subagentTabsRef.current = [];
+      setInspectId(null);
+      return;
+    }
+    // The inspector selection is per-session — a session switch closes it.
+    setInspectId(null);
+    let live = true;
+    const poll = () => {
+      client
+        .request("session/subagents", { sessionId: activeId })
+        .then((res) => {
+          if (!live) return;
+          const tabs = mapHostSubagents(res);
+          subagentTabsRef.current = tabs;
+          setSubagentTabs(tabs);
+        })
+        .catch(() => {
+          /* session not found (closed under us) — keep the last tabs */
+        });
+    };
+    poll();
+    const timer = setInterval(poll, 3000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [activeId, client]);
 
   const rememberModel = (choice: ModelChoice) => {
     uiState.current = uiStateRepository.addRecent({ providerId: choice.providerId, modelId: choice.modelId });
@@ -3199,6 +3250,14 @@ export function App({
         if (next !== undefined) { undoStack.current.push(text0); applyDraft(next, next.length); }
         return;
       }
+      if (key.name === "down" && !key.ctrl && !key.meta && !key.shift && !draftRef.current && subagentTabsRef.current.length > 0) {
+        // session.child.first (v2 keybind "down", Toggle subagent picker):
+        // fires only where the history walk below is a no-op — an empty
+        // single-line draft — and only when subagent tabs exist.
+        setPickerFilter("active");
+        setDialog("subagents");
+        return;
+      }
       if (key.name === "up" || key.name === "down") {
         // Multiline drafts move the cursor across lines; single-line drafts
         // walk the prompt history.
@@ -3445,6 +3504,46 @@ export function App({
           }
         }}
         onSelect={(row) => { closeDialog(); void open(row); }}
+        onClose={closeDialog}
+      />
+    );
+  }
+  if (dialog === "subagents") {
+    // RunSubagentSelectBody (0.6.52): the searchable subagent picker; tab
+    // toggles running vs ended (the reference active/inactive signal).
+    const visible = pickerTabs(subagentTabs, pickerFilter);
+    return (
+      <SelectDialog
+        title="Select subagent"
+        size="large"
+        menu
+        theme={C}
+        options={visible.map((t) => ({
+          id: t.sessionID,
+          label: t.description || t.title || t.label,
+          description: t.subagentType,
+          footer: subagentStatusLabel(t.status),
+          footerTone: t.status === "running" || t.status === "error" ? t.status : t.status === "completed" ? ("success" as const) : undefined,
+          icon: () => (
+            <text content={subagentStatusIcon(t.status)} fg={subagentStatusColor(C, t.status)} />
+          ),
+          value: t.sessionID,
+        }))}
+        currentId={inspectId ?? undefined}
+        footerHints={[
+          { key: "tab", label: pickerFilter === "active" ? "show inactive" : "show active" },
+          { key: "enter", label: "inspect" },
+          { key: "esc", label: "close" },
+        ]}
+        emptyLabel="No subagents found"
+        onExtraKey={(key) => {
+          if (key.name === "tab" && !key.ctrl && !key.meta) {
+            setPickerFilter((f) => (f === "active" ? "inactive" : "active"));
+            return true;
+          }
+          return false;
+        }}
+        onSelect={(sessionId) => { setInspectId(sessionId); closeDialog(); }}
         onClose={closeDialog}
       />
     );
@@ -4305,7 +4404,11 @@ footerHints={[
     thinkingOff: thoughtLevel === "disabled",
     leaderActive,
   };
-  const hintBits = "shift+tab agents   ctrl+p commands";
+  // The v2 contextHintCandidates row: the subagent entry appears only when
+  // tabs exist (footer.view.tsx — activeTabs > 0 && shortcut).
+  const hintBits = subagentTabs.length > 0
+    ? `shift+tab agents   ctrl+p commands   down ${subagentTabs.length} subs`
+    : "shift+tab agents   ctrl+p commands";
   const ctxLabel = ctx && ctx.window > 0 ? `${formatContextLabel(ctx.used, ctx.window)}  ` : "";
 
   if (view === "home") {
@@ -4538,6 +4641,26 @@ footerHints={[
       ) : null}
       <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
       {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} /> : null}
+      {inspectId ? (
+        // The subagent inspector (0.6.52): the RunFooterSubagentBody header
+        // plane above the composer — esc back, tab cycles the tabs.
+        <SubagentInspector
+          C={C}
+          tab={subagentTabs.find((t) => t.sessionID === inspectId)}
+          index={subagentTabIndex(subagentTabs, inspectId)}
+          total={subagentTabs.length}
+          spinner={spinner}
+          width={dims.width}
+          onClose={() => setInspectId(null)}
+          onCycle={(dir) => {
+            const n = subagentTabs.length;
+            if (n === 0) return;
+            const at = subagentTabIndex(subagentTabs, inspectId);
+            const next = ((at < 0 ? 0 : at + dir) + n) % n;
+            setInspectId(subagentTabs[next].sessionID);
+          }}
+        />
+      ) : null}
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
         <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
       </box>

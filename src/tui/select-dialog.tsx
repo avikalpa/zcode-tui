@@ -154,6 +154,7 @@ export function SelectDialog<T>({
   emptyLabel,
   noMatchLabel,
   menu,
+  onExtraKey,
   theme,
 }: {
   title: string;
@@ -188,6 +189,11 @@ export function SelectDialog<T>({
    * instead of the legacy dialog-select rows — the sessions-surface
    * rebuild (owner dogfood directive, docs/parity-v2.md sessions line). */
   menu?: boolean;
+  /** Surface-specific key hook (reference onKey in the searchable panel
+   * controller): fired after escape/quit, before the shared grammar; return
+   * true when the key was consumed. The subagents picker's tab
+   * active/inactive toggle rides this. */
+  onExtraKey?: (key: { name: string; shift?: boolean; ctrl?: boolean; meta?: boolean; sequence?: string }) => boolean;
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
@@ -287,6 +293,7 @@ export function SelectDialog<T>({
 
   useKeyboard((key) => {
     if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
+    if (onExtraKey?.(key)) return;
     if (key.ctrl && key.name === "f") { onAction?.("pin", shown[sel]); return; }
     if (key.ctrl && key.name === "d") { onAction?.("delete", shown[sel]); return; }
     if (key.ctrl && key.name === "r") { onAction?.("rename", shown[sel]); return; }
