@@ -50,6 +50,9 @@ export interface DialogOption<T> {
   /** Right-edge status cell — port of the v2.0.7 dialog-select option
    * footer + footerColor pair (the MCP dialog's Connected ✓ column). */
   status?: { text: string; color?: string; bold?: boolean };
+  /** Search-only keywords (v2 dialog-select searchText: the filter reads
+   * title + category + searchText — matched text never renders). */
+  searchText?: string;
   /** Menu-grammar fields (footer.menu.tsx item shape) for the surfaces
    * painted through the menu path: a 2-column icon cell, and a footer cell
    * carrying a tone (current markers ride footer "current" + selection,
@@ -211,7 +214,7 @@ export function SelectDialog<T>({
   const cardWidth = tierWidth(size, dims.width);
 
   const shown = options.filter((o) =>
-    `${o.label} ${o.description ?? ""} ${o.meta ?? ""} ${o.group ?? ""}`
+    `${o.label} ${o.description ?? ""} ${o.meta ?? ""} ${o.group ?? ""} ${o.searchText ?? ""}`
       .toLowerCase()
       .includes(filter.toLowerCase()),
   );

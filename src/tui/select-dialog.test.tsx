@@ -68,4 +68,33 @@ describe("SelectDialog reference parity", () => {
     expect(frame).toContain("zai-api");
     setup.renderer.destroy();
   });
+
+  test("searchText is filter-only — matched text never renders (v2 dialog-config port)", async () => {
+    const setup = await testRender(
+      <SelectDialog
+        title="Settings"
+        menu
+        options={[
+          {
+            id: "theme",
+            label: "Theme",
+            group: "Appearance",
+            footer: "opencode",
+            searchText: "color scheme",
+            value: "theme",
+          },
+        ]}
+        onSelect={() => {}}
+        onClose={() => {}}
+      />,
+      { width: 60, height: 20 },
+    );
+    const frame = await setup.waitForFrame((f) => f.includes("Theme"), { maxPasses: 20 });
+    // The menu grammar paints title + category header + the value in the
+    // footer cell; the searchText keywords stay invisible.
+    expect(frame).toContain("Appearance");
+    expect(frame).toContain("opencode");
+    expect(frame).not.toContain("color scheme");
+    setup.renderer.destroy();
+  });
 });

@@ -4356,11 +4356,16 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     );
   }
   if (dialog === "settings") {
-    // Ported from opencode v2.0.7 component/dialog-config.tsx: the settings
-    // list — category groups, the current value in the row meta, ←/→ cycles
-    // and enter steps forward. OUR rows map only to real setters
-    // (state.json + live session state); the v2 rows without a plane here
-    // (scrollbar, markdown, TPS, permissions, notifications…) stay out.
+    // Ported from opencode v2.0.16 component/dialog-config.tsx onto the menu
+    // grammar (0.6.57, third small-wave dialog migration): rows = title +
+    // category header + the CURRENT VALUE in the menu footer cell (their
+    // option.footer = display(setting)); keywords are SEARCH-ONLY (their
+    // searchText — the filter reads title/category/searchText, matched text
+    // never renders); one footer hint (left/right = change); enter steps
+    // forward, arrows cycle. OUR rows map only to real setters
+    // (state.json + live session state — the 0.6.27 owner law); the v2 rows
+    // without a plane here (scrollbar, markdown, TPS, permissions,
+    // notifications…) stay out.
     type SettingRow = {
       id: string;
       title: string;
@@ -4424,20 +4429,17 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       <SelectDialog
         title="Settings"
         size="large"
+        menu
         options={rows.map((row) => ({
           id: row.id,
           label: row.title,
-          description: row.hint,
-          meta: row.value,
           group: row.group,
+          footer: row.value,
+          searchText: row.hint,
           value: row.id,
         }))}
         theme={C}
-        footerHints={[
-          { key: "←/→", label: "change" },
-          { key: "enter", label: "next value" },
-          { key: "esc", label: "close" },
-        ]}
+        footerHints={[{ key: "←/→", label: "change" }]}
         onHorizontal={(dir, option) => {
           const row = rows.find((r) => r.id === option?.id);
           if (row) row.change(dir);
