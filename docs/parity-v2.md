@@ -28,6 +28,28 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **the models dialog onto the menu grammar** SHIPPED 0.6.54 — the first of
+  the small-wave dialog migrations. Reference component/dialog-model.tsx:
+  sections verbatim (Favorites; Recent minus favorites; the rest grouped by
+  provider name), rows through the SelectDialog menu path, title "Select
+  model". The rest-sort adopts the NEUTRAL parts of their sortModelOptions
+  (provider-name locale-compare, then title); their house-provider boost
+  (opencode/opencode-go first) and the release-date key have no honest
+  analog or data here and are skipped, and the "Free" footer needs cost
+  data the zcode catalog does not expose. SHARED BEHAVIOR ported with it:
+  the reference flatten (dialog-select.tsx) — a non-empty query collapses
+  every grouped dialog to one flat list, no headers, no spacers. The
+  invented star/recent row metas are RETIRED (deviation-drain): favorites
+  wear the upstream "(Favorite)" description (the one noted delta: their
+  grouped Favorites rows omit the mark; ours keep it so the mark survives
+  the collapsed filter view), recent membership is carried by the Recent
+  header. ctrl+f favorite, enter select, and the setModel wiring are
+  unchanged; the builder is src/tui/model-dialog.ts + 8 unit checks.
+  SKIPPED and recorded: the "Connect an integration" action row (our
+  provider_connect plane is the 0.6.34 integration dialog — a follow-on
+  wave if the owner wants the link from this dialog), fuzzysort (its own
+  Remaining line).
+
 - **the transcript-render family, slice 1 (model layer)** SHIPPED
   0.6.53 — the framework-free core of upstream's #48489/#50930/#50936
   rework, ported verbatim from the v2.0.16 reference and UNWIRED by
@@ -961,9 +983,10 @@ full run on this binary; the law is closed.
   settled: the count range row is dropped on the menu path; meta appends to
   the display; the legacy status cell is the footer cell's predecessor.
   REMAINS on this line: migrating the OTHER dialogs onto the menu grammar
-  (models, agents, settings, stash, config, MCP — each a small wave; the
-  legacy paint and its proof needles stay honest until each moves). The
-  SUBAGENT TAB STRIP SHIPPED 0.6.52 (its own Shipped bullet).
+  (agents, settings, stash, config, MCP — each a small wave; the legacy
+  paint and its proof needles stay honest until each moves). SHIPPED: the
+  sessions slice 0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS
+  dialog 0.6.54.
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted
