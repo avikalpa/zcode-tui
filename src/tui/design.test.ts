@@ -145,6 +145,19 @@ describe("OpenCode-shaped zcode-tui design model", () => {
     expect(tokensFor("zai-light", "dark")).toEqual(THEMES["zai-light"]);
   });
 
+  test("opencode resolves from the v2 document through the vendored engine (tools/resolve-theme-v2.ts)", () => {
+    // The engine's own resolutions (tools/theme-v2-opencode.json, v2.0.16):
+    // the accent is the interactive hue's vivid step, the Build agent rides
+    // the first categorical color, and faint is the doc's mid neutral (the
+    // v1 asset's borderSubtle has no v2 successor).
+    expect(tokensFor("opencode", "dark").accent).toBe("#fab283");
+    expect(tokensFor("opencode", "dark").user).toBe("#5c9cf5");
+    expect(tokensFor("opencode", "dark").faint).toBe("#4c4c4c");
+    expect(tokensFor("opencode", "light").accent).toBe("#3b7dd8");
+    expect(tokensFor("opencode", "light").user).toBe("#7b5bb6");
+    expect(tokensFor("opencode", "light").faint).toBe("#bebebe");
+  });
+
   test("mdFor/diffFor follow the mode (both arms from the same upstream documents)", () => {
     expect(mdFor("opencode", "light").mdHeading).toBe("#d68c27");
     expect(mdFor("opencode", "dark").mdHeading).toBe("#9d7cd8");
