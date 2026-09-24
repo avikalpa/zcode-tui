@@ -28,6 +28,41 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **the subagent tab strip** SHIPPED 0.6.52 — the R39-audit line, landed
+  as the UI half of the HOST's session/subagents verb (live-probed
+  2026-09-25, tools/subagents-probe.ts: params { sessionId }; payload
+  { revision, childSessionIds, running: [{ childSessionId, agentId,
+  toolCallId, subagentType, title, startedAt, status }], ended:
+  { total, items: [...the same + summary, endedAt] } }; status
+  vocabulary measured running|success). THE PORT: src/tui/session/
+  subagents.ts maps the payload (success->completed, cancelled kept,
+  unmeasured->error conservatively; host title -> label, summary ->
+  inspector body, subagentType -> the picker row's secondary slot; the
+  upstream display formula description||title||label verbatim). The
+  PICKER is RunSubagentSelectBody on the SelectDialog menu grammar — tab
+  toggles running vs not-running through the new onExtraKey hook
+  (reference onKey in their searchable-panel controller), footerHints
+  carry the toggle + inspect, empty state "No subagents found". The
+  INSPECTOR is RunFooterSubagentBody's header plane (statusColor/
+  statusIcon verbatim including the mono fallbacks * - ! ., the i-of-n
+  count cell, footerMenuText budget) rendered above the composer; esc
+  back, tab cycles all tabs with wrap. OPENS via session.child.first —
+  down on an EMPTY single-line draft when tabs exist (the only spot the
+  history walk below is a no-op); the 0.6.24 blocked-host note is
+  SUPERSEDED (the child tree has its own verb), coverage: first covered
+  with member evidence, child.next/previous partial (the inspector tab
+  cycle carries the semantic, the right/left keys are unbound). The
+  footer hint row gains "down N subs" (the contextHintCandidates entry).
+  MEASURED HOST GAPS (filed in Blocked-on-host, not invented around):
+  session/messages + session/read on a child id fail "Session is not
+  active" (tools/subagents-child-gap-probe.ts) — no child-transcript
+  navigation, the body renders the host summary or the upstream empty
+  state; per-child interrupt unverified, so the interrupt hint stays
+  unrendered (upstream renders it only when the binding exists). No new
+  PTY stage: the surface needs a live subagent turn in-proof (dream
+  filed for a dedicated probe stage); 16 unit checks pin the mapping,
+  the picker filter, the label strings, and the glyphs.
+
 - **the theme-v2 default-theme plane** SHIPPED 0.6.51 — upstream's live
   default theme is the v2 document (theme/assets/v2/opencode.json),
   resolved at runtime by their @opencode/theme package; we baked the v1
@@ -903,12 +938,8 @@ full run on this binary; the law is closed.
   the display; the legacy status cell is the footer cell's predecessor.
   REMAINS on this line: migrating the OTHER dialogs onto the menu grammar
   (models, agents, settings, stash, config, MCP — each a small wave; the
-  legacy paint and its proof needles stay honest until each moves), and the
-  SUBAGENT TAB STRIP — the protocol plane EXISTS (sessionSubagents,
-  "session/subagents", in SESSION_METHODS, grep-verified zero call sites
-  2026-09-21), so the reference surface (RunSubagentSelectBody +
-  RunFooterSubagentBody) is portable once the payload is live-probed
-  (plugins-probe pattern, idempotent reads only).
+  legacy paint and its proof needles stay honest until each moves). The
+  SUBAGENT TAB STRIP SHIPPED 0.6.52 (its own Shipped bullet).
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted
@@ -1063,6 +1094,17 @@ full run on this binary; the law is closed.
   fallback is dark). Needs a terminal-colors plane on the host or an
   OSC 10/11 query+parse in our input loop.
 ## Blocked on a zcode HOST VERB (file with the zcode host, not the TUI)
+
+- **subagent child plane (0.6.52 measured)** — session/messages and
+  session/read on a child session id fail "Session is not active"
+  (tools/subagents-child-gap-probe.ts): the child transcript is not
+  addressable from the TUI, so upstream's subagent detail view (their
+  1141-line stream-v2.subagent transport feeding
+  RunFooterSubagentBody's scrollbox) has no data source here — our
+  inspector renders the host summary line instead. Per-child interrupt
+  (v2 session.interrupt on the child id) is unverified in the same
+  stroke. The strip itself SHIPPED 0.6.52 on the summary/empty-state
+  body; the detail plane returns when the host exposes child reads.
 
 - **session.undo / session.redo** — v2 = server-side session.revert
   stage/clear; zcode has fork-at-message only (timeline). Needs
