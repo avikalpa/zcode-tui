@@ -28,6 +28,43 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **the v2.0.16 re-pin (maintenance law, fourth live fire)** SHIPPED
+  0.6.50 — upstream released v2.0.12..v2.0.16 in the three days after
+  R39's recon (28 TUI commits, 34 files, +1146/-581). The vendored
+  reference is re-pinned (tools/sync-opencode.sh v2.0.16, explicit
+  tag); generators refreshed: the keybind surface is UNCHANGED (241
+  binds, coverage 162/49/22/1/7, lint 0 lies) and the baked theme arms
+  are unchanged (the generator consumes the v1 assets/*.json, which did
+  not move — the v2 default-theme drift is its own Remaining wave).
+  Ports landed:
+  - **/clear split (session.clear, #50524)** — upstream split "new
+    session" from a new "clear session" command: /clear closes the
+    ACTIVE tab (recorded to the closed stack) and lands on the front
+    page; /new keeps creating. Ours: the one command registry
+    (design.ts SLASH_COMMANDS + union), the dispatcher arm, the palette
+    row. The model/effort/mode survive (ours are app-level; upstream
+    re-sets them across the route change).
+  - **errorMessage family (#50778/#50783)** — upstream util/error.ts
+    errorMessage/errorFormat ported (src/tui/error.ts; isRecord
+    inlined, cliErrorMessage left upstream-side): Error.message ->
+    Error.name -> record.message -> record.data.message -> String ->
+    errorFormat — the fix for user-visible surfaces printing a bare
+    "[object Object]" for structured API failures. All 21 ad-hoc
+    `instanceof Error ? …` sites in app.tsx ride it now. 7 unit checks.
+  Dispositions (no plane in this tree, truth-recorded): copy-session-ID
+  from the tab context menu (#50181) — the FUNCTION is at parity (the
+  session.copy.id palette row since 0.6.33), the tab CONTEXT MENU stays
+  in the strip's ledgered mouse-affordance deviation; export complete
+  transcript (#50733) — parity by construction (our resume loads the
+  FULL message list; upstream's bug was formatting from their loaded
+  window); turn-token latest-step summary (#50765), execute-details
+  click (#50921), MCPFailed removal (#50958), Mini exit aliases
+  (#50388), /btw resize (#50392), MCP sidebar persist (#50447), renderer
+  listener budget (#50442), update-command description (#50687),
+  canonical projects + worktrees-out (#50674/#50612), composer import
+  cycle (#50637), verbosity levels (net-reverted upstream; survives
+  only in their mini mode, which we do not port).
+
 - ~~**settings dialog truncated hints**~~ FIXED 0.6.45 — SelectDialog's row
   budget gave the label column `cardWidth - 10` (78 of 88 cols in large
   dialogs), starving every description to `max(8, 2)` = 8 chars ("color
@@ -776,8 +813,32 @@ debt) and documented-persistent F0 red. EVERY red family is green in >=1
 full run on this binary; the law is closed.
 
 
-## Remaining (v2.0.11 → us)
+## Remaining (v2.0.16 → us)
 
+- **theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit) —
+  upstream's LIVE default theme is now the v2 document
+  (theme/assets/v2/opencode.json: $hue.* refs, base/categorical
+  structure, light/dark mode definitions), re-based dark-first (#50412)
+  and parsed with dynamic hue-name support (#50728); the bright terminal
+  palette derives from it (#50433, terminal-pane). Our theme plane bakes
+  the v1 assets/*.json (gen-themes.py SRC glob) — unchanged this bump,
+  correctly in sync with everything we consume — but the default theme
+  we render drifts from upstream's with every v2-doc change. WAVE:
+  teach the generator (or a runtime parser) the v2 document — $hue
+  resolution, dark/light defs — or pin the parity statement that we
+  render the v1 opencode palette by owner law (the zcodetui home-logo
+  class of non-parities).
+- **transcript-render refactor family (v2.0.12..v2.0.16)** — group-view
+  (+321 lines, persisted group expansion #48489 + exact scroll
+  anchors), history-until-oldest-group-complete (#50930), mount budget
+  by rendered entries (#50936), session/index.tsx reworked (468 lines),
+  rows.ts reworked. The biggest upstream surface drift since the port
+  began; a wave (or waves) of its own — our transcript/tool-parts ports
+  predate it (v2.0.7-era) and remain functionally served.
+- **automatic tabs mode (#50456)** and **sidebar onboarding (#50475)** —
+  new upstream surfaces, no plane here yet (the auto mode onto our strip
+  model; onboarding — our sidebar keeps its own shape, deviation
+  ledger).
 - ~~**plan-quota surface** (owner directive 2026-09-20: show the Z.AI
   Coding Plan quota, usage and weekly quota left)~~ SHIPPED 0.6.46 —
   the design fork RESOLVED (b): the synced coding-plan api key
