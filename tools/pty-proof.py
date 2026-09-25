@@ -1153,10 +1153,10 @@ if alive(pid):
     # law (2026-09-25, live probe) — the composer's ctrl+j newline does not
     # exist on the PTY path (OpenTUI delivers \x0a as a no-op and the draft
     # concatenates), so a multi-line draft cannot be typed here.
-    os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear the restored draft
     # take-on-select means S2's restore EMPTIED the stash — re-park draft-1
-    # first, so the list holds two entries for the ordering/disarm/delete
-    # proofs (the run-5 S3/S5/S6 dumps: one-row lists, mechanics all green).
+    # FIRST. No ctrl+c here: the park empties the composer itself, and a
+    # ctrl+c would clear the draft and turn the park into its empty-draft
+    # no-op (the run-5/6 S3 dumps: one-row lists, mechanics all green).
     _palette_run("stash prompt")
     os.write(master, b"STASH-PROOF-DRAFT-2")
     read_for(master, stream, 0.8)
