@@ -1126,6 +1126,11 @@ if alive(pid):
     _palette_run("stash list")
     s1_ok = poll_paint(master, stream, screen, ("Stash", "STASH-PROOF-DRAFT-1", "just now"))
     check(pid, "S1 stash list dialog shows the preview + age", s1_ok)
+    if not s1_ok:
+        print("---- S1 FAIL SCREEN (full, non-empty rows) ----")
+        for i, line in enumerate(screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
 
     os.write(master, b"\r")                                   # enter: restore (take)
     s2_ok = False
@@ -1136,6 +1141,11 @@ if alive(pid):
             s2_ok = True
             break
     check(pid, "S2 restore returns the draft to the composer", s2_ok)
+    if not s2_ok:
+        print("---- S2 FAIL SCREEN (full, non-empty rows) ----")
+        for i, line in enumerate(screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
 
     # 0.6.58 menu-grammar migration: a second, MULTI-LINE draft must top the
     # list (newest first) and carry its line count in the menu FOOTER cell
@@ -1165,6 +1175,11 @@ if alive(pid):
         for line in screen.display[-16:]:
             if line.strip():
                 print(f"|{line.rstrip()}")
+    if not s3_ok:
+        print("---- S3 FAIL SCREEN (tail) ----")
+        for line in screen.display[-16:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
 
     os.write(master, b"\x04")                                 # ctrl+d: arm delete (selection on the top row)
     s4_ok = poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
@@ -1187,6 +1202,11 @@ if alive(pid):
         for line in screen.display[-16:]:
             if line.strip():
                 print(f"|{line.rstrip()}")
+    if not s5_ok:
+        print("---- S5 FAIL SCREEN (tail) ----")
+        for line in screen.display[-16:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
 
     os.write(master, b"\x1b[A"); read_for(master, stream, 0.4)   # up: back onto draft-2
     os.write(master, b"\x04")                                 # ctrl+d: arm again
@@ -1202,6 +1222,11 @@ if alive(pid):
                 s6_ok = True
                 break
     check(pid, "S6 confirmed ctrl+d deletes the armed row only", s6_ok)
+    if not s6_ok:
+        print("---- S6 FAIL SCREEN (tail) ----")
+        for line in screen.display[-16:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
     if not s6_ok:
         print("---- S6 FAIL SCREEN (tail) ----")
         for line in screen.display[-16:]:
