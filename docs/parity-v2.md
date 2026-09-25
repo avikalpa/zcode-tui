@@ -1075,9 +1075,29 @@ PROOF: new unit check (searchText is filter-only — the paint shows title +
 category + footer value, never the keywords); new harness stage SE3
 (typing "scheme" narrows the menu to the Theme row while "Animations"
 drops out — the searchText filter inclusion proven end-to-end and the
-search-only paint with it). GATES: typecheck clean; generators stamp-only
-(241 binds 163/3/49/19/7, lint 0 lies); PTY two load-gated md5-pinned
-full runs (launcher /tmp/r47-launcher.log, logs /tmp/r47-proof-{1,2}.log).
+search-only paint with it). GATES: typecheck clean; bun 205 = 204 pass +
+the documented auth-sync red; generators stamp-only (241 binds
+163/3/49/19/7, lint 0 lies). PTY on one md5-pinned binary (dist ab9b2491),
+THREE load-gated full runs (launcher /tmp/r47-launcher.log + run-3 wrapper,
+logs /tmp/r47-proof-{1,2,3}.log):
+  run 1 (OLD needles) 123/11 {S2, TB3/TB4/TB6, K0/K1, TH3/TH4/TH5/TH7, F0}
+  run 2 (old reader still in memory — its log predates the scp)
+    122/10 {S-pre×2, S0/S1/S3/S4, F0, TH×4}
+  run 3 (fixed harness) **131/3 {CX-pre + CX5, F0}**.
+  ★ THE TH CLUSTER WAS A STALE NEEDLE, NOT A WAVE DEFECT: the fail-screen
+  dump shows the menu paint CORRECT (values right-aligned in the footer
+  cell, headers, single hint — upstream truth), while color_mode_value()
+  still read the first double-space token after the label — the 0.6.27
+  inline-meta geometry, whose token boundary rode the trailing-padding
+  parity. Re-pointed to the LAST token of the row line (harness commit
+  0ce3ec6, the R45 L0 needle-vs-truth class); TH greens prove it live.
+  Wave law MET: every red family green in >=1 run on the same binary
+  (S-family green in run 1, TB/K green in run 2, TH green in run 3, CX
+  pair green in run 1; F0 the documented persistent fail). ★ THE pf636
+  ZOMBIE PHOTOGRAPHED A SEVENTH TIME: run 3's CX-pre fail screen shows
+  the pf636.txt ask card parked above the composer stealing enter (green
+  in run 1 on the same binary — store poisoning, never the wave); the
+  session/delete host-verb filing strengthens again.
 
 ## Remaining (v2.0.16 → us)
 
