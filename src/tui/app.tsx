@@ -4454,11 +4454,14 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
   }
   if (dialog === "stash") {
     const entries = promptStash.list();
-    // Ported from opencode v2.0.7 component/dialog-stash.tsx: newest first,
-    // first-line preview + relative age, ~N lines footer, two-stroke delete
-    // that repaints the row in the destructive colour. Restore is
-    // take-on-select (the entry leaves the stash — a stale copy never
-    // shadows newer input).
+    // Ported from opencode v2.0.16 component/dialog-stash.tsx onto the menu
+    // grammar (0.6.58, fourth small-wave dialog migration): rows newest
+    // first, first-line preview + relative age keep their slots, the ~N
+    // lines count rides the menu FOOTER cell (their option.footer), the
+    // two-stroke delete keeps the destructive row colour (the field the
+    // menu grammar gains) and DISARMS on selection move (their onMove ->
+    // setToDelete(undefined)). Restore is take-on-select (the entry leaves
+    // the stash — a stale copy never shadows newer input).
     const stashOptions: DialogOption<number>[] = entries
       .map((entry, index) => ({ entry, index }))
       .slice()
@@ -4469,7 +4472,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
           id: String(index),
           label: stashArm === index ? "Press ctrl+d again to confirm" : getStashPreview(entry.prompt.text),
           description: getRelativeTime(entry.timestamp),
-          meta: lineCount > 1 ? `~${lineCount} lines` : undefined,
+          footer: lineCount > 1 ? `~${lineCount} lines` : undefined,
           bg: stashArm === index ? C.error : undefined,
           value: index,
         };
@@ -4477,6 +4480,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     return (
       <SelectDialog
         title="Stash"
+        menu
         options={stashOptions}
         theme={C}
         footerHints={[
@@ -4484,6 +4488,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
           { key: "enter", label: "restore" },
           { key: "esc", label: "close" },
         ]}
+        onMove={() => setStashArm(undefined)}
         onAction={(action, option) => {
           if (action !== "delete" || !option) return;
           if (stashArm === option.value) {
