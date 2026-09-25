@@ -1099,6 +1099,90 @@ logs /tmp/r47-proof-{1,2,3}.log):
   in run 1 on the same binary — store poisoning, never the wave); the
   session/delete host-verb filing strengthens again.
 
+### 0.6.58 — the stash dialog onto the menu grammar (fourth small-wave dialog migration)
+
+Reference component/dialog-stash.tsx (v2.0.16): a DialogSelect titled
+"Stash" over the prompt-stash store — rows NEWEST FIRST (their toReversed),
+title = the first-line preview (getStashPreview, 50-char truncate) or, while
+the two-stroke delete is armed, "Press <stash.delete> again to confirm" with
+the destructive bg/fg; description = the relative age (getRelativeTime);
+footer = "~N lines" when the stashed prompt is multi-line (their
+option.footer); onMove DISARMS the armed delete; select is TAKE-ON-SELECT
+(stash.remove then apply — a restored entry leaves the stash).
+
+OUR SURFACE: the stash dialog (palette "stash list…") rides that reference
+on the menu path — the preview and the age KEEP their slots; the line count
+MOVES from the legacy meta column into the menu FOOTER cell; the armed row
+keeps the destructive colour (the field the menu grammar gains, the 0.6.49
+sessions pattern); the confirm label keeps our binding name ("Press ctrl+d
+again to confirm"). PARITY FIX riding the wave: onMove disarms the armed
+delete (their onMove -> setToDelete(undefined)) — ours never disarmed on
+selection move; armed state survived navigation until a delete completed.
+Take-on-select, the ctrl+d action, and the three footer hints (enter
+restore / ctrl+d delete / esc close) unchanged. Fuzzysort stays on its open
+line (skipped+recorded).
+
+PROOF: the S-series follows the migration — S3 stashes a SECOND multi-line
+draft (ctrl+j newline) and asserts newest-first ORDERING by row index plus
+the "~2 lines" count ON THE SAME ROW LINE as its label and ABSENT from the
+single-line row (per-row, never a bare substring — the R47 value-reader law
+applied pre-emptively; the pre-claim sweep found no other stash VALUE-token
+readers, S1/S3 title needles survive verbatim); new S5 arms then MOVES DOWN
+and requires the confirm label gone while the dialog is still open with both
+rows visible (vacuous-pass law: presence presupposed before the absence
+check); S6 re-arms and deletes the armed row only (draft-2 gone, draft-1
+remains); the empty-list close becomes S7 with the ACK-9e5105d7b0 positive
+needle. New polls 30 rounds (the R39 fat-session law). GATES: typecheck
+clean; bun 204 pass + the documented auth-sync red; generators stamp-only
+(241 binds 163/3/49/19/7, lint 0 lies).
+
+PTY: one md5-pinned binary (dist b8fdd4526afbdd4f6494f2f9745e4d4a), SEVEN
+load-gated full runs (launcher /tmp/r48-launcher.py — fires only when dev
+load drops below the gate AND the dist md5 still matches; logs
+/tmp/r48-proof-{1..7}.log), the harness evolving under the microscope across
+them (b794213, 274daa5, 7ac6caa, 02d752b, 3270032, f6dfb33 — every fix
+occasioned by a measured fault, none by theory):
+  run 1 125/11, run 2 126/10 — the pf636 ZOMBIE cascade (eighth and ninth
+    photographs): the throwaway ask card parked over the composer stole
+    enters mid-run, hours after the PF stage that minted it.
+  run 3 132/5 — dezombify() landed; NO zombie anywhere; the stash family
+    still red and its dumps read BLANK — the tail-slice microscope was
+    looking BELOW the modal (the vacuous-pass law applied to the
+    microscope itself).
+  run 4 132/5 — full-viewport dumps lost to a re-scp miss (same class).
+  run 5 133/5 — the SEEDED S8 stage green ON ITS FIRST RUN (an isolated
+    ZCODE_TUI_STATE_DIR store, two entries, one multi-line, a fresh TUI:
+    "~2 lines" rides draft-2's OWN row line, absent from draft-1's, newest
+    first — the footer-cell migration PROVEN); the full S3/S5/S6 dumps
+    then named the real defect: TAKE-ON-SELECT empties the stash on
+    restore, so the one-row lists could never satisfy the two-row clauses
+    while the dumps show the mechanics green (arm, disarm-on-move label
+    gone, armed-row-only delete, empty state).
+  run 6 133/5 — the re-park attempt STILL sabotaged: the ctrl+c before it
+    cleared the draft and the park hit its empty-draft no-op (the dump:
+    the same one-row list).
+  run 7 **133/5 {CX0-CX3, F0}** — THE STASH FAMILY ALL GREEN (S0-S8): the
+    two-row list, newest-first ordering, arm, disarm-on-move, armed-row-
+    only delete, empty state, and the seeded footer-cell fixture. The CX
+    cluster ran during the load-18 thrash window with the pf636 turn's
+    interrupted transcript visible underneath (the store's session-state
+    corroboration); every CX stage is green in runs 1-6 on this binary.
+    Wave law MET — every red family green in >=1 run on the same binary;
+    F0 the documented persistent fail.
+★ THE CTRL+J PTY PROBE LAW (harness, 02d752b): a live probe settled it —
+  the composer's ctrl+j newline does not exist on the PTY path (OpenTUI
+  delivers \x0a as a no-op; LINE-ONE + \x0a + LINE-TWO paints as
+  LINE-ONELINE-TWO), so multi-line proof fixtures are SEEDED through the
+  store file, never typed.
+★ dezombify() (harness, 274daa5): the 0.6.47 de-zombifier generalized —
+  the pf636 ask OUTLIVES the run in the host session store and REPAINTS
+  MID-RUN hours later; the helper identifies our cards by the ask-action
+  rows plus a proof-scope marker (the C-1 "Permission required" needle
+  misses once the header scrolls off the viewport) and dismisses with the
+  PF3 grammar at the CX copy/export, filler-send and stash blocks. The
+  card count now stands at NINE photographs plus the run-7 transcript
+  corroboration — the session/delete host-verb filing strengthens again.
+
 ## Remaining (v2.0.16 → us)
 
 - ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
@@ -1168,11 +1252,12 @@ logs /tmp/r47-proof-{1,2,3}.log):
   destructive bg, the one field the grammar gains). Carry-over audit
   settled: the count range row is dropped on the menu path; meta appends to
   the display; the legacy status cell is the footer cell's predecessor.
-  REMAINS on this line: migrating the OTHER dialogs onto the menu grammar
-  (stash, MCP — each a small wave; the legacy paint and its proof needles
-  stay honest until each moves). SHIPPED: the sessions slice
+  REMAINS on this line: the MCP dialog — the LAST legacy-paint dialog
+  (a small wave; sweep the harness for value-token readers on it BEFORE
+  the proof runs, the R47 law). SHIPPED: the sessions slice
   0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS dialog 0.6.54,
-  the AGENTS dialog 0.6.56, the SETTINGS dialog 0.6.57.
+  the AGENTS dialog 0.6.56, the SETTINGS dialog 0.6.57, the STASH dialog
+  0.6.58 (with the onMove-disarm parity fix).
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted
