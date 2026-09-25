@@ -4556,35 +4556,44 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     );
   }
   if (dialog === "mcp") {
-    // Ported from opencode v2.0.7 component/dialog-mcp.tsx: /mcps — sorted
-    // by name, the status footer grammar verbatim (Connecting … · Connected
-    // ✓ · Failed ! · Sign in required → · Disabled ○) with the reference
-    // colours. The v2 space toggle (dialog.mcp.toggle) and the
-    // enter-to-error detail view are HOST GAPS: the zcode protocol exposes
-    // mcp/list but no connect/disconnect verbs, and the status payload
-    // carries no error text — recorded in docs/parity-v2.md, not hacked
-    // around.
-    const statusCell = (status: string): { text: string; color?: string; bold?: boolean } => {
-      if (status === "connected") return { text: "Connected ✓", color: C.success, bold: true };
-      if (status === "failed") return { text: "Failed !", color: C.error };
-      if (status === "needs_auth") return { text: "Sign in required →", color: C.warning };
-      if (status === "pending" || status === "connecting") return { text: "Connecting …", color: C.subtle };
-      return { text: "Disabled ○", color: C.subtle };
+    // Ported from opencode v2.0.16 component/dialog-mcp.tsx onto the menu
+    // grammar (0.6.59, fifth small-wave dialog migration — the LAST
+    // legacy-paint dialog on the footer-menu line): rows sorted by name,
+    // the status grammar verbatim in the menu FOOTER cell (their
+    // option.footer: Connecting … · Connected ✓ · Failed ! · Sign in
+    // required → · Disabled ○), footerTone success/error per their
+    // footerColor — their needs_auth warning has no tone in our grammar
+    // (rides muted no-tone) and their BOLD connected has no slot (the
+    // tone carries the emphasis). Zero servers flows to the shared
+    // emptyView verbatim; the idle/loading "Connecting …" row stays as
+    // our async mapping (their data layer is reactive, ours fetches).
+    // The v2 space toggle (dialog.mcp.toggle) and the enter-to-error
+    // detail view are HOST GAPS: the zcode protocol exposes mcp/list but
+    // no connect/disconnect verbs, and the status payload carries no
+    // error text — recorded in docs/parity-v2.md, not hacked around.
+    const statusFooter = (status: string): { footer: string; footerTone?: "success" | "error" } => {
+      if (status === "connected") return { footer: "Connected ✓", footerTone: "success" };
+      if (status === "failed") return { footer: "Failed !", footerTone: "error" };
+      if (status === "needs_auth") return { footer: "Sign in required →" };
+      if (status === "pending" || status === "connecting") return { footer: "Connecting …" };
+      return { footer: "Disabled ○" };
     };
     const mcpOptions: DialogOption<string | null>[] =
       mcpState.kind === "idle" || mcpState.kind === "loading"
         ? [{ id: "loading", label: "Connecting …", value: null }]
-        : mcpState.servers.length === 0
-          ? [{ id: "none", label: "No MCP servers configured", value: null }]
-          : mcpState.servers.map((server) => ({
+        : mcpState.servers
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((server) => ({
               id: server.name,
               label: server.name,
-              status: statusCell(server.status),
+              ...statusFooter(server.status),
               value: null,
             }));
     return (
       <SelectDialog
         title="MCP servers"
+        menu
         options={mcpOptions}
         theme={C}
         footerHints={[{ key: "esc", label: "close" }]}
