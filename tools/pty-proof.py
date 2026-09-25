@@ -1003,6 +1003,12 @@ if b0 and alive(pid):
             break                      # full-run transcript paints the affordance
         read_for(master, stream, 0.7)  # late - the CX-pre fat-session lesson)
         afford = "Jump to latest" in "\n".join(screen.display)
+    if not afford:
+        print("---- S1 FAIL SCREEN (scroll state) ----")
+        print("scrolled:", scrolled)
+        for ln in screen.display:
+            if ln.strip():
+                print(ln)
     check(pid, "S1 Jump-to-latest affordance appears", afford)
     os.write(master, b"\x1b\x07"); time.sleep(0.6)               # ctrl+alt+g: jump to latest
     cleared = False
@@ -1389,6 +1395,11 @@ if alive(pid):
         if "Plugins" in d_pg and ("disabled," in d_pg) != pre_disabled:
             pg2 = True
             break
+    if not pg2:
+        print("---- PG2 FAIL SCREEN (pre_disabled=%s) ----" % pre_disabled)
+        for ln in screen.display:
+            if ln.strip():
+                print(ln)
     check(pid, "PG2 enter toggles the plugin (setEnabled round-trips)", pg2)
     os.write(master, b"\r"); read_for(master, stream, 0.5)     # enter: restore
     pg3 = False
