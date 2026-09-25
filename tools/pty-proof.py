@@ -1314,14 +1314,47 @@ else:
     check(pid, "K1 catalog rows render (a user skill is listed)", False)
 
 if alive(pid):
-    os.write(master, b"/mcps\r"); read_for(master, stream, 3.0)
-    m0 = "\n".join(screen.display)
-    check(pid, "M0 /mcps opens the MCP servers dialog", "MCP servers" in m0)
-    check(pid, "M1 status grammar renders", "Connected \u2713" in m0 or "Connecting \u2026" in m0)
+    os.write(master, b"/mcps\r")
+    # poll: the ready paint (dialog-open poll law) — the old fixed 3.0s
+    # settle raced the mcp/list round-trip under load.
+    m_open = poll_paint(master, stream, screen, ("MCP servers",))
+    check(pid, "M0 /mcps opens the MCP servers dialog", m_open)
+    # M1 (0.6.59 menu grammar): the status rides the menu FOOTER cell on
+    # the server-name ROW LINE (per-row, never a bare substring — the
+    # R46/R48 pre-emptive needle law; the old whole-screen OR passed on
+    # the loading placeholder alone). Poll past the "Connecting …" settle
+    # for a real row, then require every status-bearing line to carry its
+    # label too; the shared emptyView (zero servers) is a legal state —
+    # the proof env's server set is the daemon's, not ours.
+    M_STATUSES = ("Connected \u2713", "Failed !", "Sign in required \u2192",
+                  "Disabled \u25cb", "Connecting \u2026")
+
+    def m_status_lines(scr):
+        out = []
+        for ln in scr.display:
+            for t in M_STATUSES:
+                i = ln.find(t)
+                if i >= 0:
+                    out.append((ln, i))
+                    break
+        return out
+
+    m_lines = []
+    for _ in range(12):
+        m_lines = m_status_lines(screen)
+        if m_lines:
+            break
+        read_for(master, stream, 0.5)
+    d = "\n".join(screen.display)
+    if not m_lines:
+        m1 = "No items available" in d
+    else:
+        m1 = all(ln[:i].strip() for ln, i in m_lines)
+    check(pid, "M1 status rides the server-name row line (menu footer cell)", m1)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)
 else:
     check(pid, "M0 /mcps opens the MCP servers dialog", False)
-    check(pid, "M1 status grammar renders", False)
+    check(pid, "M1 status rides the server-name row line (menu footer cell)", False)
 
 # ==== FAM:PG requires BOOT ====
 # ---- PG-series: the plugins dialog (v2 port, 0.6.34). Rows off
