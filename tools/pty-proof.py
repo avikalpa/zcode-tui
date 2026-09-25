@@ -1419,13 +1419,15 @@ def color_mode_seg(scr):
     return d.split("Color mode")[1][:60] if "Color mode" in d else ""
 
 def color_mode_value(scr):
-    # The value (meta) paints between double spaces right after the label;
-    # the hint text follows. Read the token, never the window.
-    seg = color_mode_seg(scr)
-    for tok in seg.split("  "):
-        tok = tok.strip()
-        if tok:
-            return tok
+    # 0.6.57 menu grammar: the value sits RIGHT-ALIGNED in the row's footer
+    # cell (upstream option.footer) — read the LAST whitespace token of the
+    # row line that carries the label. The 0.6.27-era inline-meta reader
+    # (first double-space token after the label) false-reds on the new
+    # geometry: the token boundary there rode the trailing-padding parity.
+    for line in scr.display:
+        if "Color mode" in line:
+            toks = line.split()
+            return toks[-1] if toks else ""
     return ""
 
 th_pid, th_m, th_scr, th_st = spawn_th()
