@@ -82,6 +82,27 @@ def sweep_stale_instances(label):
 
 sweep_stale_instances("LEAK GUARD start")
 
+def dezombify(master, stream, screen, rounds=4):
+    # Residual-ask de-zombifier (0.6.47), generalized into a helper (R48,
+    # 2026-09-25): the pf636 throwaway ask OUTLIVES the run in the host
+    # session store and REPAINTS MID-RUN — both R48 runs photographed it at
+    # CX-pre hours after the PF stage that minted it, and its stolen enters
+    # cascaded into the scroll and stash families on a healthy binary.
+    # Dismiss OUR OWN cards wherever they surface: the card is the ask-action
+    # rows plus a proof-scope marker in the dump (the C-1 "Permission
+    # required" needle missed it once the header scrolled off the viewport
+    # tail); a foreign ask is named, never touched (esc = deny + stop, the
+    # PF3 grammar).
+    for _ in range(rounds):
+        d = "\n".join(screen.display)
+        if "Allow once" not in d and "Always allow" not in d:
+            return True
+        if "pf636" not in d and "zct-proof-cwd" not in d:
+            print("---- dezombify: FOREIGN ASK CARD (not ours — left untouched) ----")
+            return False
+        os.write(master, b"\x1b"); read_for(master, stream, 1.2)
+    return "Allow once" not in "\n".join(screen.display)
+
 def spawn(cols=110, rows=34, args=None):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -762,6 +783,7 @@ if b0 and alive(pid):
             cx_clear = True
             break
     check(pid, "CX-pre composer verified empty", cx_clear)
+    dezombify(master, stream, screen)
     os.write(master, b"/copy")
     # Positive popup-row needle (typed-command law, R38): the popup ROW must
     # be visible before enter — the placeholder disappears on ANY typed text,
@@ -819,6 +841,7 @@ if b0 and alive(pid):
     check(pid, "CX3 export writes the tmp file and shows the result dialog", cx3)
     os.write(master, b"\r"); read_for(master, stream, 0.6)
     check(pid, "CX4 return closes the result dialog", "Session exported" not in "\n".join(screen.display))
+    dezombify(master, stream, screen)
 
     os.write(master, b"/export")
     cx_popup2 = False
@@ -909,6 +932,7 @@ if b0 and alive(pid):
             os.write(master, b"\x03")      # never leave the draft behind
             read_for(master, stream, 0.5)
     check(pid, "S-pre composer verified empty before the filler turn", se_clear)
+    dezombify(master, stream, screen)
     # The filler ride: paste a 60-line prompt (bracketed paste = ONE atomic
     # insert), send, then INTERRUPT (the I-series precedent). A full turn is
     # too variable to wait out (measured: high-effort streaming ran past a
@@ -1085,6 +1109,7 @@ def _palette_run(filter_text):
     poll_paint_gone(master, stream, screen, "Commands")
 
 if alive(pid):
+    dezombify(master, stream, screen)
     os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear any draft
     os.write(master, b"STASH-PROOF-DRAFT-1")
     read_for(master, stream, 0.8)
@@ -1135,6 +1160,11 @@ if alive(pid):
             if s3_ok:
                 break
     check(pid, "S3 newest-first list carries the line count in the footer cell", s3_ok)
+    if not s3_ok:
+        print("---- S3 FAIL SCREEN (tail) ----")
+        for line in screen.display[-16:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
 
     os.write(master, b"\x04")                                 # ctrl+d: arm delete (selection on the top row)
     s4_ok = poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
@@ -1152,6 +1182,11 @@ if alive(pid):
             s5_ok = True
             break
     check(pid, "S5 moving the selection disarms the armed delete", s5_ok)
+    if not s5_ok:
+        print("---- S5 FAIL SCREEN (tail) ----")
+        for line in screen.display[-16:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
 
     os.write(master, b"\x1b[A"); read_for(master, stream, 0.4)   # up: back onto draft-2
     os.write(master, b"\x04")                                 # ctrl+d: arm again
@@ -1167,6 +1202,11 @@ if alive(pid):
                 s6_ok = True
                 break
     check(pid, "S6 confirmed ctrl+d deletes the armed row only", s6_ok)
+    if not s6_ok:
+        print("---- S6 FAIL SCREEN (tail) ----")
+        for line in screen.display[-16:]:
+            if line.strip():
+                print(f"|{line.rstrip()}")
 
     os.write(master, b"\x04")                                 # ctrl+d: arm the last row
     poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
