@@ -1341,15 +1341,17 @@ if alive(pid):
 
     m_lines = []
     for _ in range(12):
-        m_lines = m_status_lines(screen)
+        # a REAL row: the status text has the label BEFORE it on the line.
+        # The loading placeholder (Connecting ... as the row's label alone)
+        # carries a status text too — awaiting any status text broke on it
+        # (run 1's M1 red was this race; the probe shows the rows green).
+        m_lines = [(ln, i) for ln in screen.display for t in M_STATUSES
+                   for i in [ln.find(t)] if i >= 0 and ln[:i].strip()]
         if m_lines:
             break
         read_for(master, stream, 0.5)
     d = "\n".join(screen.display)
-    if not m_lines:
-        m1 = "No items available" in d
-    else:
-        m1 = all(ln[:i].strip() for ln, i in m_lines)
+    m1 = bool(m_lines) or "No items available" in d
     check(pid, "M1 status rides the server-name row line (menu footer cell)", m1)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)
 else:
