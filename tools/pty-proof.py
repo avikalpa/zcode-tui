@@ -1112,18 +1112,71 @@ if alive(pid):
             break
     check(pid, "S2 restore returns the draft to the composer", s2_ok)
 
-    _palette_run("stash prompt")                              # stash it again for the delete proof
+    # 0.6.58 menu-grammar migration: a second, MULTI-LINE draft must top the
+    # list (newest first) and carry its line count in the menu FOOTER cell
+    # (upstream option.footer) — asserted on the SAME ROW LINE as its label
+    # and absent from the single-line row (per-row, never a bare substring;
+    # the R47 lesson — value assertions must survive the geometry move).
+    os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear the restored draft
+    os.write(master, b"STASH-PROOF-DRAFT-2")
+    os.write(master, b"\x0a")                                 # ctrl+j: newline (the composer insert)
+    os.write(master, b"tail line")
+    read_for(master, stream, 0.8)
+    _palette_run("stash prompt")
     _palette_run("stash list")
-    os.write(master, b"\x04")                                 # ctrl+d: arm delete
-    s3_ok = poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
-    check(pid, "S3 two-stroke delete arms with the confirm label", s3_ok)
-    os.write(master, b"\x04")                                 # ctrl+d: delete
+    s3_ok = False
+    for _ in range(30):
+        read_for(master, stream, 0.6)
+        lines = screen.display
+        top = next((i for i, l in enumerate(lines) if "STASH-PROOF-DRAFT-2" in l), None)
+        low = next((i for i, l in enumerate(lines) if "STASH-PROOF-DRAFT-1" in l), None)
+        if top is not None and low is not None and top < low:
+            s3_ok = "~2 lines" in lines[top] and "~2 lines" not in lines[low]
+            if s3_ok:
+                break
+    check(pid, "S3 newest-first list carries the line count in the footer cell", s3_ok)
+
+    os.write(master, b"\x04")                                 # ctrl+d: arm delete (selection on the top row)
+    s4_ok = poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
+    check(pid, "S4 two-stroke delete arms with the confirm label", s4_ok)
+
+    os.write(master, b"\x1b[B"); read_for(master, stream, 0.4)   # down: move OFF the armed row
+    s5_ok = False
+    for _ in range(30):
+        read_for(master, stream, 0.6)
+        d5 = "\n".join(screen.display)
+        # Vacuous-pass law: the dialog must still be open with both rows —
+        # only then does "confirm gone" mean DISARMED, not closed.
+        if ("Stash" in d5 and "STASH-PROOF-DRAFT-1" in d5
+                and "Press ctrl+d again to confirm" not in d5):
+            s5_ok = True
+            break
+    check(pid, "S5 moving the selection disarms the armed delete", s5_ok)
+
+    os.write(master, b"\x1b[A"); read_for(master, stream, 0.4)   # up: back onto draft-2
+    os.write(master, b"\x04")                                 # ctrl+d: arm again
+    s6_ok = poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
+    if s6_ok:
+        os.write(master, b"\x04")                             # ctrl+d: delete the armed row
+        s6_ok = False
+        for _ in range(30):
+            read_for(master, stream, 0.6)
+            d6 = "\n".join(screen.display)
+            if ("Stash" in d6 and "STASH-PROOF-DRAFT-2" not in d6
+                    and "STASH-PROOF-DRAFT-1" in d6):
+                s6_ok = True
+                break
+    check(pid, "S6 confirmed ctrl+d deletes the armed row only", s6_ok)
+
+    os.write(master, b"\x04")                                 # ctrl+d: arm the last row
+    poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
+    os.write(master, b"\x04")                                 # ctrl+d: delete it
     # Positive needle (dream ACK-9e5105d7b0): the EMPTY-LIST line inside the
     # titled Stash dialog — "No matching items" alone is the shared empty
     # text of palette/SlashPopup/SelectDialog and passed vacuously when the
     # pick missed and no dialog was open at all.
-    s4_ok = poll_paint(master, stream, screen, ("Stash", "No items available"))
-    check(pid, "S4 second ctrl+d empties the stash list", s4_ok)
+    s7_ok = poll_paint(master, stream, screen, ("Stash", "No items available"))
+    check(pid, "S7 second ctrl+d empties the stash list", s7_ok)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)
     try:
         os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
@@ -1133,8 +1186,11 @@ else:
     for lbl in ("S0 stash prompt parks the draft (composer empties)",
                 "S1 stash list dialog shows the preview + age",
                 "S2 restore returns the draft to the composer",
-                "S3 two-stroke delete arms with the confirm label",
-                "S4 second ctrl+d empties the stash list"):
+                "S3 newest-first list carries the line count in the footer cell",
+                "S4 two-stroke delete arms with the confirm label",
+                "S5 moving the selection disarms the armed delete",
+                "S6 confirmed ctrl+d deletes the armed row only",
+                "S7 second ctrl+d empties the stash list"):
         check(pid, lbl, False)
 
 if alive(pid):
