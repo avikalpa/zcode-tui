@@ -4558,7 +4558,9 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
   if (dialog === "mcp") {
     // Ported from opencode v2.0.16 component/dialog-mcp.tsx onto the menu
     // grammar (0.6.59, fifth small-wave dialog migration — the LAST
-    // legacy-paint dialog on the footer-menu line): rows sorted by name,
+    // dialog on the small-wave footer-menu line; plugins still paints
+    // legacy, its status word moving to the meta column this wave):
+    // rows sorted by name,
     // the status grammar verbatim in the menu FOOTER cell (their
     // option.footer: Connecting … · Connected ✓ · Failed ! · Sign in
     // required → · Disabled ○), footerTone success/error per their
@@ -4631,7 +4633,13 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
                 return {
                   id: plugin.id,
                   label: plugin.name,
-                  status: footerParts.length > 0 ? { text: footerParts.join(", "), color: C.subtle } : undefined,
+                  // 0.6.59: the legacy status cell retired with the MCP
+                  // migration — this was its hidden second producer
+                  // (ternary form; the producer grep missed it and .map()
+                  // inference silences the excess-property check). The
+                  // status word + version ride the meta column until this
+                  // dialog takes its own menu-grammar wave.
+                  meta: footerParts.length > 0 ? footerParts.join(", ") : undefined,
                   gutter: pluginPending.includes(plugin.id) ? "…" : undefined,
                   value: plugin.id,
                 };
