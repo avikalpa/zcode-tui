@@ -1147,15 +1147,14 @@ if alive(pid):
             if line.strip():
                 print(f"{i:2}|{line.rstrip()}")
 
-    # 0.6.58 menu-grammar migration: a second, MULTI-LINE draft must top the
-    # list (newest first) and carry its line count in the menu FOOTER cell
-    # (upstream option.footer) — asserted on the SAME ROW LINE as its label
-    # and absent from the single-line row (per-row, never a bare substring;
-    # the R47 lesson — value assertions must survive the geometry move).
+    # 0.6.58 menu-grammar migration: a second draft must top the list
+    # (newest first) — ordering asserted by row index. The multi-line
+    # footer-cell fixture is SEEDED in S8 through the store file: the probe
+    # law (2026-09-25, live probe) — the composer's ctrl+j newline does not
+    # exist on the PTY path (OpenTUI delivers \x0a as a no-op and the draft
+    # concatenates), so a multi-line draft cannot be typed here.
     os.write(master, b"\x03"); time.sleep(0.3)          # ctrl+c: clear the restored draft
     os.write(master, b"STASH-PROOF-DRAFT-2")
-    os.write(master, b"\x0a")                                 # ctrl+j: newline (the composer insert)
-    os.write(master, b"tail line")
     read_for(master, stream, 0.8)
     _palette_run("stash prompt")
     _palette_run("stash list")
@@ -1166,20 +1165,14 @@ if alive(pid):
         top = next((i for i, l in enumerate(lines) if "STASH-PROOF-DRAFT-2" in l), None)
         low = next((i for i, l in enumerate(lines) if "STASH-PROOF-DRAFT-1" in l), None)
         if top is not None and low is not None and top < low:
-            s3_ok = "~2 lines" in lines[top] and "~2 lines" not in lines[low]
-            if s3_ok:
-                break
-    check(pid, "S3 newest-first list carries the line count in the footer cell", s3_ok)
+            s3_ok = True
+            break
+    check(pid, "S3 newest-first list shows the latest draft on top", s3_ok)
     if not s3_ok:
-        print("---- S3 FAIL SCREEN (tail) ----")
-        for line in screen.display[-16:]:
+        print("---- S3 FAIL SCREEN (full, non-empty rows) ----")
+        for i, line in enumerate(screen.display):
             if line.strip():
-                print(f"|{line.rstrip()}")
-    if not s3_ok:
-        print("---- S3 FAIL SCREEN (tail) ----")
-        for line in screen.display[-16:]:
-            if line.strip():
-                print(f"|{line.rstrip()}")
+                print(f"{i:2}|{line.rstrip()}")
 
     os.write(master, b"\x04")                                 # ctrl+d: arm delete (selection on the top row)
     s4_ok = poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
@@ -1198,15 +1191,10 @@ if alive(pid):
             break
     check(pid, "S5 moving the selection disarms the armed delete", s5_ok)
     if not s5_ok:
-        print("---- S5 FAIL SCREEN (tail) ----")
-        for line in screen.display[-16:]:
+        print("---- S5 FAIL SCREEN (full, non-empty rows) ----")
+        for i, line in enumerate(screen.display):
             if line.strip():
-                print(f"|{line.rstrip()}")
-    if not s5_ok:
-        print("---- S5 FAIL SCREEN (tail) ----")
-        for line in screen.display[-16:]:
-            if line.strip():
-                print(f"|{line.rstrip()}")
+                print(f"{i:2}|{line.rstrip()}")
 
     os.write(master, b"\x1b[A"); read_for(master, stream, 0.4)   # up: back onto draft-2
     os.write(master, b"\x04")                                 # ctrl+d: arm again
@@ -1223,15 +1211,10 @@ if alive(pid):
                 break
     check(pid, "S6 confirmed ctrl+d deletes the armed row only", s6_ok)
     if not s6_ok:
-        print("---- S6 FAIL SCREEN (tail) ----")
-        for line in screen.display[-16:]:
+        print("---- S6 FAIL SCREEN (full, non-empty rows) ----")
+        for i, line in enumerate(screen.display):
             if line.strip():
-                print(f"|{line.rstrip()}")
-    if not s6_ok:
-        print("---- S6 FAIL SCREEN (tail) ----")
-        for line in screen.display[-16:]:
-            if line.strip():
-                print(f"|{line.rstrip()}")
+                print(f"{i:2}|{line.rstrip()}")
 
     os.write(master, b"\x04")                                 # ctrl+d: arm the last row
     poll_paint(master, stream, screen, ("Press ctrl+d again to confirm",))
@@ -1242,6 +1225,59 @@ if alive(pid):
     # pick missed and no dialog was open at all.
     s7_ok = poll_paint(master, stream, screen, ("Stash", "No items available"))
     check(pid, "S7 second ctrl+d empties the stash list", s7_ok)
+
+    # S8 (fresh boot, SEEDED store — the ctrl+j PTY probe law above): the
+    # multi-line draft's "~2 lines" count rides the menu FOOTER CELL on its
+    # OWN row line, absent from the single-line row, newest first. An
+    # isolated state dir keeps the owner's store out of the fixture.
+    seed_dir = "/tmp/zct-proof-stash-seed"
+    import shutil
+    shutil.rmtree(seed_dir, ignore_errors=True)
+    os.makedirs(seed_dir, exist_ok=True)
+    now_ms = int(time.time() * 1000)
+    with open(os.path.join(seed_dir, "prompt-stash.jsonl"), "w") as f:
+        f.write('{"prompt":{"text":"STASH-PROOF-DRAFT-1"},"timestamp":%d}\n' % (now_ms - 3_600_000))
+        f.write('{"prompt":{"text":"STASH-PROOF-DRAFT-2\\nsecond line"},"timestamp":%d}\n' % now_ms)
+    s_master, s_slave = pty.openpty()
+    fcntl.ioctl(s_slave, termios.TIOCSWINSZ, struct.pack("HHHH", 34, 110, 0, 0))
+    s_screen = pyte.Screen(110, 34)
+    s_stream = pyte.ByteStream(s_screen)
+    s_pid = subprocess.Popen([binary], stdin=s_slave, stdout=s_slave, stderr=subprocess.DEVNULL,
+                             cwd="/tmp/zct-proof-cwd",
+                             env=dict(os.environ, TERM="xterm-256color", ZCODE_TUI_STATE_DIR=seed_dir),
+                             close_fds=True).pid
+    os.close(s_slave)
+    boot_ok = False
+    deadline = time.time() + 30
+    while time.time() < deadline and not boot_ok:
+        read_for(s_master, s_stream, 0.6)
+        boot_ok = "Ask anything" in "\n".join(s_screen.display)
+    os.write(s_master, b"\x10"); read_for(s_master, s_stream, 1.0)
+    for ch in "stash list":
+        os.write(s_master, ch.encode()); time.sleep(0.04)
+    os.write(s_master, b"\r")
+    s8_ok = False
+    deadline = time.time() + 30
+    while time.time() < deadline and not s8_ok:
+        read_for(s_master, s_stream, 0.6)
+        lines = s_screen.display
+        top = next((i for i, l in enumerate(lines) if "STASH-PROOF-DRAFT-2" in l), None)
+        low = next((i for i, l in enumerate(lines) if "STASH-PROOF-DRAFT-1" in l), None)
+        if top is not None and low is not None and top < low:
+            s8_ok = "~2 lines" in lines[top] and "~2 lines" not in lines[low]
+    try:
+        os.kill(s_pid, 9)
+    except OSError:
+        pass
+    read_for(s_master, s_stream, 0.3)
+    os.close(s_master)
+    if not s8_ok:
+        print("---- S8 FAIL SCREEN (full, non-empty rows) ----")
+        for i, line in enumerate(s_screen.display):
+            if line.strip():
+                print(f"{i:2}|{line.rstrip()}")
+    shutil.rmtree(seed_dir, ignore_errors=True)
+    check(pid, "S8 seeded multi-line draft wears the line count in the footer cell", s8_ok)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)
     try:
         os.remove(os.path.expanduser("~/.config/zcode-tui/prompt-stash.jsonl"))
@@ -1251,7 +1287,7 @@ else:
     for lbl in ("S0 stash prompt parks the draft (composer empties)",
                 "S1 stash list dialog shows the preview + age",
                 "S2 restore returns the draft to the composer",
-                "S3 newest-first list carries the line count in the footer cell",
+                "S3 newest-first list shows the latest draft on top",
                 "S4 two-stroke delete arms with the confirm label",
                 "S5 moving the selection disarms the armed delete",
                 "S6 confirmed ctrl+d deletes the armed row only",
