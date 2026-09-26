@@ -78,6 +78,7 @@ import {
   type SessionRow as TranscriptRow,
 } from "./session/rows";
 import { SessionGroupView, type GroupViewCtx } from "./session/group-view";
+import type { Verbosity } from "./session/grouping/session";
 import { EntryAnchor, timelineAnchors } from "./session/anchor-view";
 import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
@@ -1351,7 +1352,10 @@ export function App({
     () => rawMsgs.map(normalizeRawMessage).filter((m): m is NormMessage => m !== null),
     [rawMsgs],
   );
-  const rows = useMemo<TranscriptRow[]>(() => reduceSessionRows(normMsgs), [normMsgs]);
+  // v2.0.18 #51131: transcript verbosity (low/medium/high), upstream config
+  // session.verbosity — our plane is app-level state like model/effort.
+  const [verbosity, setVerbosity] = useState<Verbosity>("medium");
+  const rows = useMemo<TranscriptRow[]>(() => reduceSessionRows(normMsgs, undefined, false, verbosity), [normMsgs, verbosity]);
   const rowsRef = useRef<TranscriptRow[]>([]);
   rowsRef.current = rows;
   const normRef = useRef<NormMessage[]>([]);
@@ -2307,6 +2311,7 @@ export function App({
       if (command === "thinking") { await toggleThinking(); return; }
       if (command === "fork") { openForkDialog(); return; }
       if (command === "compact") { await compactActive(); return; }
+      if (command === "verbosity") { cycleVerbosity(); return; }
       if (command === "copy") { copyTranscript(); return; }
       if (command === "export") { setDialog("export"); return; }
       if (command === "quit") { onQuit(); return; }
@@ -2520,6 +2525,13 @@ export function App({
 
   // v2 session.copy.id ("Copy session ID") — palette-only upstream, keys none.
   const [exportResultPath, setExportResultPath] = useState<string | null>(null);
+  // Upstream's "Verbosity: X" palette row (session.verbosity.cycle, keys none).
+  const cycleVerbosity = () => {
+    const levels = ["low", "medium", "high"] as const;
+    const next = levels[(levels.indexOf(verbosity) + 1) % levels.length];
+    setVerbosity(next);
+    flashStatus(`Verbosity: ${next[0].toUpperCase()}${next.slice(1)}`, "success");
+  };
   const copySessionId = () => {
     if (!activeId) return;
     const ok = osc52Copy(activeId);
@@ -4833,7 +4845,10 @@ footerHints={[
     width: dims.width,
     spinnerChar: spinner,
     toolsExpanded,
-    expanded: (id) => (groupsOverride !== null ? groupsOverride : groupExpand[id] ?? false),
+    expanded: (id, kind) =>
+      groupsOverride !== null
+        ? groupsOverride
+        : groupExpand[id] ?? (verbosity === "high" && (kind === "exploration" || kind === "instructions")),
     toggle: (id) => setGroupExpand((cur) => ({ ...cur, [id]: !(groupsOverride ?? cur[id] ?? false) })),
     message: (messageID) => normById.get(messageID),
     entry: (entry) => (

@@ -20,10 +20,14 @@ import {
   partitionPending,
   projectEntries,
   groupRefs,
+  partPath,
+  messagePath,
+  defaultVerbosity,
   type CacheUsage,
   type PartRef,
   type ProjectionEntry,
   type SessionRow,
+  type Verbosity,
 } from "./grouping/session"
 
 export type { CacheUsage, PartRef, SessionRow } from "./grouping/session"
@@ -50,6 +54,7 @@ export type NormPart =
         input: Record<string, unknown>
         output?: string
         error?: string
+        metadata?: Record<string, unknown>
       }
     }
 
@@ -109,6 +114,10 @@ export function normalizeRawMessage(raw: RawMessageRecord): NormMessage | null {
           output:
             typeof state.output === "string" ? state.output : typeof state.result === "string" ? state.result : undefined,
           error: typeof state.error === "string" ? state.error : undefined,
+          metadata:
+            state.metadata && typeof state.metadata === "object" && !Array.isArray(state.metadata)
+              ? (state.metadata as Record<string, unknown>)
+              : undefined,
         },
       })
     }
@@ -158,7 +167,12 @@ export async function completeGroupBoundary(input: {
   }
 }
 
-export function reduceSessionRows(messages: NormMessage[], inputs = new Set<string>(), turnTokens = false) {
+export function reduceSessionRows(
+  messages: NormMessage[],
+  inputs = new Set<string>(),
+  turnTokens = false,
+  verbosity: Verbosity = defaultVerbosity,
+) {
   const isInput = (message: NormMessage) => inputs.has(message.id)
   const pendingCompactions = messages.filter((message) => message.type === "compaction" && message.status === "running")
   const pending = new Set([...pendingCompactions.map((message) => message.id), ...inputs])
@@ -198,7 +212,7 @@ export function reduceSessionRows(messages: NormMessage[], inputs = new Set<stri
       }
       if (message.type === "synthetic" && !message.text.trim()) return rows
       if (message.type === "compaction" && message.status === "completed" && usage) usage.previousTurnCache = undefined
-      rows.push({ entry: { type: "message", messageID: message.id }, closesPrevious: !pending.has(message.id) })
+      rows.push({ entry: { type: "message", messageID: message.id }, closesPrevious: !pending.has(message.id), path: messagePath(message, verbosity) })
       return rows
     }
     usage?.steps.push(message)
@@ -217,6 +231,7 @@ export function reduceSessionRows(messages: NormMessage[], inputs = new Set<stri
                   time: part.time?.completed !== undefined ? { completed: part.time.completed } : undefined,
                 }
               : { type: "text" },
+        path: partPath(part, verbosity),
       })
     })
     // Upstream keys the terminal step off message.finish; our records carry

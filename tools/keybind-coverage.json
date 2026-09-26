@@ -189,6 +189,7 @@
       "status": "covered",
       "note": "0.6.33 — palette Copy session ID; keys none as upstream stocks it"
     },
+ "session.verbosity.cycle": {"status": "covered", "note": "0.6.62 /verbosity palette command (v2.0.18 51131): cycles transcript verbosity low/medium/high; keys none as upstream stocks it"},
     "session.copy": {
       "status": "covered",
       "note": "0.6.33 — /copy + palette: formatSessionTranscript markdown into the clipboard (OSC 52); the old batch covered-lie retired"

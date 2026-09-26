@@ -20,7 +20,15 @@ import { GroupAnchor, EntryAnchor, visitEntries } from "./anchor-view";
 import { groupID } from "./anchors";
 import type { NormMessage, NormPart } from "./rows";
 import { resolvePart } from "./rows";
-import type { PartRef, SessionEntry, SessionGroup, SessionNode } from "./grouping/session";
+import {
+  instructionPaths,
+  type GroupKind,
+  type PartRef,
+  type SessionEntry,
+  type SessionGroup,
+  type SessionNode,
+} from "./grouping/session";
+import { summarizeActivity } from "./activity-summary";
 
 export type GroupViewCtx = {
   C: ThemeTokens;
@@ -29,8 +37,8 @@ export type GroupViewCtx = {
   spinnerChar: string;
   /** ToolPart output blocks (the ctrl+o cycle's outer arm). */
   toolsExpanded: boolean;
-  /** Resolved per-group expansion: override ?? persisted map ?? false. */
-  expanded: (groupID: string) => boolean;
+  /** Resolved per-group expansion: override ?? persisted map ?? verbosity default. */
+  expanded: (groupID: string, kind: GroupKind) => boolean;
   toggle: (groupID: string) => void;
   message: (messageID: string) => NormMessage | undefined;
   /** The app's entry view: part/message entries outside groups. */
@@ -44,7 +52,7 @@ export function SessionGroupView(props: { ctx: GroupViewCtx; row: SessionGroup }
       node={props.row}
       level={0}
       completed={props.row.completed}
-      pending={props.row.kind === "exploration" ? props.row.pending : []}
+      pending={props.row.kind === "exploration" || props.row.kind === "activity" ? props.row.pending : []}
     />
   );
 }
@@ -62,6 +70,8 @@ type GroupProps = {
 function Group(props: GroupProps) {
   // Keep kind-specific state isolated during reconciliation (upstream's
   // keyed <Show> on node.kind — the React idiom is a keyed wrapper).
+  if (props.node.kind === "activity") return <ActivityGroup key="activity" {...props} />;
+  if (props.node.kind === "instructions") return <InstructionsGroup key="instructions" {...props} />;
   return <GroupContent key={props.node.kind} {...props} />;
 }
 
@@ -69,7 +79,7 @@ function GroupContent(props: GroupProps) {
   const ctx = props.ctx;
   const latestRef = useRef<string | null>(null);
   const id = groupID(props.node, props.level);
-  const expanded = id ? ctx.expanded(id) : false;
+  const expanded = id ? ctx.expanded(id, props.node.kind) : false;
   const entries: SessionEntry[] = [];
   visitEntries(props.node.children, (entry) => entries.push(entry));
   const refs = entries.flatMap((entry) =>
@@ -190,6 +200,80 @@ function GroupContent(props: GroupProps) {
         outside={props.pendingOutside}
         entry={ctx.entry}
       />
+    </GroupAnchor>
+  );
+}
+
+/** Low verbosity: one summary for a run of tools, thoughts and instruction loads. */
+function ActivityGroup(props: GroupProps) {
+  const ctx = props.ctx;
+  const id = groupID(props.node, props.level);
+  const summary = summarizeActivity(props.node, ctx.message, props.pending, props.completed);
+  const expanded = id ? ctx.expanded(id, props.node.kind) : false;
+  const toggle = () => {
+    if (id) ctx.toggle(id);
+  };
+  const entries: SessionEntry[] = [];
+  visitEntries(props.node.children, (entry) => entries.push(entry));
+  return (
+    <GroupAnchor groupID={id} active={summary.label !== ""}>
+      {summary.label !== "" ? (
+        <>
+          <InlineToolRow
+            ctx={ctx}
+            icon={summary.failed ? "✗" : expanded ? "-" : "+"}
+            color={ctx.C.subtle}
+            complete={true}
+            spinner={!expanded && summary.active}
+            onToggle={toggle}
+            label={summary.label}
+          />
+          {expanded ? (
+            <box style={{ paddingLeft: 3, flexDirection: "column" }}>
+              <Children {...props} nodes={props.node.children} mode="normal" />
+            </box>
+          ) : null}
+        </>
+      ) : null}
+      <PendingEntries
+        pending={props.pending}
+        entries={entries}
+        outside={props.pendingOutside}
+        entry={ctx.entry}
+      />
+    </GroupAnchor>
+  );
+}
+
+/** Consecutive instruction loads, summarized by the number of distinct files. */
+function InstructionsGroup(props: GroupProps) {
+  const ctx = props.ctx;
+  const id = groupID(props.node, props.level);
+  const expanded = id ? ctx.expanded(id, props.node.kind) : false;
+  const toggle = () => {
+    if (id) ctx.toggle(id);
+  };
+  const entries: SessionEntry[] = [];
+  visitEntries(props.node.children, (entry) => entries.push(entry));
+  const files = new Set(
+    entries.flatMap((entry) => (entry.type === "message" ? instructionPaths(ctx.message(entry.messageID)) : [])),
+  ).size;
+  return (
+    <GroupAnchor groupID={id} active={files > 0}>
+      <InlineToolRow
+        ctx={ctx}
+        icon="◈"
+        color={ctx.C.subtle}
+        complete={true}
+        spinner={false}
+        onToggle={toggle}
+        label={`Instructions: ${files} ${files === 1 ? "file" : "files"}`}
+      />
+      {expanded ? (
+        <box style={{ paddingLeft: 3, flexDirection: "column" }}>
+          <Children {...props} nodes={props.node.children} mode="normal" />
+        </box>
+      ) : null}
     </GroupAnchor>
   );
 }
