@@ -28,6 +28,27 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **PTY-PROOF --GATED + the S2 RE-NEEDLE** SHIPPED 0.6.63 — tools-only,
+  zero parity delta. The load-gated, md5-pinned proof launcher
+  hand-assembled as a ~/rNN-launch.sh script for seven straight waves
+  materializes as the verb `pty-proof.py BINARY --gated` (entry gate
+  load < --max-load, continuation gate < --cont-load, --expect-md5 pin
+  RE-VERIFIED after every gate wait so a mid-wave rebuild can never
+  poison a run, one full log per run — never tail-piped) PLUS the
+  WAVE-LAW verdict computed from the logs: every family red in any run
+  must go green in >= 1 run (--allow names the documented persistents,
+  default F0) — the launcher stops being re-invented and the wave law
+  stops being eyeballed. Two laws born at the verb's first live fire:
+  a child that prints no checks is CRASHED-NO-CHECKS and VOIDS the
+  supervision (a verdict over zero checks is the vacuous-pass class —
+  the run-1 launch died on a relative binary path, the child spawns the
+  TUI with cwd=the proof fixture so the path must be absolute, and the
+  zero-check runs nearly waved through MET), and the S2 absence check
+  now presupposes the presence it negates (the affordance is
+  re-measured in S2's own poll window before the jump — dream
+  ACK-ff353709ed, live reproducer R40 run 1: S1 FAIL + S2 PASS on an
+  affordance that never painted; an S1 flake now fails S1+S2 honestly).
+
 - **TRANSCRIPT-VERBOSITY (#51131)** SHIPPED
   0.6.62 — the v2.0.18 transcript verbosity levels (low/medium/high;
   session.verbosity.cycle, keys none) over the R44 render family.
@@ -1670,6 +1691,21 @@ Defect note: the sessions dialog's ctrl+d delete runs session/close, which
 fails on inactive ("Session is not active") sessions — delete in the dialog
 is dead for everything older than the current run. Rides on the
 session/delete verb above.
+
+Gated-launch laws (0.6.63): the proof launcher is a verb now —
+`python3 tools/pty-proof.py BINARY --gated [--max-runs N] [--max-load L]
+[--cont-load L] [--expect-md5 MD5] [--log-prefix P] [--allow F0,...]
+[--wait-max MIN]`. The supervisor never opens a TUI: it gates on
+/proc/loadavg, pins the binary md5 (re-checked after every gate wait),
+writes one full log per run, and prints the WAVE-LAW verdict from the
+logs. (1) CRASHED-NO-CHECKS: a child that prints no PASS lines voids its
+run and the whole verdict — a wave law computed over zero checks is the
+vacuous-pass class. (2) The child binary argument must be ABSOLUTE (the
+TUI spawns with cwd=the proof fixture; the bash launchers' $PWD prefix
+was load-bearing, not cosmetic). (3) S2's law, generalized: an absence
+check must presuppose the presence it negates — S2 re-measures the
+affordance in its own window before the jump, so an S1 flake fails S1+S2
+honestly instead of buying a vacuous S2 pass.
 
 ## Maintenance law
 

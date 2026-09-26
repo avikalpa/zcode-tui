@@ -10,6 +10,146 @@ throwaway; the wrapper closes it afterwards.
 import os, pty, select, re, sys, time, fcntl, termios, struct, subprocess
 import pyte
 
+# ==== --gated launcher (dream ACK-21821c9216, post-0.6.62 harness wave).
+# The load-gated, md5-pinned full-run launcher hand-assembled as
+# ~/rNN-launch.sh for seven straight waves, materialized as a verb. The
+# supervisor wraps the PLAIN full run as a subprocess per gated attempt and
+# never opens a TUI itself: entry gate (load < --max-load), md5 pin
+# (--expect-md5; default pins the binary as found — a mid-wave rebuild can
+# never poison a run, and the pin is re-verified per run AFTER the gate
+# wait), one full log per run (NEVER tail-piped — the FAIL list must
+# survive), continuation gate (load < --cont-load), then the WAVE-LAW
+# verdict computed from the logs: every family red in any run must go green
+# in >= 1 run; --allow names the documented persistent fails (default F0).
+def _gated_load():
+    return float(open("/proc/loadavg").read().split()[0])
+
+def _gated_wait(limit, deadline, sleep):
+    while True:
+        if time.time() > deadline:
+            print("pty-proof --gated: load window (load < %s) not seen within the wait budget" % limit, file=sys.stderr)
+            sys.exit(4)
+        if _gated_load() < limit:
+            return _gated_load()
+        time.sleep(sleep)
+
+def _gated_parse(argv):
+    opts = {"max_load": 11.0, "cont_load": 12.0, "max_runs": 6, "expect_md5": None,
+            "log_prefix": "/tmp/zct-proof", "allow": "F0", "sleep": 60.0,
+            "wait_max": 150.0}
+    i = 2
+    def val():
+        nonlocal i
+        if i + 1 >= len(argv):
+            sys.exit("pty-proof --gated: %s needs a value" % argv[i])
+        v = argv[i + 1]
+        i += 2
+        return v
+    while i < len(argv):
+        a = argv[i]
+        if a == "--gated":
+            i += 1
+        elif a == "--max-load":
+            opts["max_load"] = float(val())
+        elif a == "--cont-load":
+            opts["cont_load"] = float(val())
+        elif a == "--max-runs":
+            opts["max_runs"] = int(val())
+        elif a == "--expect-md5":
+            opts["expect_md5"] = val()
+        elif a == "--log-prefix":
+            opts["log_prefix"] = val()
+        elif a == "--allow":
+            opts["allow"] = val()
+        elif a == "--sleep":
+            opts["sleep"] = float(val())
+        elif a == "--wait-max":
+            opts["wait_max"] = float(val())
+        else:
+            sys.exit("pty-proof: bad argument %r (usage: pty-proof.py BINARY [--gated] "
+                     "[--max-load N] [--cont-load N] [--max-runs N] [--expect-md5 MD5] "
+                     "[--log-prefix P] [--allow FAM,FAM] [--sleep S] [--wait-max MIN])" % a)
+    return opts
+
+def _gated_md5(path):
+    import hashlib
+    return hashlib.md5(open(path, "rb").read()).hexdigest()
+
+def _gated_main(argv):
+    sys.stdout.reconfigure(line_buffering=True)   # the supervisor's own
+    # progress must stay tail-able, like the per-run logs it keeps
+    if len(argv) < 2 or argv[1].startswith("-"):
+        sys.exit("usage: pty-proof.py BINARY --gated [flags]")
+    binary, opts = argv[1], _gated_parse(argv)
+    path = os.path.abspath(binary)
+    digest = _gated_md5(path)
+    if opts["expect_md5"] and digest != opts["expect_md5"]:
+        print("pty-proof --gated: md5 MISMATCH (dist %s, expected %s) — refusing to run"
+              % (digest, opts["expect_md5"]), file=sys.stderr)
+        sys.exit(3)
+    print("gated: binary md5 pinned %s | entry gate load < %s | %d runs max | logs %s-N.log"
+          % (digest, opts["max_load"], opts["max_runs"], opts["log_prefix"]))
+    allowed = tuple(s.strip() for s in opts["allow"].split(",") if s.strip())
+    deadline = time.time() + opts["wait_max"] * 60.0
+    fails_by_run = []
+    self_path = os.path.abspath(__file__)
+    for run in range(1, opts["max_runs"] + 1):
+        load = _gated_wait(opts["max_load"], deadline, opts["sleep"])
+        now = _gated_md5(path)
+        if now != digest:
+            print("pty-proof --gated: md5 MOVED under the gate (%s -> %s) — refusing to run"
+                  % (digest, now), file=sys.stderr)
+            sys.exit(3)
+        log = "%s-%d.log" % (opts["log_prefix"], run)
+        with open(log, "w") as fh:
+            fh.write("=== gated run %d start %s load %s binary %s\n"
+                     % (run, time.strftime("%Y-%m-%dT%H:%M:%S%z"), load, digest))
+            fh.flush()
+            # The child spawns the TUI with cwd=the proof fixture — the
+            # binary path MUST be absolute or the spawn FileNotFounds (the
+            # bash launcher passed $PWD/dist/zcode-tui for this reason).
+            rc = subprocess.call([sys.executable, self_path, path],
+                                 stdout=fh, stderr=subprocess.STDOUT)
+        fails, passes = [], 0
+        for line in open(log):
+            if line.startswith("FAIL"):
+                lab = line[4:].strip()
+                if lab.startswith("(DEAD)"):
+                    lab = lab[6:].strip()
+                fails.append(lab)
+            elif line.startswith("PASS"):
+                passes += 1
+        fails_by_run.append((passes, fails))
+        print("run %d exit=%d pass=%d fail=%d load=%s log=%s%s"
+              % (run, rc, passes, len(fails), load, log,
+                 " CRASHED-NO-CHECKS" if passes == 0 else ""))
+        for f in fails:
+            if not f.startswith(allowed):
+                print("  FAIL", f)
+        if run < opts["max_runs"]:
+            _gated_wait(opts["cont_load"], deadline, opts["sleep"])
+    # A crashed child prints no checks: zero PASS lines voids the run and
+    # the verdict (a wave law computed over no data is the vacuous-pass
+    # class — the S2 law applied to this verb's own first live fire).
+    crashed = [i + 1 for i, (passes, _) in enumerate(fails_by_run) if passes == 0]
+    if crashed:
+        print("SUPERVISION INVALID — run(s) %s produced no checks (crashed child); wave law not computable"
+              % ", ".join(map(str, crashed)))
+        sys.exit(1)
+    all_fails = sorted(set(f for _, fs in fails_by_run for f in fs))
+    never_green = [f for f in all_fails
+                   if not f.startswith(allowed)
+                   and all(f in fs for _, fs in fails_by_run)]
+    if never_green:
+        print("WAVE LAW: NOT MET — red in every run: %s" % " | ".join(never_green))
+        sys.exit(1)
+    print("WAVE LAW: MET — every non-allowed red family green in >= 1 of %d runs (allowed: %s)"
+          % (opts["max_runs"], opts["allow"]))
+    sys.exit(0)
+
+if "--gated" in sys.argv[2:]:
+    _gated_main(sys.argv)
+
 binary = sys.argv[1]
 verdicts = []
 check_secs = []          # parallel to verdicts: the FAM section each check ran under
@@ -1014,6 +1154,17 @@ if b0 and alive(pid):
             if ln.strip():
                 print(ln)
     check(pid, "S1 Jump-to-latest affordance appears", afford)
+    # S2 re-needle (dream ACK-ff353709ed, live reproducer R40 run 1): an
+    # absence check must presuppose the presence it negates. The affordance
+    # is re-measured HERE, in S2's own poll window, BEFORE the jump — an S1
+    # flake can no longer buy a vacuous S2 pass ("never painted" otherwise
+    # also satisfies "not painted after the jump").
+    s2_seen = "Jump to latest" in "\n".join(screen.display)
+    for _ in range(15):
+        if s2_seen:
+            break
+        read_for(master, stream, 0.5)
+        s2_seen = "Jump to latest" in "\n".join(screen.display)
     os.write(master, b"\x1b\x07"); time.sleep(0.6)               # ctrl+alt+g: jump to latest
     cleared = False
     for _ in range(8):
@@ -1023,7 +1174,13 @@ if b0 and alive(pid):
         if "Jump to latest" not in "\n".join(screen.display):
             cleared = True
             break
-    check(pid, "S2 affordance clears at the bottom", cleared)
+    if not (cleared and s2_seen):
+        print("---- S2 FAIL SCREEN (bottom state) ----")
+        print("affordance seen before the jump:", s2_seen)
+        for ln in screen.display:
+            if ln.strip():
+                print(ln)
+    check(pid, "S2 affordance clears at the bottom", cleared and s2_seen)
 
     # V-series (0.6.62): the transcript verbosity cycle (v2.0.18 #51131).
     # Typed-command law: the popup row must show the design.ts SLASH summary
