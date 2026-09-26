@@ -1765,6 +1765,34 @@ manifest constants — a missing binary or log parent fails fast NAMED,
 never as a mid-run traceback; a new fixture swears in at the manifest,
 not in a family body.
 
+Floor-liveness verb (0.6.66): the R38 four-probe ritual is a verb —
+`python3 tools/floor-check.py WORKTREE [--board infra/meta]
+[--lane-marker STR] [--claim-ack ACK] [--self-ack ACK] [--since-hours H]
+[--fresh-minutes M] [--logs-glob GLOB] [--wait-window MIN] [--poll SEC]
+[--json]`, run ON THE WORK HOST beside the worktree (one ssh): live
+pty-proof/bun/launcher processes, worktree status + newest mtime (pruned
+walk, --fresh-minutes window), newest /tmp proof log + its last line, and
+the msgboard tail filtered to the lane — HOT/COLD verdict with evidence
+lines, exit 0 COLD / 1 HOT / 3 DEGRADED (computed cold with a probe
+erroring — treat as UNKNOWN, never as a clean cold). Board closure law
+as implemented (all three rules live-measured this sitting): only
+ANSWER-kind posts close a claim-class post — by citing it or sharing a
+thread ref (the progress inherits its claim's outcome); a warm post's
+own citations never close it; closers match board-wide because OUTCOMEs
+often drop the full lane refspec ("Lane 06fe815 pushed..."). --self-ack
+excludes the caller's own claim (a seat re-checking its own floor must
+not flag itself); --wait-window arms compact one-line polls until COLD —
+the hail→HOLD→takeover ladder STAYS POLICY, the verb only waits and
+reports. Stdlib-only by law: it must run before pty-proof (which imports
+pyte) and anywhere. Trap it encodes: msgboard hides from non-interactive
+ssh PATH (~/.local/bin + ~/data/msggraph/bin fallbacks, or MSGBOARD=).
+Proof legs on the live floor: each probe provably HOT (named decoy
+`exec -a pty-proof-sim`, fresh log touch, the seat's own open claim, its
+own fresh edit), COLD exit 0 on the cold sibling checkout and after a
+--wait-window ladder (decoy dying mid-window: compact HOT polls then
+full-evidence COLD), DEGRADED exit 3 observed organically before the
+fallback landed.
+
 ## Maintenance law
 
 Owner directive 2026-09-17: after EVERY UX iteration, re-write the Remaining
