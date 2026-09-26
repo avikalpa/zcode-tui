@@ -517,6 +517,7 @@ export function DiffViewer(props: {
                         {reviewed ? null : entry.file.patch ? (
                           <PatchDiff
                             refCb={(ref) => patchDiffByFileIndex.current.set(entry.fileIndex, ref)}
+                            scroll={() => scrollRef.current ?? undefined}
                             diff={entry.file.patch}
                             hunkFg={D.diffHunkHeader}
                             view={entry.file.status === "modified" ? view : "unified"}
