@@ -1183,6 +1183,74 @@ occasioned by a measured fault, none by theory):
   card count now stands at NINE photographs plus the run-7 transcript
   corroboration — the session/delete host-verb filing strengthens again.
 
+### 0.6.59 — the MCP dialog onto the menu grammar (fifth small-wave dialog migration — the line CLOSES)
+
+Reference component/dialog-mcp.tsx (v2.0.16): a DialogSelect titled
+"MCP servers" over the location's server list — rows sorted by name (their
+sortBy), title = the server name, footer = the status text (loading/pending
+"Connecting …", connected "Connected ✓" bold, failed "Failed !",
+needs_auth "Sign in required →", else "Disabled ○") with footerColor
+success/error/warning/muted; onMove tracks the focused server for the
+toggle action row (dialog.mcp.toggle — disconnect/retry/sign in/connect)
+and the enter-to-error detail view (DialogErrorDetails over status.error);
+select on an auth-gated integration enters the integration flow.
+
+OUR SURFACE: the /mcps dialog rides that reference on the menu path — rows
+sorted by name, the status grammar VERBATIM in the menu FOOTER cell with
+footerTone success/error per their footerColor. Their needs_auth warning
+has no tone in our grammar (FooterMenuTone = selection|running|error|
+success) — it rides muted no-tone, the label carries the truth; their BOLD
+connected has no slot either — the tone carries the emphasis (the R45
+●-gutter class of grammar-bound retirements). Zero servers flows to the
+shared emptyView ("No items available") verbatim — the synthesized "No MCP
+servers configured" row retires (a v2.0.7-era invention); the idle/loading
+"Connecting …" row stays as our async mapping (their data layer is
+reactive, ours fetches). HOST GAPS stay RECORDED not invented: the zcode
+protocol exposes mcp/list but no connect/disconnect verbs (SESSION_METHODS
+re-verified this wave) — the toggle action row has no plane; the status
+payload carries no error text — the enter-to-error detail view has no
+plane; the auth-gated integration flow has no plane. THE LEGACY STATUS
+CELL IS DRAINED — DialogOption.status and its right-edge paint are gone.
+
+★ THE DRAIN'S HIDDEN SECOND PRODUCER (the wave's defect, owned): the
+plugins dialog also produced `status:` — as a TERNARY
+(`status: footerParts.length > 0 ? {...} : undefined`), which the
+producer sweep (`grep "status: {"`) missed, and .map() inference LOSES
+LITERAL FRESHNESS so the excess-property check never fired — typecheck
+stayed green over an orphaned field. The plugins footer (disabled,/version)
+vanished from every row: PG2 red FIVE consecutive runs while the payload
+probe showed the data intact and the PG2 microscope showed the bare row.
+FIX: the status word + version ride the legacy meta column (same row, same
+text) until plugins takes its own menu-grammar wave. TWO LAWS: a producer
+sweep greps the FIELD ASSIGNMENT (`status:`), never one literal shape; and
+typecheck is NOT a producer sweep — inference silences excess properties.
+
+PROOF: the M-series follows the migration per the pre-emptive needle law —
+the pre-claim sweep found M0/M1 whole-screen substrings that survive the
+cell move but pass on the loading placeholder alone; M0 now POLLS the ready
+paint (the fixed 3.0 settle raced the mcp/list round-trip under load) and
+M1 is re-pointed PER-ROW: poll for a REAL row (the status text preceded by
+its label on the line — awaiting any status text broke on the loading
+placeholder, run 1's M1 red, isolated probe green), then every
+status-bearing line must carry its label ON THE SAME LINE, with the shared
+emptyView as the legal zero-server state (the proof env's server set is
+the daemon's, not ours). S1/PG2 fail microscopes wired when reds ran past
+the rotate (the PF3 pattern). GATES: typecheck clean; bun 204 pass + the
+documented auth-sync red; generators stamp-only (241 binds 163/3/49/19/7,
+lint 0 lies).
+
+PTY: TWO md5-pinned binaries. On the wave binary (dist f55d8c264746ab9e,
+5 runs, launcher ~/r49-launch.sh, logs /tmp/r49-proof-{1..5}.log): run 1
+130/4 {S1, M1, PG2, F0} — the M1 red was the needle's own race (above);
+runs 2-3 135/3 {S1, PG2, F0} + 129/9 {S-pre×2, S0, S1, S3, S6, PG2, F0} —
+the S-cascade dumps showed the second stash park never landing (load
+~11.5, the known timing class); run 4 130/7 {S1, S3, S6, K0, K1, PG2, F0};
+run 5 134/4 {TB4, TB6, PG2, F0} — S1 GREEN. PG2 red all five (the drain's
+defect, named above). On the FIXED binary (dist cdfc1b7f90fcb2bd, the
+plugins meta fix): run 6 **136/1 {F0}** — the best full run of the
+campaign memory; wave law MET (the only red is the documented persistent
+fail). M1 green in every run since the needle fix (runs 2-6).
+
 ## Remaining (v2.0.16 → us)
 
 - ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
@@ -1252,12 +1320,14 @@ occasioned by a measured fault, none by theory):
   destructive bg, the one field the grammar gains). Carry-over audit
   settled: the count range row is dropped on the menu path; meta appends to
   the display; the legacy status cell is the footer cell's predecessor.
-  REMAINS on this line: the MCP dialog — the LAST legacy-paint dialog
-  (a small wave; sweep the harness for value-token readers on it BEFORE
-  the proof runs, the R47 law). SHIPPED: the sessions slice
-  0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS dialog 0.6.54,
-  the AGENTS dialog 0.6.56, the SETTINGS dialog 0.6.57, the STASH dialog
-  0.6.58 (with the onMove-disarm parity fix).
+  THE LINE IS CLOSED (0.6.59): the MCP dialog shipped as the fifth and
+  last small-wave migration and the legacy status cell drained with it
+  (plugins still paints legacy — its status word moved to the meta column
+  in 0.6.59; its own menu wave, if wanted, is unscoped). SHIPPED: the
+  sessions slice 0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS
+  dialog 0.6.54, the AGENTS dialog 0.6.56, the SETTINGS dialog 0.6.57,
+  the STASH dialog 0.6.58 (with the onMove-disarm parity fix), the MCP
+  dialog 0.6.59.
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted
