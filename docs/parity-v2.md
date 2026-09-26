@@ -28,6 +28,25 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **PTY-PROOF FIXTURE MANIFEST** SHIPPED 0.6.65 — tools-only, ZERO runtime
+  delta. The 2026-09-26 host-reboot class retired for good: a wiped /tmp
+  killed six launcher runs on a standing fixture the harness assumed but
+  never created; the proof cwd got an in-wave makedirs then, but the
+  other folklore paths stayed discoverable per-crash. Every path the
+  harness creates, chdirs into, or reads its own fixtures from now lives
+  in ONE manifest (PROOF_CWD / FAKE_EDITOR / STASH_SEED_DIR / TH_HOME)
+  provisioned by provision_fixtures() at startup — a named binary check,
+  the makedirs sweep, and a provisioning line stamped into every run
+  log; the gated supervisor names an unreadable binary instead of an md5
+  traceback and provisions its own log parent; the plain run exits
+  "binary not found" by name; all three spawn chdirs and the
+  EDITOR/DIFF/seed/TH sites ride the constants. Ask-card needles and
+  agent prompt texts stay verbatim. Proof: the exact crash class
+  REPLAYED — all four fixtures wiped (the host-reboot state), stage SKM
+  on the pinned 0.6.64 dist 9af1ef8d self-provisioned and went 28 PASS /
+  0 FAIL with no traceback, fixtures back on disk; bad-binary named
+  exits in both modes; two gated full runs on the unchanged binary as
+  the no-regression leg. Harness law (4) below.
 - **PLUGINS DIALOG onto the menu grammar** SHIPPED 0.6.64 — the SIXTH
   small-wave migration: the LAST legacy-painted dialog retires (its
   status word had ridden the meta column since 0.6.59's drain) and the
@@ -1739,7 +1758,12 @@ TUI spawns with cwd=the proof fixture; the bash launchers' $PWD prefix
 was load-bearing, not cosmetic). (3) S2's law, generalized: an absence
 check must presuppose the presence it negates — S2 re-measures the
 affordance in its own window before the jump, so an S1 flake fails S1+S2
-honestly instead of buying a vacuous S2 pass.
+honestly instead of buying a vacuous S2 pass. (4) FIXTURE MANIFEST
+(0.6.65): every path the harness creates, chdirs into, or reads its own
+fixtures from is provisioned by provision_fixtures() at startup from the
+manifest constants — a missing binary or log parent fails fast NAMED,
+never as a mid-run traceback; a new fixture swears in at the manifest,
+not in a family body.
 
 ## Maintenance law
 

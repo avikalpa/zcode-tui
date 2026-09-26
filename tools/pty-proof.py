@@ -73,7 +73,10 @@ def _gated_parse(argv):
 
 def _gated_md5(path):
     import hashlib
-    return hashlib.md5(open(path, "rb").read()).hexdigest()
+    try:
+        return hashlib.md5(open(path, "rb").read()).hexdigest()
+    except OSError as e:
+        sys.exit("pty-proof --gated: binary unreadable: %s (%s)" % (path, e))
 
 def _gated_main(argv):
     sys.stdout.reconfigure(line_buffering=True)   # the supervisor's own
@@ -82,6 +85,7 @@ def _gated_main(argv):
         sys.exit("usage: pty-proof.py BINARY --gated [flags]")
     binary, opts = argv[1], _gated_parse(argv)
     path = os.path.abspath(binary)
+    os.makedirs(os.path.dirname(os.path.abspath(opts["log_prefix"])), exist_ok=True)
     digest = _gated_md5(path)
     if opts["expect_md5"] and digest != opts["expect_md5"]:
         print("pty-proof --gated: md5 MISMATCH (dist %s, expected %s) — refusing to run"
@@ -150,6 +154,8 @@ def _gated_main(argv):
 if "--gated" in sys.argv[2:]:
     _gated_main(sys.argv)
 
+if len(sys.argv) < 2:
+    sys.exit("usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR] | pty-proof.py BINARY --gated [flags]")
 binary = sys.argv[1]
 verdicts = []
 check_secs = []          # parallel to verdicts: the FAM section each check ran under
@@ -173,13 +179,29 @@ def check(pid, label, ok):
     check_secs.append(CUR_SECTION)
     print(f"{'PASS' if ok else 'FAIL'}{'' if alive(pid) else ' (DEAD)'} {label}")
 
-with open("/tmp/zct-fake-editor.sh", "w") as f:
-    f.write('#!/bin/sh\nprintf EDITED-BY-EDITOR >> "$1"\ncp "$1" /tmp/zct-export-latest.md\n')
-os.chmod("/tmp/zct-fake-editor.sh", 0o755)
-# The proof cwd is a standing fixture a host reboot wipes (2026-09-26: all
-# six launch runs died FileNotFoundError on it) — the harness provisions it
-# itself, like the fake editor above.
-os.makedirs("/tmp/zct-proof-cwd", exist_ok=True)
+# ---- fixture manifest: every path the harness creates, chdirs into, or
+# reads its own fixtures from is provisioned HERE, at startup, and the
+# binary is fail-fast NAMED — never discovered per-crash (2026-09-26: a
+# host reboot wiped /tmp and six launcher runs died FileNotFoundError on a
+# standing fixture the harness assumed but never created; the audit swears
+# every future fixture in at the same door instead of per-crash).
+PROOF_CWD = "/tmp/zct-proof-cwd"              # spawn cwd; diff/ym/pf fixtures live here
+FAKE_EDITOR = "/tmp/zct-fake-editor.sh"       # the EDITOR the export/edit stages drive
+STASH_SEED_DIR = "/tmp/zct-proof-stash-seed"  # S8's isolated ZCODE_TUI_STATE_DIR
+TH_HOME = "/tmp/zct-proof-home"               # the theme family's isolated HOME
+
+def provision_fixtures(binary_path):
+    if not os.path.exists(binary_path):
+        sys.exit("pty-proof: binary not found: %s" % binary_path)
+    with open(FAKE_EDITOR, "w") as f:
+        f.write('#!/bin/sh\nprintf EDITED-BY-EDITOR >> "$1"\ncp "$1" /tmp/zct-export-latest.md\n')
+    os.chmod(FAKE_EDITOR, 0o755)
+    for _d in (PROOF_CWD, STASH_SEED_DIR, TH_HOME):
+        os.makedirs(_d, exist_ok=True)
+    print("fixtures provisioned: cwd=%s editor=%s seed=%s th_home=%s"
+          % (PROOF_CWD, FAKE_EDITOR, STASH_SEED_DIR, TH_HOME))
+
+provision_fixtures(os.path.abspath(binary))
 
 def sweep_stale_instances(label):
     # LEAK GUARD (2026-09-19 sitting): an earlier sitting leaked five
@@ -253,8 +275,8 @@ def spawn(cols=110, rows=34, args=None):
     screen = pyte.Screen(cols, rows)
     stream = pyte.ByteStream(screen)
     pid = subprocess.Popen([binary] + (args or []), stdin=slave, stdout=slave, stderr=subprocess.DEVNULL,
-                           cwd="/tmp/zct-proof-cwd",
-                           env=dict(os.environ, TERM="xterm-256color", EDITOR="/tmp/zct-fake-editor.sh"),
+                           cwd=PROOF_CWD,
+                           env=dict(os.environ, TERM="xterm-256color", EDITOR=FAKE_EDITOR),
                            close_fds=True).pid
     os.close(slave)
     return pid, master, screen, stream
@@ -1451,7 +1473,7 @@ if alive(pid):
     # multi-line draft's "~2 lines" count rides the menu FOOTER CELL on its
     # OWN row line, absent from the single-line row, newest first. An
     # isolated state dir keeps the owner's store out of the fixture.
-    seed_dir = "/tmp/zct-proof-stash-seed"
+    seed_dir = STASH_SEED_DIR
     import shutil
     shutil.rmtree(seed_dir, ignore_errors=True)
     os.makedirs(seed_dir, exist_ok=True)
@@ -1464,7 +1486,7 @@ if alive(pid):
     s_screen = pyte.Screen(110, 34)
     s_stream = pyte.ByteStream(s_screen)
     s_pid = subprocess.Popen([binary], stdin=s_slave, stdout=s_slave, stderr=subprocess.DEVNULL,
-                             cwd="/tmp/zct-proof-cwd",
+                             cwd=PROOF_CWD,
                              env=dict(os.environ, TERM="xterm-256color", ZCODE_TUI_STATE_DIR=seed_dir),
                              close_fds=True).pid
     os.close(s_slave)
@@ -1700,7 +1722,7 @@ kill(pid)
 
 # ==== FAM:DF ==== (own spawn + seeded repo)
 # ---- boot 3: diff viewer (the v2 port over local-git wiring) ----
-DIFF_CWD = "/tmp/zct-proof-cwd"
+DIFF_CWD = PROOF_CWD
 
 def seed_diff_repo():
     # Deterministic every run: nuke and re-init (earlier runs must not leak
@@ -1816,7 +1838,7 @@ kill(pid)
 # runner account never sees a mode flip. Colour itself is invisible to the
 # pyte text dump, so the asserts read the CONSUMPTION: the settings row's
 # value meta, and the state file the pin persists.
-TH_HOME = "/tmp/zct-proof-home"
+TH_HOME = TH_HOME   # manifest constant; re-bound here so the FAM text stays self-evident
 subprocess.run(["rm", "-rf", TH_HOME])
 subprocess.run(["mkdir", "-p", TH_HOME])
 
@@ -1826,7 +1848,7 @@ def spawn_th():
     scr = pyte.Screen(110, 34)
     strm = pyte.ByteStream(scr)
     p = subprocess.Popen([binary], stdin=slave, stdout=slave, stderr=subprocess.DEVNULL,
-                         cwd="/tmp/zct-proof-cwd",
+                         cwd=PROOF_CWD,
                          env=dict(os.environ, TERM="xterm-256color", HOME=TH_HOME),
                          close_fds=True).pid
     os.close(slave)
@@ -2082,7 +2104,7 @@ if alive(ym_pid) and ym_boot:
         if "Permission required" in d_ym:
             ym_asked = True
             break
-        if os.path.exists("/tmp/zct-proof-cwd/ym-mode-proof.txt"):
+        if os.path.exists(f"{PROOF_CWD}/ym-mode-proof.txt"):
             ym_done = True
             break
     check(ym_pid, YM_LABELS[2], ym_done and not ym_asked)
@@ -2091,7 +2113,7 @@ if alive(ym_pid) and ym_boot:
         for line in ym_screen.display:
             if line.strip():
                 print(f"|{line.rstrip()}")
-    ym_file = os.path.exists("/tmp/zct-proof-cwd/ym-mode-proof.txt")
+    ym_file = os.path.exists(f"{PROOF_CWD}/ym-mode-proof.txt")
     check(ym_pid, YM_LABELS[3], ym_file)
     ym_badge = False
     for _ in range(16):
