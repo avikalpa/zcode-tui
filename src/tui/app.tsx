@@ -4635,15 +4635,24 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     );
   }
   if (dialog === "plugins") {
-    // Ported from opencode v2.0.8 feature-plugins/system/plugins.tsx (0.6.34):
-    // the Plugins select — rows off plugins/list sorted by name, the v2
-    // footer grammar (status word when not active, then the version; hash
-    // versions shortened to 7) with subdued colour, pending rows wear a
-    // gutter mark while the toggle is in flight. Enter toggles
-    // plugins/setEnabled (v2 toggles its TUI arm — ours is the only toggle
-    // plane the host offers; mapping note in docs/parity-v2.md). The v2
-    // ctrl+a internal-plugins toggle, dialog.plugins.error/-check/-update
-    // have no plane here (no TUI-runtime arm, no error/outdated payloads) —
+    // Ported from opencode v2.0.18 feature-plugins/system/plugins.tsx onto
+    // the menu grammar (0.6.64, sixth small-wave dialog migration — the
+    // LAST legacy-painted dialog retires): rows sorted by name, the v2
+    // footer(entry) grammar verbatim in the menu FOOTER cell — [status
+    // word when not active, version with 40/64-hex shortened to 7] joined
+    // ", " (our plugins/list payload has no local/package-source/outdated
+    // fields, so their "local" and "update available" parts and the
+    // failed/info footer colors have no plane — recorded); pending rows
+    // read "updating" in the footer cell (their updating(entry)) and keep
+    // the "…" gutter; zero plugins flows to the shared emptyView (the
+    // synthesized "No plugins available" row retires — the MCP 0.6.59
+    // precedent); the idle/loading row stays as our async mapping. Enter
+    // toggles plugins/setEnabled (v2 toggles its TUI arm — ours is the
+    // only toggle plane the host offers; mapping note in
+    // docs/parity-v2.md). The v2 ctrl+a internal-plugins toggle,
+    // dialog.plugins.error/-check/-update, the DialogErrorDetails detail
+    // view and the TUI/Server category split have no plane here (no
+    // TUI-runtime arm, no error/outdated payloads, single-plane rows) —
     // omitted per the Revert-row precedent, not hacked around.
     const pluginOptions: DialogOption<string | null>[] =
       pluginsState.kind === "idle" || pluginsState.kind === "loading"
@@ -4653,31 +4662,25 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
               { id: "err", label: "Could not load plugins", description: pluginsState.message, value: null },
               { id: "err2", label: "Close and reopen Plugins to try again.", value: null },
             ]
-          : pluginsState.plugins.length === 0
-            ? [{ id: "empty", label: "No plugins available", value: null }]
-            : pluginsState.plugins.map((plugin) => {
-                const footerParts = [
-                  ...(plugin.enabled ? [] : ["disabled"]),
-                  ...(plugin.version ? [shortVersion(plugin.version)] : []),
-                ];
-                return {
-                  id: plugin.id,
-                  label: plugin.name,
-                  // 0.6.59: the legacy status cell retired with the MCP
-                  // migration — this was its hidden second producer
-                  // (ternary form; the producer grep missed it and .map()
-                  // inference silences the excess-property check). The
-                  // status word + version ride the meta column until this
-                  // dialog takes its own menu-grammar wave.
-                  meta: footerParts.length > 0 ? footerParts.join(", ") : undefined,
-                  gutter: pluginPending.includes(plugin.id) ? "…" : undefined,
-                  value: plugin.id,
-                };
-              });
+          : pluginsState.plugins
+              .slice()
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((plugin) => ({
+                id: plugin.id,
+                label: plugin.name,
+                footer: pluginPending.includes(plugin.id)
+                  ? "updating"
+                  : [
+                      ...(plugin.enabled ? [] : ["disabled"]),
+                      ...(plugin.version ? [shortVersion(plugin.version)] : []),
+                    ].join(", ") || undefined,
+                gutter: pluginPending.includes(plugin.id) ? "…" : undefined,
+                value: plugin.id,
+              }));
     return (
       <SelectDialog
         title="Plugins"
-        size="large"
+        menu
         options={pluginOptions}
         theme={C}
         footerHints={[
