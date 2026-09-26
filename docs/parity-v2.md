@@ -28,6 +28,28 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **DIFF-VIRTUALIZATION (#51122 render half)** SHIPPED
+  0.6.61 — VirtualAddedPatch onto our React diff viewer: added-file diffs
+  >= 3000 lines split by the 0.6.60 model half render as 128-line virtual
+  chunks — offscreen chunks become fixed-height placeholders, the chunks
+  overlapping the viewport (+-1 window) follow the ScrollBox offset
+  observed on the renderer lifecycle pass, and the whole file is
+  tree-sitter highlighted once with each chunk painting its slice
+  (chunkHighlights offset math verbatim). The gutter sync width becomes
+  max(live digits, whole-file digits) so the independently-mounted chunks
+  align; PatchDiff gains the `scroll` prop (the diff route's ScrollBox)
+  and PatchDiffRef.hunks widens to (DiffRenderable | BoxRenderable)[] with
+  the virtual root as its single member (upstream's shape). Binding
+  translations recorded: Solid signals -> React state with an equality
+  bail-out (the lifecycle pass fires every render pass; an unmoved window
+  must not re-render), Solid ref/onCleanup -> ref callbacks + effects over
+  the same registerLifecyclePass pairing, requestAnimationFrame ->
+  setTimeout (the 0.6.7 binding deviation), props.read -> refs mirrored
+  from the latest render. Contract tests (patch-diff.test.tsx): a
+  3200-line added file splits into 25 chunks and mounts only the viewport
+  window at top and mid-file; a small patch stays on the per-hunk path
+  with the scroll plane wired.
+
 - **the v2.0.18 re-pin (maintenance law, fifth live fire)** SHIPPED
   0.6.60 — upstream released v2.0.17+v2.0.18 in the day after R49's
   claim-time check (13 TUI commits, 46 files, +1859/-273). The vendored
@@ -49,8 +71,8 @@ ports AROUND the logo, never over it).
     split) + their 3-test contract (src/tui/diff/added-patch.test.ts).
     The render half — VirtualAddedPatch scroll windowing over chunk
     placeholders, whole-file tree-sitter highlight-once with per-chunk
-    slices, renderer lifecycle-pass scroll observation — is Solid-deep
-    and lands as its own wave (DIFF-VIRTUALIZATION, Remaining).
+    slices, renderer lifecycle-pass scroll observation — SHIPPED 0.6.61
+    (DIFF-VIRTUALIZATION, the lead Shipped entry).
   - **queued_prompt.undo (ctrl+u, #51124)** — the queue manager's
     ctrl+u pops the selected queued prompt back into the composer
     (draft + \n\n + text, cursor at end, queue row removed, dialog
@@ -1298,15 +1320,12 @@ fail). M1 green in every run since the needle fix (runs 2-6).
 
 ## Remaining (v2.0.18 → us)
 
-- **DIFF-VIRTUALIZATION (#51122 render half, opened 0.6.60)** —
-  VirtualAddedPatch: added-file diffs >= 3000 lines render as 128-line
-  virtual chunks (offscreen = fixed-height placeholders, viewport +-1
-  window from the scroll offset observed on the renderer lifecycle
-  pass; whole-file tree-sitter highlight-once, per-chunk highlight
-  slices). Model half SHIPPED 0.6.60 (splitAddedPatch); the Solid
-  windowing translates onto our React diff viewer (the `scroll` prop
-  plumbs from the diff route's ScrollBox, upstream diff-viewer.tsx
-  1024). Named wave — not a maintenance item.
+- ~~**DIFF-VIRTUALIZATION (#51122 render half, opened 0.6.60)**~~
+  SHIPPED 0.6.61 — VirtualAddedPatch windowing on our React diff viewer
+  (128-line chunks, fixed-height placeholders offscreen, lifecycle-pass
+  scroll observation, whole-file tree-sitter highlight-once + per-chunk
+  slices, the `scroll` prop from the diff route's ScrollBox). See the
+  0.6.61 Shipped entry.
 - **TRANSCRIPT-VERBOSITY (#51131, opened 0.6.60)** — upstream's
   transcript verbosity levels (low/medium/high; session.verbosity.cycle
   bind, keys none) rework the activity surface: new
