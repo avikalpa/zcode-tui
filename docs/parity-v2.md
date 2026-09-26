@@ -28,6 +28,40 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **PLUGINS DIALOG onto the menu grammar** SHIPPED 0.6.64 — the SIXTH
+  small-wave migration: the LAST legacy-painted dialog retires (its
+  status word had ridden the meta column since 0.6.59's drain) and the
+  small-wave footer-menu line re-closes. The v2.0.18
+  feature-plugins/system/plugins.tsx grammar onto the SelectDialog `menu`
+  path: the FOOTER cell carries footer(entry) verbatim — [status word
+  when not active ("disabled"), version with 40/64-hex shortened to 7]
+  joined ", " (upstream's "local" / "update available" parts and the
+  failed/error + outdated/info footerColor tones have NO plane — our
+  plugins/list payload carries no local/package-source/outdated/failed
+  fields; recorded); pending rows read "updating" in the footer cell
+  (their updating(entry)) and keep the "…" gutter; rows sorted by name
+  (their label sort); zero plugins flows to the shared emptyView — the
+  synthesized "No plugins available" row retires (the MCP precedent);
+  the idle/loading row stays our async mapping; enter toggles
+  plugins/setEnabled unchanged (the only toggle plane the host offers).
+  Host gaps stay RECORDED: ctrl+a show-internal toggle (no TUI-runtime
+  arm), dialog.plugins.check/-update (no outdated payload, no
+  plugin/update verb), dialog.plugins.error + the DialogErrorDetails
+  detail view (no error payload), the TUI/Server category split
+  (single-plane payload). NEEDLE LAW APPLIED PRE-EMPTIVELY: the PG
+  series verified against the new geometry BEFORE the first run —
+  whole-screen substrings + the filter-pin survive the meta→footer
+  cell move; PG green 4/4 in isolation, then green ALL SIX gated runs.
+  GATES: typecheck clean; bun 220 pass + the documented auth-sync red;
+  generators stamp-only (243 binds 165 covered, lint 0 lies). PTY: ONE
+  md5-pinned binary 9af1ef8d, SIX gated runs via the --gated verb (logs
+  /tmp/r54-proof-{1..6}.log on dev): 139/2 {S2, F0}, **141/1 {F0}**,
+  139/3 {CX-pre, CX5, F0}, 139/3 {TB4, TB6, F0}, 132/9 {S-pre×2, S0-S2,
+  V0-V2, F0}, 136/5 {S1, S2, V2, TB6, F0} — reds rotate entirely in
+  the known class; every family green >= 1 run (run 2 green but F0);
+  S2 red ONLY alongside S1 (runs 5-6) — the re-needle signature
+  holds; the verb's verdict: **WAVE LAW: MET** (allowed: F0).
+
 - **PTY-PROOF --GATED + the S2 RE-NEEDLE** SHIPPED 0.6.63 — tools-only,
   zero parity delta. The load-gated, md5-pinned proof launcher
   hand-assembled as a ~/rNN-launch.sh script for seven straight waves
@@ -1451,14 +1485,14 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   destructive bg, the one field the grammar gains). Carry-over audit
   settled: the count range row is dropped on the menu path; meta appends to
   the display; the legacy status cell is the footer cell's predecessor.
-  THE LINE IS CLOSED (0.6.59): the MCP dialog shipped as the fifth and
-  last small-wave migration and the legacy status cell drained with it
-  (plugins still paints legacy — its status word moved to the meta column
-  in 0.6.59; its own menu wave, if wanted, is unscoped). SHIPPED: the
-  sessions slice 0.6.48/0.6.49, the SUBAGENT TAB STRIP 0.6.52, the MODELS
-  dialog 0.6.54, the AGENTS dialog 0.6.56, the SETTINGS dialog 0.6.57,
-  the STASH dialog 0.6.58 (with the onMove-disarm parity fix), the MCP
-  dialog 0.6.59.
+  THE LINE IS CLOSED (0.6.59, re-closed 0.6.64): the MCP dialog shipped
+  as the fifth small-wave migration and the legacy status cell drained
+  with it; the PLUGINS dialog — the one holdout on the meta column
+  since 0.6.59 — SHIPPED 0.6.64 as the sixth and last migration (see
+  Shipped). SHIPPED: the sessions slice 0.6.48/0.6.49, the SUBAGENT TAB
+  STRIP 0.6.52, the MODELS dialog 0.6.54, the AGENTS dialog 0.6.56, the
+  SETTINGS dialog 0.6.57, the STASH dialog 0.6.58 (with the onMove-disarm
+  parity fix), the MCP dialog 0.6.59, the PLUGINS dialog 0.6.64.
 - **quick_switch persistent slots** (split out of the sessions line,
   0.6.48 audit) — v2.0.11 keeps a SECOND slot plane beside the tab keys:
   session.quick_switch.1-9 bound to local.session.slots() (a persisted
