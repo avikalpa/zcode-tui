@@ -1028,6 +1028,10 @@ if b0 and alive(pid):
     # V-series (0.6.62): the transcript verbosity cycle (v2.0.18 #51131).
     # Typed-command law: the popup row must show the design.ts SLASH summary
     # before enter — and the flash window is polled, never fixed-settled.
+    # The pf636 zombie parks with focus here (12th photograph, run 1: the
+    # ask card ate the typed /verbosity and the composer stayed empty), so
+    # dismiss proof-scoped cards before the first keystroke.
+    dezombify(master, stream, screen, 4)
     os.write(master, b"/verbosity")
     vpop = False
     for _ in range(10):
