@@ -90,8 +90,10 @@ import {
   recordClosedSessionTab,
   recordSessionTabHistory,
   reopenSessionTab,
+  resolveTabsEnabled,
   type ClosedSessionTab,
   type SessionTabHistory,
+  type TabsMode,
 } from "./session/session-tabs-model";
 import { getRelativeTime, getStashPreview, promptStash, type StashEntry } from "./session/prompt-stash";
 import {
@@ -1673,6 +1675,11 @@ export function App({
   // Persisted in state.json; diff wrapping rides DiffPreferences.wrap.
   const [animations, setAnimations] = useState(uiState.current.animations);
   const [fileContext, setFileContext] = useState(uiState.current.fileContext);
+  // v2 config.tabs voice (#50456): the strip mode. enabled is derived —
+  // auto = on unless the terminal environment lacks support (HERDR_ENV,
+  // upstream's needle, carried verbatim).
+  const [tabsMode, setTabsMode] = useState<TabsMode>(uiState.current.tabs.mode);
+  const tabsEnabled = resolveTabsEnabled({ mode: tabsMode });
   // v2 home.footer status row (0.6.26): the MCP ⊙ count. Fetched on boot
   // and on every return home; the plugins-failed half is omitted (no
   // plugins plane in this TUI).
@@ -2409,6 +2416,7 @@ export function App({
   // opencode v2 session.tab.select.N: leader 1..9/0 select the Nth OPEN
   // TAB (0.6.22 re-point — v2.0.7 owns these keys for tabs, not recency).
   const quickSwitch = (slot: number) => {
+    if (!tabsEnabled) return;
     const tab = tabsRef.current[slot - 1];
     if (!tab) { flashStatus(`no tab in slot ${slot}`); return; }
     if (tab.sessionID === activeId) { closeDialog(); setView("session"); return; }
@@ -2430,6 +2438,7 @@ export function App({
     if (row) void open(row);
   };
   const tabCycle = (direction: 1 | -1, unreadOnly = false) => {
+    if (!tabsEnabled) return;
     const next = cycleSessionTab(
       tabsRef.current,
       activeId ?? undefined,
@@ -2440,6 +2449,7 @@ export function App({
     tabOpenSession(next.sessionID);
   };
   const tabClose = () => {
+    if (!tabsEnabled) return;
     if (!activeId) { flashStatus("no tab to close"); return; }
     const index = tabsRef.current.findIndex((t) => t.sessionID === activeId);
     const result = closeSessionTab(tabsRef.current, activeId);
@@ -2463,6 +2473,7 @@ export function App({
     setView("home");
   };
   const tabReopen = () => {
+    if (!tabsEnabled) return;
     const result = reopenSessionTab(closedTabs, tabsRef.current);
     if (!result.tabs || !result.sessionID) { flashStatus("no closed tab to reopen"); return; }
     setClosedTabs(result.stack);
@@ -2470,6 +2481,7 @@ export function App({
     tabOpenSession(result.sessionID);
   };
   const tabHistoryForward = () => {
+    if (!tabsEnabled) return;
     const result = moveSessionTabHistory(tabHistoryRef.current, tabsRef.current, activeId ?? undefined, 1);
     if (!result.sessionID) { flashStatus("no forward tab history"); return; }
     tabHistoryRef.current = result.history;
@@ -3831,8 +3843,9 @@ export function App({
           { key: "ctrl+d", label: "delete" },
           { key: "ctrl+r", label: "rename" },
           // v2 renders the quick-switch hint only when slots exist
-          // (quickSwitchFooterHints — no slots, no hint).
-          ...(tabsRef.current.length > 0 ? [{ key: "ctrl+1-9", label: "switch" }] : []),
+          // (quickSwitchFooterHints — no slots, no hint); #50456: none
+          // either when the strip mode disables tabs.
+          ...(tabsRef.current.length > 0 && tabsEnabled ? [{ key: "ctrl+1-9", label: "switch" }] : []),
           { key: "esc", label: "close" },
         ]}
         onMove={() => setDeleteId(null)}
@@ -4454,6 +4467,22 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "mode", title: "Mode", group: "Session", hint: "agent mode", value: mode, change: (dir) => void cycleMode(dir) },
       { id: "effort", title: "Effort", group: "Session", hint: "reasoning effort", value: effort, change: (dir) => cycleEffort(dir) },
       { id: "tool-output", title: "Tool output", group: "Session", hint: "expansion · ctrl+o", value: toolsExpanded ? "expanded" : "collapsed", change: () => setToolsExpanded((v) => !v) },
+      {
+        // v2 #50456: their Tabs "Enabled" row became "Mode" — values
+        // off/on/auto, default auto (the order below is their values array).
+        id: "tabs",
+        title: "Mode",
+        group: "Tabs",
+        hint: "session tabs",
+        value: tabsMode,
+        change: (dir) => {
+          const values = ["off", "on", "auto"];
+          const next = values[(values.indexOf(tabsMode) + dir + values.length) % values.length] as TabsMode;
+          setTabsMode(next);
+          uiState.current = uiStateRepository.update(() => ({ tabs: { mode: next } }));
+          flashStatus(`tabs → ${next}`);
+        },
+      },
     ];
     return (
       <SelectDialog
@@ -4872,7 +4901,7 @@ footerHints={[
   };
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
-      {view === "session" && tabs.length > 0 ? (
+      {view === "session" && tabsEnabled && tabs.length > 0 ? (
         <SessionTabsStrip
           C={C}
           tabs={tabs}

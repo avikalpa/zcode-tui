@@ -9,6 +9,7 @@ import {
   recordClosedSessionTab,
   recordSessionTabHistory,
   reopenSessionTab,
+  resolveTabsEnabled,
   sessionTabOverflowWidth,
 } from "./session-tabs-model";
 
@@ -104,5 +105,27 @@ describe("adaptiveSessionTabLayout", () => {
 
   test("overflow marker budget matches the reference constant", () => {
     expect(sessionTabOverflowWidth(12)).toBe(4);
+  });
+});
+
+describe("resolveTabsEnabled (#50456 auto mode)", () => {
+  test("on is on, off is off — regardless of the environment", () => {
+    expect(resolveTabsEnabled({ mode: "on" }, {})).toBe(true);
+    expect(resolveTabsEnabled({ mode: "on" }, { HERDR_ENV: "1" })).toBe(true);
+    expect(resolveTabsEnabled({ mode: "off" }, {})).toBe(false);
+    expect(resolveTabsEnabled({ mode: "off" }, { HERDR_ENV: undefined })).toBe(false);
+  });
+
+  test("auto = the environment formula (upstream's HERDR_ENV needle, verbatim)", () => {
+    expect(resolveTabsEnabled({ mode: "auto" }, {})).toBe(true);
+    expect(resolveTabsEnabled({ mode: "auto" }, { HERDR_ENV: "1" })).toBe(false);
+    expect(resolveTabsEnabled({ mode: "auto" }, { HERDR_ENV: "0" })).toBe(true);
+  });
+
+  test("an unset mode falls to the legacy enabled boolean, else auto", () => {
+    expect(resolveTabsEnabled(undefined, {})).toBe(true);
+    expect(resolveTabsEnabled({}, {})).toBe(true);
+    expect(resolveTabsEnabled({ enabled: true }, { HERDR_ENV: "1" })).toBe(true);
+    expect(resolveTabsEnabled({ enabled: false }, {})).toBe(false);
   });
 });

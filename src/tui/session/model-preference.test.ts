@@ -47,3 +47,28 @@ describe("UiState repository theme voice", () => {
     expect(state.animations).toBe(false);
   });
 });
+
+describe("UiState repository tabs voice (#50456)", () => {
+  test("fresh state decodes to the default auto mode", () => {
+    rmSync(statePath, { force: true });
+    const repo = createModelPreferenceRepository(statePath);
+    expect(repo.load().tabs).toEqual({ mode: "auto" });
+  });
+
+  test("update persists tabs.mode and keeps it through a reload", () => {
+    const repo = createModelPreferenceRepository(statePath);
+    repo.update(() => ({ tabs: { mode: "off" } }));
+    const onDisk = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(onDisk.tabs).toEqual({ mode: "off" });
+    expect(repo.load().tabs).toEqual({ mode: "off" });
+  });
+
+  test("a garbage tabs mode sanitizes to auto", () => {
+    rmSync(statePath, { force: true });
+    writeFileSync(statePath, JSON.stringify({ tabs: { mode: "always" }, animations: false }));
+    const repo = createModelPreferenceRepository(statePath);
+    const state = repo.load();
+    expect(state.tabs).toEqual({ mode: "auto" });
+    expect(state.animations).toBe(false);
+  });
+});

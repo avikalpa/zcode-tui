@@ -4,8 +4,8 @@
 // the file so a change made by one client surfaces in the others live. Our
 // schema is the zcode-tui state.json voice: the model-preference core
 // (recent/favorite/variant, field-named providerId/modelId here) plus this
-// TUI's own persistence fields (diff/animations/fileContext), sanitized on
-// load exactly like the reference's decodeModelPreference. IO is synchronous
+// TUI's own persistence fields (diff/animations/fileContext/theme/tabs),
+// sanitized on load exactly like the reference's decodeModelPreference. IO is synchronous
 // (our persistence has always been sync) and the reference's Flock is the
 // adapted port in ./flock.
 
@@ -14,6 +14,7 @@ import path from "node:path";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { DiffPreferences } from "../diff/diff-viewer";
 import { withLockSync, type FlockOptions } from "./flock";
+import { DEFAULT_TABS_MODE, type TabsMode } from "./session-tabs-model";
 
 export type ModelKey = { providerId: string; modelId: string };
 
@@ -30,6 +31,10 @@ export type UiState = {
   // color-mode lock ("dark"|"light"|"system"; null = never set — an unset
   // or "system" mode is an unlocked mode).
   theme: { name: string | null; mode: string | null };
+  // The v2 config.tabs voice (#50456): the strip mode. We carry only mode —
+  // their legacy enabled boolean and the scope/layout/indicators keys have
+  // no plane on this stack (recorded in parity-v2.md).
+  tabs: { mode: TabsMode };
 };
 
 const EMPTY: UiState = {
@@ -40,6 +45,7 @@ const EMPTY: UiState = {
   animations: true,
   fileContext: true,
   theme: { name: null, mode: null },
+  tabs: { mode: DEFAULT_TABS_MODE },
 };
 
 export function modelKey(model: ModelKey): string {
@@ -95,6 +101,12 @@ function decode(raw: unknown): UiState {
         return {
           name: typeof raw.name === "string" ? raw.name : null,
           mode: raw.mode === "dark" || raw.mode === "light" || raw.mode === "system" ? raw.mode : null,
+        };
+      })(),
+      tabs: (() => {
+        const raw = (obj.tabs && typeof obj.tabs === "object" ? obj.tabs : {}) as Record<string, unknown>;
+        return {
+          mode: raw.mode === "auto" || raw.mode === "on" || raw.mode === "off" ? raw.mode : DEFAULT_TABS_MODE,
         };
       })(),
     };

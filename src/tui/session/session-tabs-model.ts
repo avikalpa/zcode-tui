@@ -14,6 +14,24 @@ export type SessionTab = {
 
 export type SessionTabUnread = "activity" | "error"
 
+// Upstream #50456 (first shipped v2.0.13): the strip carries a config mode —
+// "on" always, "off" never, "auto" = on unless the terminal environment
+// lacks support. Their support needle is the HERDR_ENV environment variable,
+// carried verbatim; nothing on our stack sets it today, so auto resolves on.
+// The derivation mirrors their config.resolve(): mode wins, then their
+// legacy enabled boolean (we never write one), then "auto".
+export type TabsMode = "auto" | "on" | "off"
+
+export const DEFAULT_TABS_MODE: TabsMode = "auto"
+
+export function resolveTabsEnabled(
+  tabs: { mode?: TabsMode; enabled?: boolean } | undefined,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  const mode = tabs?.mode ?? (tabs?.enabled === undefined ? DEFAULT_TABS_MODE : tabs.enabled ? "on" : "off")
+  return mode === "on" || (mode === "auto" && environment.HERDR_ENV !== "1")
+}
+
 export const NEW_SESSION_TAB_TITLE = "New session"
 
 export function sessionTabNumberLabel(index: number) {
