@@ -28,6 +28,51 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **the v2.0.18 re-pin (maintenance law, fifth live fire)** SHIPPED
+  0.6.60 — upstream released v2.0.17+v2.0.18 in the day after R49's
+  claim-time check (13 TUI commits, 46 files, +1859/-273). The vendored
+  reference re-pinned (tools/sync-opencode.sh v2.0.18, EXPLICIT tag);
+  ritual run: bun tools/resolve-theme-v2.ts, gen-keybinds, gen-themes,
+  lint, parity-report --stale (15 ports predate the pin). Keybind
+  surface +2 to 243 binds (covered 164 / none 50 / partial 3 / law 7 /
+  blocked-host 19, lint 0 lies); baked theme arms STAMP-ONLY — the
+  yellow-alias drop (#51177) does not reach our generated arms. Ports
+  landed:
+  - **failed-group plain-x marker (#51175, site 1)** — an errored tool
+    (state.status error) marks the exploration group's run icon x
+    (plain, upstream truth; their error tint was already absent in our
+    grammar). Site 2 (the iconColor drop) lives in their ActivityGroup
+    summary row — the low-verbosity surface we do not carry; it rides
+    the TRANSCRIPT-VERBOSITY wave below.
+  - **splitAddedPatch + AddedPatchChunk (#51122 model half)** — the
+    new-file-patch chunker (verbatim; context/removed patches refuse to
+    split) + their 3-test contract (src/tui/diff/added-patch.test.ts).
+    The render half — VirtualAddedPatch scroll windowing over chunk
+    placeholders, whole-file tree-sitter highlight-once with per-chunk
+    slices, renderer lifecycle-pass scroll observation — is Solid-deep
+    and lands as its own wave (DIFF-VIRTUALIZATION, Remaining).
+  - **queued_prompt.undo (ctrl+u, #51124)** — the queue manager's
+    ctrl+u pops the selected queued prompt back into the composer
+    (draft + \n\n + text, cursor at end, queue row removed, dialog
+    closed). N/A here: their appendPrompt part-range shifting (our
+    queue rows are plain text) and the shell-mode refusal (no shell
+    mode). SelectDialog gains the undo action slot (the DialogAction
+    union + the ctrl+u handler beside pin/delete/rename/all).
+  - **fs.watch sync-throw guard (#51210 pattern)** — the preference
+    watch site wraps watch() in try/catch (ENOSPC-class sync throws
+    degrade to live-reload-disabled, never crash); the #51243 on-error
+    handler landed with the 0.6.29 port and now also clears the reload
+    timer. Their storage.tsx has no plane here (our storage is
+    host-side).
+  - **OpenTUI ^0.5.12 (#50567)** — resolved 0.5.12, gates green; their
+    only adaptation was mini/mono.ts (a surface we do not carry).
+  DISPOSITIONS (no plane, truth-recorded): transcript verbosity levels
+  (#51131) = the TRANSCRIPT-VERBOSITY wave; pair one-time links
+  (#50972, their DialogPair de-credentialing) = no pair dialog here;
+  plugin model-variant exposure (#51101) = no plugin-host plane;
+  location-missing recovery (#51096) = no local-CLI cwd plane; shared
+  browser-opener (#51412 openUrl) = no open dependency. mini/*
+  deltas ride the unported mini mode. Upstream pin: v2.0.18.
 - **the agents dialog onto the menu grammar** SHIPPED 0.6.56 — the second
   small-wave dialog migration. Reference component/dialog-agent.tsx: a flat
   dialog, title "Select agent", rows render the agent id VERBATIM with its
@@ -1251,8 +1296,27 @@ plugins meta fix): run 6 **136/1 {F0}** — the best full run of the
 campaign memory; wave law MET (the only red is the documented persistent
 fail). M1 green in every run since the needle fix (runs 2-6).
 
-## Remaining (v2.0.16 → us)
+## Remaining (v2.0.18 → us)
 
+- **DIFF-VIRTUALIZATION (#51122 render half, opened 0.6.60)** —
+  VirtualAddedPatch: added-file diffs >= 3000 lines render as 128-line
+  virtual chunks (offscreen = fixed-height placeholders, viewport +-1
+  window from the scroll offset observed on the renderer lifecycle
+  pass; whole-file tree-sitter highlight-once, per-chunk highlight
+  slices). Model half SHIPPED 0.6.60 (splitAddedPatch); the Solid
+  windowing translates onto our React diff viewer (the `scroll` prop
+  plumbs from the diff route's ScrollBox, upstream diff-viewer.tsx
+  1024). Named wave — not a maintenance item.
+- **TRANSCRIPT-VERBOSITY (#51131, opened 0.6.60)** — upstream's
+  transcript verbosity levels (low/medium/high; session.verbosity.cycle
+  bind, keys none) rework the activity surface: new
+  routes/session/activity-summary.ts (summarizeActivity/busyLabel —
+  "3 commands, 1 edit, 2 thoughts, 4 reads" low-verbosity summaries,
+  running-item labels), group-view ActivityGroup summary rows (the
+  ✗ failed site-2 home), grouping/session + rows + mount-budget +
+  render-context deltas, the config dialog row, and their 293-line
+  session-verbosity contract test. A wave of its own on the R44 scale
+  (Solid → React over our carried group-view/rows).
 - ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
   SHIPPED 0.6.51 — the default "opencode" theme resolves from the v2
   document through the vendored @opencode/theme engine run verbatim at
