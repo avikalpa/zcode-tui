@@ -28,6 +28,34 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **AUTOMATIC TABS MODE (#50456)** SHIPPED 0.6.67 — the strip's config
+  mode grammar, ported from upstream 5b9dc35eec (first shipped v2.0.13,
+  inside our pin): tabs.mode auto|on|off — "on" always, "off" never,
+  "auto" = on unless the terminal environment lacks support.
+  resolveTabsEnabled() (session-tabs-model) carries their resolve()
+  derivation VERBATIM — mode wins, then their legacy enabled boolean,
+  then auto — and their support needle (HERDR_ENV) with the environment
+  seam (the testability override); nothing on our stack sets the
+  variable, so auto resolves on. The mode persists in state.json's
+  UiState (the 0.6.29 repository voice; decode sanitizes a garbage mode
+  to auto) and cycles from a settings row — their Tabs "Enabled" row
+  became "Mode" (values off/on/auto, default auto; ours under a Tabs
+  group). TRANSLATION SEAM (recorded): upstream gates tab-STATE
+  mutation in their session-tabs context; our tab list doubles as the
+  open-session model, so the gates land on the strip render, the tab
+  NAV verbs (cycle/close/reopen/history-forward/ctrl+x select) and the
+  sessions-dialog switch hint — session opening stays live. No plane,
+  recorded: their legacy-enabled normalization in the config merge (we
+  never wrote tabs.enabled) and the tabs scope/layout/indicators config
+  keys (horizontal-only per 0.6.22, tabs per-process in-memory, the
+  digit IS the indicator). Proof: 6 new bun tests (the resolution math
+  incl. the environment formula + the store round-trip/sanitize); PTY
+  on one md5-pinned binary 790037b2, SIX gated runs (loads 6.2-10.5):
+  139/3 {S1,S2,F0}, 141/1 {F0}, 131/11 {S-pre×2,S0-S2,V0-V2,TB6,F0},
+  133/9 ×2 (the R52 wide-cluster signature), 139/2 {TB6,F0} — reds
+  rotate entirely in the known class, every family green in runs 1-2;
+  verb verdict WAVE LAW: MET. Default auto ≡ on — the shipping
+  behavior is unchanged until a config says otherwise.
 - **PTY-PROOF FIXTURE MANIFEST** SHIPPED 0.6.65 — tools-only, ZERO runtime
   delta. The 2026-09-26 host-reboot class retired for good: a wiped /tmp
   killed six launcher runs on a standing fixture the harness assumed but
@@ -1460,10 +1488,10 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   per-session expansion persistence rides in-memory module state, not the
   session-tabs store; the hover/mouse plane and the tool-images slot have
   no arm here (ledgered deviations).
-- **automatic tabs mode (#50456)** and **sidebar onboarding (#50475)** —
-  new upstream surfaces, no plane here yet (the auto mode onto our strip
-  model; onboarding — our sidebar keeps its own shape, deviation
-  ledger).
+- ~~**automatic tabs mode (#50456)**~~ SHIPPED 0.6.67 — tabs.mode
+  auto|on|off onto the strip model (see the 0.6.67 Shipped entry).
+  **sidebar onboarding (#50475)** stays the recorded deviation — our
+  sidebar keeps its own shape.
 - ~~**plan-quota surface** (owner directive 2026-09-20: show the Z.AI
   Coding Plan quota, usage and weekly quota left)~~ SHIPPED 0.6.46 —
   the design fork RESOLVED (b): the synced coding-plan api key
