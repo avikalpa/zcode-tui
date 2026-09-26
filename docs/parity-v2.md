@@ -28,7 +28,38 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
-- **DIFF-VIRTUALIZATION (#51122 render half)** SHIPPED
+- **TRANSCRIPT-VERBOSITY (#51131)** SHIPPED
+  0.6.62 — the v2.0.18 transcript verbosity levels (low/medium/high;
+  session.verbosity.cycle, keys none) over the R44 render family.
+  session/activity-summary.ts ports summarizeActivity/busyLabel/
+  activitySummary verbatim (the "3 commands, 1 edit, 2 thoughts, 4 reads"
+  low-verbosity label; permission-blocked tools excluded; the anti-flicker
+  "Running command…" busy label; code-mode execute counts its finished
+  nested calls), on util/tool-display.ts carrying the two consumed helpers
+  (canonicalToolName, executeCalls; isRecord inlined — the rest of
+  upstream's tool-display has no consumer in our tree). grouping/session.ts
+  gains the activity/instructions kinds, Verbosity + defaultVerbosity
+  ("medium"), the v2.0.18 partPath/messagePath/instructionPaths
+  (exploration now includes webfetch + websearch; questions stand alone;
+  low wraps every run of tools and thoughts in one activity summary;
+  instruction loads group — inert on live data, our protocol carries no
+  synthetic instruction metadata), the sessionGroup helper, and the
+  path-carrying ProjectionEntry. rows.ts threads verbosity through
+  reduceSessionRows; the normalizer passes tool state metadata through.
+  group-view.tsx renders the ActivityGroup (✗/−/+ summary row, spinner
+  while collapsed-active) and InstructionsGroup ("Instructions: N files");
+  the disclosure default follows upstream — high opens exploration +
+  instructions groups. app.tsx holds verbosity as app-level state
+  (upstream persists config.session.verbosity; our plane is the
+  model/effort state) and adds the /verbosity slash row (upstream's
+  "Verbosity: X" palette row, session.verbosity.cycle keys none — the
+  coverage row flips covered). Their 293-line session-verbosity contract
+  test is re-derived as 11 bun tests on our NormMessage shapes (the
+  vendored reference strips tests); reasoningContent is re-inlined locally
+  (importing group-view's would cycle). pty-proof gains the V-series (the
+  popup summary row, then the three cycle flashes).
+
+- **DIFF-VIRTUALIZATION (#51122 render half)** SHIPPED (#51122 render half)** SHIPPED
   0.6.61 — VirtualAddedPatch onto our React diff viewer: added-file diffs
   >= 3000 lines split by the 0.6.60 model half render as 128-line virtual
   chunks — offscreen chunks become fixed-height placeholders, the chunks
@@ -1326,16 +1357,12 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   scroll observation, whole-file tree-sitter highlight-once + per-chunk
   slices, the `scroll` prop from the diff route's ScrollBox). See the
   0.6.61 Shipped entry.
-- **TRANSCRIPT-VERBOSITY (#51131, opened 0.6.60)** — upstream's
-  transcript verbosity levels (low/medium/high; session.verbosity.cycle
-  bind, keys none) rework the activity surface: new
-  routes/session/activity-summary.ts (summarizeActivity/busyLabel —
-  "3 commands, 1 edit, 2 thoughts, 4 reads" low-verbosity summaries,
-  running-item labels), group-view ActivityGroup summary rows (the
-  ✗ failed site-2 home), grouping/session + rows + mount-budget +
-  render-context deltas, the config dialog row, and their 293-line
-  session-verbosity contract test. A wave of its own on the R44 scale
-  (Solid → React over our carried group-view/rows).
+- ~~**TRANSCRIPT-VERBOSITY (#51131, opened 0.6.60)**~~ SHIPPED 0.6.62 —
+  the levels (low/medium/high), the activity summary + the activity/
+  instructions grouping kinds, the /verbosity palette command (their
+  "config row" is a palette row upstream; their settings dialog carries
+  none), the verbosity-high disclosure default, and the V-series proof
+  family. mini/verbosity.ts rides the unported mini mode.
 - ~~**theme-v2 default-theme plane** (opened 0.6.50, the re-pin audit)~~
   SHIPPED 0.6.51 — the default "opencode" theme resolves from the v2
   document through the vendored @opencode/theme engine run verbatim at
