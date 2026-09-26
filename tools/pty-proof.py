@@ -1025,6 +1025,52 @@ if b0 and alive(pid):
             break
     check(pid, "S2 affordance clears at the bottom", cleared)
 
+    # V-series (0.6.62): the transcript verbosity cycle (v2.0.18 #51131).
+    # Typed-command law: the popup row must show the design.ts SLASH summary
+    # before enter — and the flash window is polled, never fixed-settled.
+    os.write(master, b"/verbosity")
+    vpop = False
+    for _ in range(10):
+        read_for(master, stream, 0.5)
+        if "cycle transcript verbosity" in "\n".join(screen.display):
+            vpop = True
+            break
+    if not vpop:
+        print("---- V-pre FAIL SCREEN (popup state) ----")
+        for ln in screen.display:
+            if ln.strip():
+                print(ln)
+    check(pid, "V-pre /verbosity popup shows the command summary", vpop)
+    os.write(master, b"\r")
+    v0 = False
+    for _ in range(10):
+        read_for(master, stream, 0.5)
+        if "Verbosity: High" in "\n".join(screen.display):
+            v0 = True
+            break
+    if not v0:
+        print("---- V0 FAIL SCREEN (post-enter) ----")
+        for ln in screen.display:
+            if ln.strip():
+                print(ln)
+    check(pid, "V0 /verbosity cycles medium to High (status flash)", v0)
+    os.write(master, b"/verbosity\r")
+    v1 = False
+    for _ in range(10):
+        read_for(master, stream, 0.5)
+        if "Verbosity: Low" in "\n".join(screen.display):
+            v1 = True
+            break
+    check(pid, "V1 second cycle reaches Low", v1)
+    os.write(master, b"/verbosity\r")
+    v2 = False
+    for _ in range(10):
+        read_for(master, stream, 0.5)
+        if "Verbosity: Medium" in "\n".join(screen.display):
+            v2 = True
+            break
+    check(pid, "V2 third cycle wraps to Medium", v2)
+
     # TB-series: the session tabs strip (v2 session.tab.*)
     read_for(master, stream, 0.8)
     disp = "\n".join(screen.display)
@@ -1076,7 +1122,7 @@ if b0 and alive(pid):
 
 
 else:
-    for lbl in ("S-pre composer verified empty before the filler turn", "S-pre the filler message sends (echo paints)", "S-pre the transcript freezes (a scrollable transcript)", "S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom"):
+    for lbl in ("S-pre composer verified empty before the filler turn", "S-pre the filler message sends (echo paints)", "S-pre the transcript freezes (a scrollable transcript)", "S0 pageup scrolls (content changed)", "S1 Jump-to-latest affordance appears", "S2 affordance clears at the bottom", "V-pre /verbosity popup shows the command summary", "V0 /verbosity cycles medium to High (status flash)", "V1 second cycle reaches Low", "V2 third cycle wraps to Medium"):
         check(pid, lbl, False)
 
 # ==== FAM:SKM requires BOOT ==== (stash is deterministic; K/M poll the live catalog)
