@@ -36,6 +36,10 @@ def check(pid, label, ok):
 with open("/tmp/zct-fake-editor.sh", "w") as f:
     f.write('#!/bin/sh\nprintf EDITED-BY-EDITOR >> "$1"\ncp "$1" /tmp/zct-export-latest.md\n')
 os.chmod("/tmp/zct-fake-editor.sh", 0o755)
+# The proof cwd is a standing fixture a host reboot wipes (2026-09-26: all
+# six launch runs died FileNotFoundError on it) — the harness provisions it
+# itself, like the fake editor above.
+os.makedirs("/tmp/zct-proof-cwd", exist_ok=True)
 
 def sweep_stale_instances(label):
     # LEAK GUARD (2026-09-19 sitting): an earlier sitting leaked five

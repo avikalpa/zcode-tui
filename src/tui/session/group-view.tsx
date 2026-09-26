@@ -115,6 +115,9 @@ function GroupContent(props: GroupProps) {
       ? props.completed
       : props.completed || (tools.length > 0 && tools.every(toolComplete));
   const label = explorationLabel(tools, completed);
+  // v2.0.18 #51175: any errored tool marks the whole group failed —
+  // the plain ✗ replaces the →/✱ run icon (no error tint upstream).
+  const failed = tools.some((part) => part.state.status === "error");
   const toggle = () => {
     if (id) ctx.toggle(id);
   };
@@ -130,7 +133,7 @@ function GroupContent(props: GroupProps) {
             {tools.length > 0 ? (
               <InlineToolRow
                 ctx={ctx}
-                icon={completed ? "→" : "✱"}
+                icon={failed ? "✗" : completed ? "→" : "✱"}
                 color={ctx.C.subtle}
                 complete={completed}
                 spinner={!completed}

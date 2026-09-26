@@ -1,15 +1,15 @@
 # Parity keybind coverage (GENERATED — do not edit by hand)
 
-Upstream reference: **v2.0.16** — 241 keybind definitions
+Upstream reference: **v2.0.18** — 243 keybind definitions
 (packages/tui/src/config/keybind.ts). Classes from
 tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 
 | class | binds |
 |---|---|
 | blocked-host | 19 |
-| covered | 163 |
+| covered | 164 |
 | law | 7 |
-| none | 49 |
+| none | 50 |
 | partial | 3 |
 
 Open surfaces (partial / none / blocked-host):
@@ -39,6 +39,7 @@ Open surfaces (partial / none / blocked-host):
 - `session.aside` (none) [blocked-host] — v2.0.8 /btw side question — rides a one-shot session.generate (no tool loop); zcode has workspace/generateText only. Filed with the host 0.6.29.
 - `session.cd` (none) [blocked-host] — no session/move or location verbs in SESSION_METHODS (0.6.34) — same batch covered-lie; v2 needs session.move + location.get
 - `session.toggle.exploration_grouping` (none) [none] — 0.6.37 LINT RETIRE: never ported — no exploration grouping surface in src; portable in principle, a future wave can claim it
+- `session.verbosity.cycle` (none) [none]
 - `session.child.next` (right) [partial] — 0.6.52 — the cycle-between-subagents semantic lives in the inspector tab key (wraps all tabs); the right/left keys are unbound
 - `session.child.previous` (left) [partial] — 0.6.52 — shift+tab cycles back in the inspector; the left key is unbound
 - `session.parent` (up) [blocked-host] — same: no parent linkage in the protocol

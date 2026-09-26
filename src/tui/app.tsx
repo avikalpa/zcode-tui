@@ -4333,6 +4333,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
         footerHints={[
           { key: "enter", label: "remove" },
           { key: "ctrl+d", label: "delete" },
+          { key: "ctrl+u", label: "undo" },
           { key: "esc", label: "close" },
         ]}
         onSelect={(i) => {
@@ -4342,10 +4343,27 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
           if (next.length === 0) closeDialog();
         }}
         onAction={(action, option) => {
+          if (!option) return;
+          if (action === "undo") {
+            // queued_prompt.undo (v2.0.18 ctrl+u, #51124): pop the
+            // selected queued prompt back into the composer. Their
+            // appendPrompt part-range shifting has no plane here (our
+            // queue rows are plain text) and their shell-mode refusal
+            // is N/A (no shell mode in our composer).
+            const text = queue[option.value];
+            if (text === undefined) return;
+            const next = queue.filter((_, j) => j !== option.value);
+            queueRef.current = next;
+            setQueue(next);
+            const merged = draftRef.current ? `${draftRef.current}\n\n${text}` : text;
+            applyDraft(merged, merged.length);
+            closeDialog();
+            return;
+          }
           // queued_prompt.delete (v2 ctrl+d). v2's enter=steer needs a
           // mid-turn injection verb the zcode protocol lacks (-32010 on
           // send-while-running) — recorded host gap; enter stays remove.
-          if (action !== "delete" || !option) return;
+          if (action !== "delete") return;
           const next = queue.filter((_, j) => j !== option.value);
           queueRef.current = next;
           setQueue(next);

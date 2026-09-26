@@ -64,7 +64,7 @@ export interface DialogOption<T> {
 }
 
 type DialogAction<T> = (
-  action: "pin" | "delete" | "rename" | "all",
+  action: "pin" | "delete" | "rename" | "all" | "undo",
   option: DialogOption<T> | undefined,
 ) => void;
 
@@ -300,6 +300,7 @@ export function SelectDialog<T>({
     if (key.ctrl && key.name === "d") { onAction?.("delete", shown[sel]); return; }
     if (key.ctrl && key.name === "r") { onAction?.("rename", shown[sel]); return; }
     if (key.ctrl && key.name === "a") { onAction?.("all", shown[sel]); return; }
+    if (key.ctrl && key.name === "u") { onAction?.("undo", shown[sel]); return; }
     if (key.name === "return") {
       const option = shown[sel];
       if (option) onSelect(option.value, option.id);

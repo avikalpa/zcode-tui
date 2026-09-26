@@ -157,20 +157,29 @@ export function createModelPreferenceRepository(filePath: string, lock?: FlockOp
       listeners.add(listener);
       listener(read());
       if (!watcher) {
-        watcher = watch(path.dirname(filePath), (_event, filename) => {
-          const changed = filename?.toString();
-          const name = path.basename(filePath);
-          if (changed !== undefined && changed !== name && !changed.startsWith(`${name}.`)) return;
-          clearTimeout(reload);
-          reload = setTimeout(() => {
-            const value = read();
-            for (const l of listeners) l(value);
-          }, 50);
-        });
-        watcher.on("error", () => {
-          watcher?.close();
-          watcher = undefined;
-        });
+        try {
+          watcher = watch(path.dirname(filePath), (_event, filename) => {
+            const changed = filename?.toString();
+            const name = path.basename(filePath);
+            if (changed !== undefined && changed !== name && !changed.startsWith(`${name}.`)) return;
+            clearTimeout(reload);
+            reload = setTimeout(() => {
+              const value = read();
+              for (const l of listeners) l(value);
+            }, 50);
+          });
+          watcher.on("error", () => {
+            clearTimeout(reload);
+            watcher?.close();
+            watcher = undefined;
+          });
+        } catch (error) {
+          // fs.watch throws synchronously (e.g. ENOSPC when the inotify
+          // watch limit is exhausted). Losing cross-client live-reload
+          // is recoverable; crashing the TUI over it is not — degrade
+          // instead of propagating (v2.0.18 #51210 pattern on our site).
+          console.error("Failed to watch preference directory, live-reload disabled", error);
+        }
       }
       return () => {
         listeners.delete(listener);
