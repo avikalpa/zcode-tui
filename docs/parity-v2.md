@@ -28,7 +28,41 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
-- **MODES LIST AUDIT** SHIPPED 0.6.69 — the Remaining audit line closed
+- **FUZZYSORT WEIGHTED FILTER** SHIPPED 0.6.70 — the 0.6.48 audit line
+  closed: the reference DialogSelect filter (dialog-select.tsx) ported
+  onto SelectDialog, and every menu-grammar dialog with it. Upstream
+  verbatim: needle = filter.toLowerCase(); an empty needle returns the
+  options in their given order; otherwise fuzzysort.go over
+  title/category/searchText with their scoreFn r[0].score*2 +
+  r[1].score + r[2].score (title weighs 2x category/searchText) and
+  their threshold option (new optional SelectDialog prop
+  filterThreshold, upstream's own name). Wiring deltas: their field
+  names to ours (title->label, category->group); the filter is a pure
+  module-level helper filterDialogOptions() consumed through useMemo
+  (React translation of their createMemo). UPSTREAM TRUTH PINNED BY
+  TEST: description/meta LEAVE the haystack — upstream searches only
+  the three keys. Measured before writing (probe on fuzzysort 3.1.0,
+  upstream's exact pin): a non-matching key scores 0, never null (the
+  scoreFn is safe verbatim); label-prefix outranks exact-group under
+  the x2 weight (1.81 vs 1.0); .go("") returns NOTHING — the
+  empty-needle guard is load-bearing. No plane, recorded:
+  skipFilter/renderFilter===false and DialogOption.disabled (no caller
+  and no field here). PTY needles swept pre-flight: SE3 rides
+  searchText (strengthened), D3 safe; PG pins its row by top score
+  (prefix ranks first — green all six runs). OUT OF SCOPE, recorded:
+  the slash palette keeps its own prefix matcher (matchSlashCommands,
+  design.ts) — upstream's autocomplete/command-palette fuzzysort
+  (autocomplete.tsx, mini/footer.command.tsx) stays a recorded
+  divergence, untouched. GATES: typecheck clean; bun 232 pass (226 +
+  6 new filterDialogOptions tests) + the documented auth-sync red;
+  gen-keybinds stamp-only (243 binds covered=165) lint 0 lies;
+  field-lint 0 survivors over 51 files. PTY: ONE md5-pinned binary
+  c2ae04a4, SIX gated runs load 6.4-10.6 (/tmp/r60-proof-{1..6}.log on
+  dev): 136/5 {S2, V0, S3, S6, F0}, 139/3 {S1, S2, F0}, 139/3 {S1, S2,
+  F0}, 140/2 {V2, F0}, 139/3 {S1, S2, F0}, 139/3 {TB4, TB6, F0} — reds
+  rotate in the known class; S1+S2 paired red in three runs then green
+  on 6 (the R57 S-cluster shape, same binary); the PG filter-pin stage
+  green all six under the new ranking. Verb verdict: WAVE LAW: MET. — the Remaining audit line closed
   with a measured verdict and a real fix. Measured against the host
   bundle (zcode.cjs, 2026-09-27): `auto` is daemon-ACCEPTED — it rides
   the session-mode validator, the assistant-message mode predicate and
@@ -1637,11 +1671,13 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   0.6.22) and the picker now renders tab slots to match (the digit is
   what the key does). The persistent slot plane itself is unported — a
   wave if the owner wants v2's full quick-switch grammar.
-- **fuzzysort weighted filter** (0.6.48 audit) — v2.0.11 DialogSelect
-  filters with fuzzysort (title weight 2x, category/searchText weight 1,
-  threshold option); ours is substring over label/description/meta/group.
-  Same shape, weaker recall. Port when a wave touches filtering (needs
-  the fuzzysort dep in bun).
+- ~~**fuzzysort weighted filter** (0.6.48 audit)~~ SHIPPED 0.6.70 — the
+  reference DialogSelect fuzzysort filter (title weight 2x,
+  category/searchText 1x, threshold option) on SelectDialog;
+  description/meta leave the haystack per upstream. See the 0.6.70
+  Shipped entry. The slash palette keeps its own prefix matcher —
+  upstream's autocomplete/command-palette fuzzysort stays a recorded
+  divergence.
 
 - **auto-update while running** (owner directive 2026-09-19: "like opencode2,
   an outstanding UX feature") — opencode2 checks for newer releases and
