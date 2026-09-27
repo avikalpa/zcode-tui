@@ -9,8 +9,8 @@ tools/keybind-coverage.json; regenerate with tools/gen-keybinds.py.
 | blocked-host | 19 |
 | covered | 165 |
 | law | 7 |
-| none | 49 |
-| partial | 3 |
+| none | 41 |
+| partial | 11 |
 
 Open surfaces (partial / none / blocked-host):
 
@@ -47,14 +47,14 @@ Open surfaces (partial / none / blocked-host):
 - `session.undo` (<leader>u) [blocked-host] — needs session/revert in the app-server
 - `session.redo` (<leader>r) [blocked-host] — needs session/revert in the app-server
 - `prompt.editor_context.clear` (none) [none] — n/a to the plain-text draft
-- `composer.subagent.up` (up) [none] — subagent prompt switcher
-- `composer.subagent.down` (down) [none] — subagent prompt switcher
-- `composer.subagent.select` (return) [none] — subagent prompt switcher
-- `composer.subagent.interrupt` (ctrl+d) [none] — subagent prompt switcher
-- `composer.shell.up` (up) [none] — shell prompt switcher
-- `composer.shell.down` (down) [none] — shell prompt switcher
-- `composer.shell.select` (return) [none] — shell prompt switcher
-- `composer.shell.kill` (ctrl+d) [none] — shell prompt switcher
+- `composer.subagent.up` (up) [partial] — 0.6.73 composer tab overlay (src/tui/composer-tabs.tsx): up/down move with the up-at-top close, ctrl+a active/inactive toggle, tab header + row + hints grammar verbatim; select (enter) opens the inspector card — the documented adaptation of upstream's navigate-to-child (no child-transcript verb, probed 0.6.52); interrupt (ctrl+d) stays a host gap (session/stop on a child id errors 'Session is not active', re-probed live 0.6.73, tools/r63-child-stop-probe.ts)
+- `composer.subagent.down` (down) [partial] — 0.6.73 composer tab overlay (src/tui/composer-tabs.tsx): up/down move with the up-at-top close, ctrl+a active/inactive toggle, tab header + row + hints grammar verbatim; select (enter) opens the inspector card — the documented adaptation of upstream's navigate-to-child (no child-transcript verb, probed 0.6.52); interrupt (ctrl+d) stays a host gap (session/stop on a child id errors 'Session is not active', re-probed live 0.6.73, tools/r63-child-stop-probe.ts)
+- `composer.subagent.select` (return) [partial] — 0.6.73 composer tab overlay (src/tui/composer-tabs.tsx): up/down move with the up-at-top close, ctrl+a active/inactive toggle, tab header + row + hints grammar verbatim; select (enter) opens the inspector card — the documented adaptation of upstream's navigate-to-child (no child-transcript verb, probed 0.6.52); interrupt (ctrl+d) stays a host gap (session/stop on a child id errors 'Session is not active', re-probed live 0.6.73, tools/r63-child-stop-probe.ts)
+- `composer.subagent.interrupt` (ctrl+d) [partial] — 0.6.73 composer tab overlay (src/tui/composer-tabs.tsx): up/down move with the up-at-top close, ctrl+a active/inactive toggle, tab header + row + hints grammar verbatim; select (enter) opens the inspector card — the documented adaptation of upstream's navigate-to-child (no child-transcript verb, probed 0.6.52); interrupt (ctrl+d) stays a host gap (session/stop on a child id errors 'Session is not active', re-probed live 0.6.73, tools/r63-child-stop-probe.ts)
+- `composer.shell.up` (up) [partial] — 0.6.73 the overlay registers the Shell tab with the verbatim empty state ('No shell commands') and left/right switching; the zcode protocol exposes no shell list/kill plane, so entries are always empty and the four commands can never fire
+- `composer.shell.down` (down) [partial] — 0.6.73 the overlay registers the Shell tab with the verbatim empty state ('No shell commands') and left/right switching; the zcode protocol exposes no shell list/kill plane, so entries are always empty and the four commands can never fire
+- `composer.shell.select` (return) [partial] — 0.6.73 the overlay registers the Shell tab with the verbatim empty state ('No shell commands') and left/right switching; the zcode protocol exposes no shell list/kill plane, so entries are always empty and the four commands can never fire
+- `composer.shell.kill` (ctrl+d) [partial] — 0.6.73 the overlay registers the Shell tab with the verbatim empty state ('No shell commands') and left/right switching; the zcode protocol exposes no shell list/kill plane, so entries are always empty and the four commands can never fire
 - `composer.terminal.up` (up,k) [none] — embedded terminal
 - `composer.terminal.down` (down,j) [none] — embedded terminal
 - `composer.terminal.select` (return) [none] — embedded terminal

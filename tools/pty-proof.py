@@ -717,7 +717,10 @@ check(pid, "B1 date group headers render", re.search(r"(Sep|Oct|Nov|Dec) \d\d 20
 check(pid, "B2 footer hints (pin/delete, switch only with tabs)",
       "pin" in disp and "delete" in disp and "switch ctrl+1-9" not in disp)
 check(pid, "B3 no idle clutter", "idle ·" not in disp)
-check(pid, "B4 no slot gutters while no tabs are open", re.search(r"(^|\s)1\s+\S", disp) is None)
+# 0.6.73: line-start anchored — the old (^|\s) form matched a " 1 " in any
+# session title (the r63 probe title "count 1 to 30" tripped it via the
+# shared daemon corpus); gutters paint at row start in the pyte dump.
+check(pid, "B4 no slot gutters while no tabs are open", re.search(r"^1\s+\S", disp, re.M) is None)
 
 # ==== FAM:D requires BOOT ====
 # D-series: the themes dialog (reference parity — bare rows, Search, ● gutter).
@@ -1284,13 +1287,13 @@ if b0 and alive(pid):
     read_for(master, stream, 0.8)
     disp = "\n".join(screen.display)
     check(pid, "TB1 the tabs strip renders with the tab-1 gutter",
-          re.search(r"(^|\s)1\s+\S", disp, re.M) is not None)
+          re.search(r"^1\s+\S", disp, re.M) is not None)
     os.write(master, b"/new\r")
     tb2 = False
     for _ in range(12):                # poll: the /new round-trip lags under
         read_for(master, stream, 0.6)  # daemon load (was a fixed 4.0 settle)
         disp = "\n".join(screen.display)
-        if (re.search(r"(^|\s)2\s+\S", disp, re.M) is not None
+        if (re.search(r"^2\s+\S", disp, re.M) is not None
                 and "Untitled session" in disp):
             tb2 = True
             break
@@ -1309,7 +1312,7 @@ if b0 and alive(pid):
     os.write(master, b"\x1f"); time.sleep(0.2)
     os.write(master, b"T"); read_for(master, stream, 2.0)
     disp = "\n".join(screen.display)
-    if re.search(r"(^|\s)2\s+\S", disp, re.M) is not None:
+    if re.search(r"^2\s+\S", disp, re.M) is not None:
         check(pid, "TB5 ctrl+shift+t reopens the closed tab", True)
     else:
         print("NOTE ctrl+shift+t undeliverable on this PTY; reopen covered by unit tests")
@@ -1323,7 +1326,7 @@ if b0 and alive(pid):
         disp = "\n".join(screen.display)
         if "Sessions" in disp and "Search" in disp:
             tb6 = ("switch ctrl+1-9" in disp
-                   and re.search(r"(^|\s)1\s+\S", disp, re.M) is not None)
+                   and re.search(r"^1\s+\S", disp, re.M) is not None)
             break
     check(pid, "TB6 sessions dialog wears the tab-slot gutter + switch hint", tb6)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)   # close sessions
@@ -2155,11 +2158,11 @@ else:
 
 
 # ==== FAM:SUB ==== (own spawn --mode yolo; one typed ask spawns a real child)
-# The subagent surfaces proof (R62, dream ACK-606f5f326d): the strip shipped
-# 0.6.52 PTY-unproven because a fresh session paints nothing. This family
-# TYPES a needle-hygiene ask (compels exactly one general-purpose child; the
-# ask text contains none of the needle words, so the live transcript can
-# never satisfy a needle vacuously) into a yolo TUI while
+# The subagent surfaces proof (R62, dream ACK-606f5f326d; re-needled 0.6.73
+# for the composer tab overlay — the picker retired with that wave). This
+# family TYPES a needle-hygiene ask (compels exactly one general-purpose
+# child; the ask text contains none of the needle words, so the live
+# transcript can never satisfy a needle vacuously) into a yolo TUI while
 # tools/subagents-proof-reader.ts polls session/list + session/subagents
 # concurrently as the protocol truth channel, reporting the model-generated
 # facts (child title, summary vary per run) the row/body needles ride. The
@@ -2167,8 +2170,8 @@ else:
 # a deterministic long child; recorded in the SSOT.
 SUB_LABELS = (
     "SUB0 the running child paints the down-1 footer hint",
-    "SUB1 the picker opens with the provably-empty active filter",
-    "SUB2 the inactive row paints the child title with the done footer",
+    "SUB1 the overlay opens with the provably-empty active filter",
+    "SUB2 the inactive row paints the child title with its agent label",
     "SUB3 the inspector body carries the settled summary",
 )
 
@@ -2240,20 +2243,23 @@ else:
         if "esc stop" in "\n".join(sub_screen.display):
             _sub_truth = {}
         if _sub_truth.get("childTitle") and alive(sub_pid):
-            os.write(sub_master, b"\x1b[B")     # down on the empty draft
+            os.write(sub_master, b"\x1b[B")     # down on the empty draft: the overlay
             _sub_pick = False
             for _ in range(30):
                 read_for(sub_master, sub_stream, 0.7)
                 _d = "\n".join(sub_screen.display)
-                if "Select subagent" in _d and "No subagents found" in _d:
+                if "Subagents" in _d and "No active subagents" in _d:
                     _sub_pick = True
                     break
             check(sub_pid, SUB_LABELS[1], _sub_pick)
-            os.write(sub_master, b"\t")         # tab: show inactive
+            os.write(sub_master, b"\x01")       # ctrl+a: show inactive
             _sub_row = False
             for _ in range(30):
                 read_for(sub_master, sub_stream, 0.7)
-                if _sub_line_has(sub_screen, _sub_truth.get("childTitle", ""), "done"):
+                # the row line: "General-Purpose: {childTitle}" — the agent
+                # label is the titlecased subagentType (deterministic for this
+                # ask; the transcript only ever carries the lowercase form)
+                if _sub_line_has(sub_screen, _sub_truth.get("childTitle", ""), "General-Purpose"):
                     _sub_row = True
                     break
             check(sub_pid, SUB_LABELS[2], _sub_row)

@@ -31,14 +31,12 @@ import {
 } from "./planQuota";
 import {
   mapHostSubagents,
-  pickerTabs,
-  subagentStatusLabel,
   tabIndex as subagentTabIndex,
-  type PickerFilter,
   type SubagentTab,
 } from "./session/subagents";
+import { ComposerOverlay, COMPOSER_TABS, type ComposerTabId } from "./composer-tabs";
 import { modelDialogOptions } from "./model-dialog";
-import { SubagentInspector, subagentStatusColor, subagentStatusIcon } from "./subagent-strip";
+import { SubagentInspector } from "./subagent-strip";
 import {
   formatDateHeading,
   formatContextLabel,
@@ -226,7 +224,7 @@ const EFFORTS = ["low", "high", "max"] as const;
 
 type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
-type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | "imagepreview" | "subagents" | null;
+type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | "imagepreview" | null;
 
 // v2 PromptInput.FileAttachment as our draft carries it: the data-uri,
 // its mime and bytes (the upload needs both), the filename, and the
@@ -1525,13 +1523,19 @@ export function App({
   const [pluginPending, setPluginPending] = useState<string[]>([]);
   const pluginPendingRef = useRef<string[]>([]);
   // Subagent tab plane (0.6.52): tabs poll session/subagents for the active
-  // session; inspectId opens the non-modal inspector card; pickerFilter is
-  // the picker's tab active/inactive toggle. The ref mirrors tabs for the
-  // composer key closure (the reconciler remount law — closures read refs).
+  // session; inspectId opens the non-modal inspector card. The ref mirrors
+  // tabs for the composer key closure (the reconciler remount law —
+  // closures read refs).
   const [subagentTabs, setSubagentTabs] = useState<SubagentTab[]>([]);
-  const subagentTabsRef = useRef<SubagentTab[]>([]);
   const [inspectId, setInspectId] = useState<string | null>(null);
-  const [pickerFilter, setPickerFilter] = useState<PickerFilter>("active");
+  // The composer tab overlay (0.6.73): session.child.first opens it in
+  // place of the composer (the reference routes/session/composer plane).
+  // No ref mirror: the composer unmounts while it is open, so the composer
+  // key closure can never observe it.
+  const [composerOverlay, setComposerOverlay] = useState<{ open: boolean; tab: ComposerTabId }>({
+    open: false,
+    tab: "subagents",
+  });
   const togglePlugin = (row: PluginRow) => {
     if (pluginPendingRef.current.includes(row.id)) return;
     const next: string[] = [...pluginPendingRef.current, row.id];
@@ -1718,11 +1722,10 @@ export function App({
   // Subagent tab poll (0.6.52): session/subagents per active session, on a
   // slow interval while a session is open — the payload is small and the
   // host keeps the revision. Kept polling even when idle-ended so the tabs
-  // (and the picker) survive turn completion, like upstream's tracker state.
+  // (the overlay's rows) survive turn completion, like upstream's tracker.
   useEffect(() => {
     if (!activeId) {
       setSubagentTabs([]);
-      subagentTabsRef.current = [];
       setInspectId(null);
       return;
     }
@@ -1735,7 +1738,6 @@ export function App({
         .then((res) => {
           if (!live) return;
           const tabs = mapHostSubagents(res);
-          subagentTabsRef.current = tabs;
           setSubagentTabs(tabs);
         })
         .catch(() => {
@@ -3609,12 +3611,14 @@ export function App({
         if (next !== undefined) { undoStack.current.push(text0); applyDraft(next, next.length); }
         return;
       }
-      if (key.name === "down" && !key.ctrl && !key.meta && !key.shift && !draftRef.current && subagentTabsRef.current.length > 0) {
+      if (key.name === "down" && !key.ctrl && !key.meta && !key.shift && !draftRef.current && activeIdRef.current) {
         // session.child.first (v2 keybind "down", Toggle subagent picker):
-        // fires only where the history walk below is a no-op — an empty
-        // single-line draft — and only when subagent tabs exist.
-        setPickerFilter("active");
-        setDialog("subagents");
+        // opens the composer tab overlay (0.6.73). Fires only where the
+        // history walk below is a no-op — an empty single-line draft — and
+        // only with a session open (the overlay lives in the session view).
+        // Upstream has no zero-tabs guard: the overlay paints its verbatim
+        // empty state ("No active subagents").
+        setComposerOverlay({ open: true, tab: "subagents" });
         return;
       }
       if (key.name === "up" || key.name === "down") {
@@ -3868,46 +3872,9 @@ export function App({
       />
     );
   }
-  if (dialog === "subagents") {
-    // RunSubagentSelectBody (0.6.52): the searchable subagent picker; tab
-    // toggles running vs ended (the reference active/inactive signal).
-    const visible = pickerTabs(subagentTabs, pickerFilter);
-    return (
-      <SelectDialog
-        title="Select subagent"
-        size="large"
-        menu
-        theme={C}
-        options={visible.map((t) => ({
-          id: t.sessionID,
-          label: t.description || t.title || t.label,
-          description: t.subagentType,
-          footer: subagentStatusLabel(t.status),
-          footerTone: t.status === "running" || t.status === "error" ? t.status : t.status === "completed" ? ("success" as const) : undefined,
-          icon: () => (
-            <text content={subagentStatusIcon(t.status)} fg={subagentStatusColor(C, t.status)} />
-          ),
-          value: t.sessionID,
-        }))}
-        currentId={inspectId ?? undefined}
-        footerHints={[
-          { key: "tab", label: pickerFilter === "active" ? "show inactive" : "show active" },
-          { key: "enter", label: "inspect" },
-          { key: "esc", label: "close" },
-        ]}
-        emptyLabel="No subagents found"
-        onExtraKey={(key) => {
-          if (key.name === "tab" && !key.ctrl && !key.meta) {
-            setPickerFilter((f) => (f === "active" ? "inactive" : "active"));
-            return true;
-          }
-          return false;
-        }}
-        onSelect={(sessionId) => { setInspectId(sessionId); closeDialog(); }}
-        onClose={closeDialog}
-      />
-    );
-  }
+  // The 0.6.52 subagents picker dialog retired at 0.6.73: session.child.first
+  // opens the reference composer tab overlay (the full-mode surface); enter
+  // there opens the same inspector card this dialog fed.
   if (dialog === "model") {
     // Reference model dialog (0.6.53, component/dialog-model.tsx): the
     // Favorites / Recent / provider-group sections through the menu grammar,
@@ -5117,7 +5084,29 @@ footerHints={[
         />
       ) : null}
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-        <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
+        {composerOverlay.open ? (
+          // The composer tab overlay (0.6.73): replaces the composer while
+          // open — upstream keeps theirs mounted with visible={false}, our
+          // dialog model unmounts (keys are exclusive like every
+          // SelectDialog). enter = the inspector (the documented adaptation
+          // of upstream's child-transcript navigation, host-gap).
+          <ComposerOverlay
+            C={C}
+            width={Math.max(20, dims.width - 5)}
+            tabs={COMPOSER_TABS}
+            activeTab={composerOverlay.tab}
+            subagentTabs={subagentTabs}
+            currentSessionId={activeId}
+            onSwitchTab={() => setComposerOverlay((o) => ({ ...o, tab: o.tab === "subagents" ? "shell" : "subagents" }))}
+            onClose={() => setComposerOverlay((o) => ({ ...o, open: false }))}
+            onInspect={(entry) => {
+              setInspectId(entry.sessionID);
+              setComposerOverlay((o) => ({ ...o, open: false }));
+            }}
+          />
+        ) : (
+          <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
+        )}
       </box>
       <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
         {running ? (

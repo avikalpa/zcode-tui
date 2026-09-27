@@ -28,6 +28,75 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **COMPOSER TAB OVERLAY (the reference routes/session/composer plane:
+  subagents + shell tabs)** SHIPPED 0.6.73 — the last un-gated surface of
+  the v2.0.18 audit. src/tui/composer-tabs.tsx ports index.tsx + context.ts
+  + subagents-tab.tsx + shell-tab.tsx onto the React stack:
+  session.child.first ("Toggle subagent picker", down on an empty draft
+  with a session open) opens the OVERLAY in place of the composer — the
+  tab-label header ("Subagents  Shell" + esc), the active tab's 5-row
+  window, the hints footer; left/right switch tabs, up/down move with the
+  verbatim up-at-top CLOSE, ctrl+a toggles active/inactive (selection
+  resets to the top), enter inspects, esc/ctrl+c close. Rows are
+  "{Agent}: {title}" — agent = titlecased subagentType (our stand-in for
+  upstream session.agent), title = the host title with an "@agent
+  subagent" prefix stripped (their agentMatch) — with the "Running" cell
+  only while running and the selected/current/base tones on the
+  established actionFocused mapping (accent/accentText, surface/brand).
+  THE PICKER RETIRES: the 0.6.52 SelectDialog subagents dialog was the
+  mini-surface port; upstream's full-mode truth is this overlay, so
+  session.child.first opens it now. The inspector card STAYS — enter
+  opens it, the documented adaptation of upstream's navigate-to-child
+  (host-gap). THE SHELL TAB registers with the verbatim empty state ("No
+  shell commands", left/right switching live) — the zcode protocol
+  exposes no shell list/kill plane, entries always empty, the four
+  composer.shell.* commands can never fire (recorded [partial]).
+  TerminalsTab stays unregistered (config.session.terminal has no plane
+  here — the panes line). Upstream keeps their overlay's composer mounted
+  with visible={false}; our dialog model unmounts (keys exclusive like
+  every SelectDialog) — recorded adaptation. Upstream auto-opens the
+  overlay inside a child session (children can't prompt) — no trigger
+  surface here while child navigation is host-blocked. ★ HOST GAPS
+  re-measured live (tools/r63-child-stop-probe.ts, one real child):
+  session/stop on a RUNNING child id errors "Session is not active:
+  sess_subagent_agent_…" — per-child interrupt
+  (composer.subagent.interrupt ctrl+d) stays blocked, the 0.6.52 note
+  strengthened to the error string; upstream's
+  hint-only-when-binding-exists rule = our interrupt hint omitted.
+  ★ HARNESS: the SUB family re-needled for the overlay (SUB1 the header +
+  "No active subagents"; SUB2 ctrl+a then the row line carrying
+  childTitle AND "General-Purpose" — the titlecased subagentType,
+  deterministic for this ask); SUB green in every run. The bare
+  down-on-empty producer sweep: every other down keystroke in pty-proof
+  sits under dialog key exclusivity. ★ THE B4 LESSON (corpus poisoning,
+  second family): runs 1-2 failed B4 ("no slot gutters") because THIS
+  sitting's interrupt-probe ask ("count slowly from 1 to 30") generated
+  the session title "Spawn subagent to count 1 to 30" in the shared
+  daemon list — the sessions dialog renders titles, and B4's
+  (^|\s)1\s+\S matched " 1 to" mid-title. The gutter regexes were
+  corpus-fragile BY CONSTRUCTION (the positive TB1/TB2 checks had the
+  mirror defect: a poisoned title could false-GREEN a gutter with no
+  tabs open) — all five anchored to line start (^1\s+\S, re.M), same
+  assertion, honest scope; B4 green run 4. session/close on the poison
+  errors "Session is not active" (the 0.6.47 gap re-measured with the
+  error string) — the corpus is protocol-unremovable; probe-ask hygiene
+  dream filed (dreams/features ACK-aa2f75ee28, host close-verb
+  ACK-677cf5ac03). GATES: typecheck clean; bun 248 pass + the documented
+  auth-sync red (16 new composer-tabs tests); gen-keybinds 243 binds
+  0 lies — BOTH lints caught the wave's own drift (session.child.first
+  evidence pointed at the retired "Select subagent" title; the Running
+  cell local tripped the DialogOption.status shorthand detector —
+  renamed off the shape); field-lint 0 survivors over 52 files. PTY:
+  ONE md5-pinned binary d6a04f722d4311c02ded726e25ee587c, isolation
+  all-green except the documented F0 (SUB 4/4 first fire), SIX gated
+  runs (loads 3.9-6.8): 142/4 {B4-poison,S1-scroll,S2-scroll,F0},
+  143/3 {B4-poison,V2,F0}, 136/10 {the wide S/V class + B4-poison},
+  132/13 {the wide S/V/TB class - B4 GREEN on the re-anchored regex},
+  140/5 {S1-scroll,S2-scroll,TB2,TB6,F0}, 140/5 {same} - reds rotate
+  entirely in the known S/V/TB timing class, B4 runs 1-3 = the corpus
+  poisoning (fixed in-sitting); SUB green 6/6 runs; verb verdict
+  WAVE LAW: MET.
+
 - **HARNESS: SUBAGENT PROOF STAGE (the SUB family + the session/subagents
   protocol reader)** SHIPPED 0.6.72 — tools-only, ZERO runtime delta, NO
   ride. Dream ACK-606f5f326d (filed R42 while waiting on proof run 1)
@@ -1857,8 +1926,12 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   exactly as upstream stocks them.
 - **panes + embedded terminal** — pane.focus.left/right, terminal.select/
   toggle/close, composer.terminal.*, dialog-shell-output. New v2 surface.
-- **composer.subagent.* / composer.shell.*** — subagent & shell prompt
-  switchers. New v2 surface.
+- ~~**composer.subagent.* / composer.shell.*** — subagent & shell prompt
+  switchers.~~ SHIPPED 0.6.73 — the composer tab overlay (see the Shipped
+  entry): the subagents tab is the full-mode surface (the 0.6.52 picker
+  retired), the shell tab registers with its verbatim empty state (no host
+  shell plane — the four shell commands can never fire), per-child
+  interrupt stays host-blocked with the live-measured error string.
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 (see Shipped) — the
   expanded ask arm is ours: ctrl+f toggle, full-viewport overlay,
   minimize-first escape, footer hint grammar.

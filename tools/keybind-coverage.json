@@ -189,7 +189,10 @@
       "status": "covered",
       "note": "0.6.33 — palette Copy session ID; keys none as upstream stocks it"
     },
- "session.verbosity.cycle": {"status": "covered", "note": "0.6.62 /verbosity palette command (v2.0.18 51131): cycles transcript verbosity low/medium/high; keys none as upstream stocks it"},
+    "session.verbosity.cycle": {
+      "status": "covered",
+      "note": "0.6.62 /verbosity palette command (v2.0.18 51131): cycles transcript verbosity low/medium/high; keys none as upstream stocks it"
+    },
     "session.copy": {
       "status": "covered",
       "note": "0.6.33 — /copy + palette: formatSessionTranscript markdown into the clipboard (OSC 52); the old batch covered-lie retired"
@@ -309,12 +312,12 @@
       "note": "embedded terminal"
     },
     "composer.subagent.": {
-      "status": "none",
-      "note": "subagent prompt switcher"
+      "status": "partial",
+      "note": "0.6.73 composer tab overlay (src/tui/composer-tabs.tsx): up/down move with the up-at-top close, ctrl+a active/inactive toggle, tab header + row + hints grammar verbatim; select (enter) opens the inspector card — the documented adaptation of upstream's navigate-to-child (no child-transcript verb, probed 0.6.52); interrupt (ctrl+d) stays a host gap (session/stop on a child id errors 'Session is not active', re-probed live 0.6.73, tools/r63-child-stop-probe.ts)"
     },
     "composer.shell.": {
-      "status": "none",
-      "note": "shell prompt switcher"
+      "status": "partial",
+      "note": "0.6.73 the overlay registers the Shell tab with the verbatim empty state ('No shell commands') and left/right switching; the zcode protocol exposes no shell list/kill plane, so entries are always empty and the four commands can never fire"
     },
     "permission.prompt.fullscreen": {
       "status": "covered",
@@ -422,9 +425,9 @@
     },
     "session.child.": {
       "status": "covered",
-      "note": "0.6.52 — the subagent picker + inspector ride the host session/subagents verb (down on an empty draft opens the picker); child-transcript navigation and per-child interrupt are host gaps (probed 0.6.52: no child-transcript verb)",
+      "note": "0.6.73 — session.child.first opens the composer tab overlay (down on an empty draft with a session open); the inspector rides the host session/subagents verb; child-transcript navigation and per-child interrupt are host gaps (no child-transcript verb probed 0.6.52; session/stop on a child id errors 'Session is not active', re-probed live 0.6.73)",
       "members": {
-        "session.child.first": "Select subagent"
+        "session.child.first": "session\\.child\\.first \\(v2 keybind"
       }
     },
     "prompt.submit": {
