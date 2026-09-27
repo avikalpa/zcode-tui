@@ -3,7 +3,7 @@
 // (fleet SKILL law) — key-driven behavior is the pty-proof's to prove.
 import { describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
-import { SelectDialog, type DialogOption } from "./select-dialog";
+import { filterDialogOptions, SelectDialog, type DialogOption } from "./select-dialog";
 
 const OPTIONS: DialogOption<string>[] = [
   { id: "alpha", label: "alpha", value: "alpha" },
@@ -96,5 +96,61 @@ describe("SelectDialog reference parity", () => {
     expect(frame).toContain("opencode");
     expect(frame).not.toContain("color scheme");
     setup.renderer.destroy();
+  });
+});
+
+
+// ==== fuzzysort weighted filter (0.6.70 — the reference DialogSelect filter)
+// Pure-function leg: key-driven filter behavior in the live dialog is the
+// pty-proof's to prove (SE3/D3/PG type into real search boxes there).
+describe("filterDialogOptions (reference fuzzysort filter)", () => {
+  const opts: DialogOption<string>[] = [
+    { id: "theme", label: "Theme", group: "Interface", searchText: "scheme color theme", value: "theme" },
+    { id: "anim", label: "Animations", group: "Interface", value: "anim" },
+    { id: "ever", label: "everforest", value: "ever" },
+    { id: "drac", label: "dracula", value: "drac" },
+    { id: "desc", label: "Zeta", description: "scheme sandbox", value: "desc" },
+  ];
+
+  test("empty needle returns the options in their given order", () => {
+    expect(filterDialogOptions(opts, "").map((o) => o.id)).toEqual([
+      "theme",
+      "anim",
+      "ever",
+      "drac",
+      "desc",
+    ]);
+  });
+
+  test("searchText-only match survives; rows without the needle drop", () => {
+    const ids = filterDialogOptions(opts, "scheme").map((o) => o.id);
+    expect(ids).toContain("theme");
+    expect(ids).not.toContain("anim");
+    expect(ids).not.toContain("ever");
+  });
+
+  test("description/meta are not in the haystack (the 0.6.70 narrowing)", () => {
+    expect(filterDialogOptions(opts, "scheme").map((o) => o.id)).not.toContain("desc");
+    expect(filterDialogOptions(opts, "sandbox").map((o) => o.id)).toEqual([]);
+  });
+
+  test("label matches outrank group-only matches (title weight 2x, measured)", () => {
+    const ranked: DialogOption<string>[] = [
+      { id: "group-only", label: "zzz", group: "dra", value: "g" },
+      { id: "label-hit", label: "dracula", value: "l" },
+    ];
+    expect(filterDialogOptions(ranked, "dra").map((o) => o.id)).toEqual([
+      "label-hit",
+      "group-only",
+    ]);
+  });
+
+  test("subsequence matches count (dca -> dracula)", () => {
+    expect(filterDialogOptions(opts, "dca").map((o) => o.id)).toContain("drac");
+  });
+
+  test("threshold drops matches below the floor", () => {
+    expect(filterDialogOptions(opts, "dra", 100000)).toEqual([]);
+    expect(filterDialogOptions(opts, "dra").map((o) => o.id)).toContain("drac");
   });
 });

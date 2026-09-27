@@ -30,7 +30,8 @@
 // like the reference agent panel). The legacy scrollbox-style rows stay for
 // the surfaces that have not migrated yet (the carry-over audit in
 // docs/parity-v2.md tracks them).
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import * as fuzzysort from "fuzzysort";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
@@ -61,6 +62,29 @@ export interface DialogOption<T> {
   bg?: string;
   gutter?: string;
   value: T;
+}
+
+// The reference filter (dialog-select.tsx): fuzzysort over the option's
+// title/category/searchText with title matches weighing 2x the other two
+// keys (their scoreFn verbatim) and their threshold option; an empty needle
+// returns the options in their given order. Matched text never renders, and
+// description/meta are NOT in the haystack — upstream searches only the
+// three keys (the 0.6.70 haystack narrowing from the substring port;
+// fuzzysort 3.1.0 scores a non-matching key 0, never null).
+export function filterDialogOptions<T>(
+  options: DialogOption<T>[],
+  filter: string,
+  filterThreshold?: number,
+): DialogOption<T>[] {
+  const needle = filter.toLowerCase();
+  if (!needle) return options;
+  return fuzzysort
+    .go(needle, options, {
+      keys: ["label", "group", "searchText"],
+      scoreFn: (r) => r[0].score * 2 + r[1].score + r[2].score,
+      threshold: filterThreshold,
+    })
+    .map((x) => x.obj);
 }
 
 type DialogAction<T> = (
@@ -156,6 +180,7 @@ export function SelectDialog<T>({
   menu,
   onExtraKey,
   theme,
+  filterThreshold,
 }: {
   title: string;
   options: DialogOption<T>[];
@@ -194,6 +219,9 @@ export function SelectDialog<T>({
    * true when the key was consumed. The subagents picker's tab
    * active/inactive toggle rides this. */
   onExtraKey?: (key: { name: string; shift?: boolean; ctrl?: boolean; meta?: boolean; sequence?: string }) => boolean;
+  /** v2 filterThreshold (dialog-select.tsx): minimum fuzzysort score for a
+   * row to survive the filter. */
+  filterThreshold?: number;
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
@@ -210,10 +238,9 @@ export function SelectDialog<T>({
   const C = theme ?? THEMES.opencode;
   const cardWidth = tierWidth(size, dims.width);
 
-  const shown = options.filter((o) =>
-    `${o.label} ${o.description ?? ""} ${o.meta ?? ""} ${o.group ?? ""} ${o.searchText ?? ""}`
-      .toLowerCase()
-      .includes(filter.toLowerCase()),
+  const shown = useMemo(
+    () => filterDialogOptions(options, filter, filterThreshold),
+    [options, filter, filterThreshold],
   );
   // The reference flatten (dialog-select.tsx): a non-empty query collapses
   // the grouped view into one flat list — no headers, no spacers (0.6.53).
