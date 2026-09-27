@@ -28,6 +28,43 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **MODES LIST AUDIT** SHIPPED 0.6.69 — the Remaining audit line closed
+  with a measured verdict and a real fix. Measured against the host
+  bundle (zcode.cjs, 2026-09-27): `auto` is daemon-ACCEPTED — it rides
+  the session-mode validator, the assistant-message mode predicate and
+  the EnterPlanMode tool schemas (plus a broader config compat enum:
+  default/acceptEdits/dontAsk/bypassPermissions/autoEdit/…) — but
+  RESERVED-UNIMPLEMENTED: checkPermission DENIES EVERY tool with
+  `mode.auto.unimplemented` ("Auto mode is reserved but not implemented
+  yet") before any ask/allow path; the daemon never resolves auto →
+  build. Our TUI offered the row ("ride the default agent (Build)") and
+  sent `session/setMode {mode:"auto"}` verbatim from the agents dialog,
+  the tab/mode cycle and the settings row — a selection that bricks the
+  session's tool use behind a false promise; the App mode-state default
+  was "auto" too. FIX (deviation-queue rules): `auto` DROPPED — MODES is
+  now exactly the daemon's implemented session-mode vocabulary
+  plan/build/edit/yolo; the App mode-state default is "build" (server
+  truth still wins via row.mode ?? "build" on session rows); the dialog
+  description ternary simplifies; --mode launch validation rejects it
+  with the updated vocabulary string (fleet grepped: no launcher passes
+  --mode auto). KEPT: design.ts modeLabel("auto") → { label: "Build",
+  auto: true } stays as the defensive DISPLAY mapping for
+  foreign/server-reported values (cycleMode already falls back to build
+  on an unknown current); the "auto" in model-preference tests is the
+  UNRELATED tabs mode (0.6.67). Host-side question (implement or
+  unreserve "auto") belongs with the zcode host campaign, not the TUI —
+  recorded, not filed as a host gap. GATES: typecheck clean; bun 226
+  pass + the documented auth-sync red; gen-keybinds lint 243 binds 0
+  lies (stamp-only); field-lint 0 survivors over 51 files. PTY: ONE
+  md5-pinned binary e2566d6c, SIX gated runs load 5.2-10.3
+  (/tmp/zct-proof-{1..6}.log on dev): 138/4 {V0-V2, F0}, 135/6 {S1, S2,
+  S3, S6, TB6, F0}, 141/1 {F0}, 141/1 {F0}, 129/13 {CX-pre, CX5,
+  S-pre×2, S0-S2, V0-V2, TB4, TB6, F0}, 141/1 {F0} — reds rotate
+  entirely in the known class (the run-5 wide cluster is the R52/R57
+  store-poisoning signature — the same families green in runs 3/4/6 on
+  the same binary); the agents-dialog family (T0/L0/L1) green ALL six
+  runs; verb verdict WAVE LAW: MET.
+
 - **FIELD-RETIREMENT LINT** SHIPPED 0.6.68 — tools-only, ZERO runtime
   delta, NO ride. Dream ACK-2b455747e9 (born the 0.6.59 five-red class)
   MATERIALIZED: the producer-sweep law is a verb — tools/field-lint.py +
@@ -1614,10 +1651,13 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   an unobtrusive update-available surface (v2-style toast), and a
   self-upgrade path for npm-installed binaries (atomic swap + restart-to-
   apply); fleet hosts keep riding ynpm pushes.
-- **MODES list audit** — our mode set carries an `auto` entry ("ride the
-  default agent (Build)") alongside plan/build/edit/yolo; verify against the
-  daemon's real mode vocabulary and the v2 semantics; drop or re-label if it
-  is an early invention (deviation-queue rules apply).
+- ~~**MODES list audit**~~ CLOSED 0.6.69 — verdict measured against the
+  host bundle: `auto` is daemon-accepted but RESERVED-unimplemented
+  (checkPermission denies every tool, `mode.auto.unimplemented`) while our
+  surfaces offered it with a false "ride the default agent (Build)"
+  description — DROPPED from the offered set; MODES is now exactly the
+  daemon's implemented session-mode vocabulary plan/build/edit/yolo (see
+  the 0.6.69 Shipped entry).
 
 - ~~opencode.settings~~ SHIPPED 0.6.27 (/settings): the DialogConfig surface
   — category groups, current value per row, ←/→ cycles + enter steps —
