@@ -28,6 +28,51 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **HARNESS: SUBAGENT PROOF STAGE (the SUB family + the session/subagents
+  protocol reader)** SHIPPED 0.6.72 — tools-only, ZERO runtime delta, NO
+  ride. Dream ACK-606f5f326d (filed R42 while waiting on proof run 1)
+  materialized: the subagent surfaces — footer hint, picker, inspector —
+  shipped 0.6.52 PTY-unproven because a fresh session paints nothing. THE
+  FAMILY (tools/pty-proof.py FAM:SUB, own spawn --mode yolo, lands between
+  YM and PF): types a needle-hygiene ask (compels exactly one
+  general-purpose child replying one fixed word; the ask text contains
+  none of the needle words, so the live transcript can never satisfy a
+  needle vacuously) while tools/subagents-proof-reader.ts polls
+  session/list + session/subagents concurrently as the PROTOCOL TRUTH
+  CHANNEL, reporting the model-generated facts the needles ride — child
+  title and summary-opening VARY PER RUN ("Reply with the word ok" /
+  "Reply with single word ok" / "Reply with one word" across runs of one
+  fixed task), so row/body needles are DYNAMIC (reader-reported) or
+  SAME-LINE chrome pairs, never whole-screen title substrings. Needles:
+  SUB0 the footer hint paints while the child runs (same-line
+  "ctrl+p commands"+"down 1" — the hint line TRUNCATES at the proof
+  geometry, the "subs" tail cut at 110 cols: needle-vs-truth, the
+  R45/R47 lesson's geometry class, first live fire); SUB1 the picker
+  opens with the provably-empty active filter ("Select subagent" +
+  "No subagents found" — the child is settled, active=running is empty;
+  presence verified before the absence is asserted); SUB2 tab -> the
+  inactive row line carries childTitle AND "done" on ONE line (the M1
+  per-row pattern); SUB3 enter -> the inspector body line carries
+  summary AND "esc back" on ONE line. The running-row paint (active
+  filter holding a row) stays UNPROVEN — it needs a deterministic long
+  child; recorded. ★ THE READER LOCK RULE (two live fires taught it):
+  older proof sessions keep their subagent activity forever, and
+  back-to-back runs put the previous run's ended child inside any
+  session-freshness window (the first fix's updatedAt>=t0-60s still
+  locked the prior run's session — its VERDICT landed at elapsedMs
+  2020) — the only safe anchor is the CHILD's startedAt: a candidate
+  qualifies only through an item started at/after the reader's own
+  start (minus a 5s clock margin); a previous run's child can never
+  re-qualify. ★ --no-subagent drops the family for thin runs (the
+  dream's cost model: one real child turn, ~30-50s, per full run);
+  wired plain+stage+gated (the argv-sweep law: every producer shaped —
+  plain mode also needed the stage-mode key moved from len(argv) to
+  the --stage token, and the --dumps-without---stage contract kept).
+  The reader log is manifest-sworn (READER_LOG provisioned + truncated
+  at startup). Isolation 4/4 twice consecutively; each run lands ONE
+  real child turn = one real session pair in the dev daemon list —
+  accepted (the R42 probe precedent), noted for the daemon-hygiene
+  ledger.
 - **HARNESS: FLOOR-CHECK COMPLETED-RUN DOWNGRADE + PTY-PROOF FLAGS-FIRST**
   SHIPPED 0.6.71 — tools-only, ZERO runtime delta, NO ride. Two harness
   dreams materialized. (1) Dream ACK-d075ca8354: the floor-check logs

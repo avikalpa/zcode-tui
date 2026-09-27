@@ -7,7 +7,7 @@ hide a failure (the v7 lesson: the Jump-to-latest affordance was painted but
 byte-oracle-blind). I-series uses ONE minimal real turn on a TUI-created
 throwaway; the wrapper closes it afterwards.
 """
-import os, pty, select, re, sys, time, fcntl, termios, struct, subprocess
+import os, pty, select, re, sys, time, fcntl, termios, struct, subprocess, json
 import pyte
 
 # ==== --gated launcher (dream ACK-21821c9216, post-0.6.62 harness wave).
@@ -36,7 +36,7 @@ def _gated_wait(limit, deadline, sleep):
 def _gated_parse(argv):
     opts = {"max_load": 11.0, "cont_load": 12.0, "max_runs": 6, "expect_md5": None,
             "log_prefix": "/tmp/zct-proof", "allow": "F0", "sleep": 60.0,
-            "wait_max": 150.0}
+            "wait_max": 150.0, "no_sub": False}
     binary = None
     i = 1
     def val():
@@ -66,10 +66,13 @@ def _gated_parse(argv):
             opts["sleep"] = float(val())
         elif a == "--wait-max":
             opts["wait_max"] = float(val())
+        elif a == "--no-subagent":
+            opts["no_sub"] = True
+            i += 1
         elif a.startswith("-"):
             sys.exit("pty-proof: bad argument %r (usage: pty-proof.py BINARY [--gated] "
                      "[--max-load N] [--cont-load N] [--max-runs N] [--expect-md5 MD5] "
-                     "[--log-prefix P] [--allow FAM,FAM] [--sleep S] [--wait-max MIN])" % a)
+                     "[--log-prefix P] [--allow FAM,FAM] [--sleep S] [--wait-max MIN] [--no-subagent])" % a)
         elif binary is None:
             binary = a
             i += 1
@@ -98,8 +101,9 @@ def _gated_main(argv):
         print("pty-proof --gated: md5 MISMATCH (dist %s, expected %s) — refusing to run"
               % (digest, opts["expect_md5"]), file=sys.stderr)
         sys.exit(3)
-    print("gated: binary md5 pinned %s | entry gate load < %s | %d runs max | logs %s-N.log"
-          % (digest, opts["max_load"], opts["max_runs"], opts["log_prefix"]))
+    print("gated: binary md5 pinned %s | entry gate load < %s | %d runs max | logs %s-N.log | SUB %s"
+          % (digest, opts["max_load"], opts["max_runs"], opts["log_prefix"],
+             "skipped" if opts["no_sub"] else "live"))
     allowed = tuple(s.strip() for s in opts["allow"].split(",") if s.strip())
     deadline = time.time() + opts["wait_max"] * 60.0
     fails_by_run = []
@@ -119,8 +123,10 @@ def _gated_main(argv):
             # The child spawns the TUI with cwd=the proof fixture — the
             # binary path MUST be absolute or the spawn FileNotFounds (the
             # bash launcher passed $PWD/dist/zcode-tui for this reason).
-            rc = subprocess.call([sys.executable, self_path, path],
-                                 stdout=fh, stderr=subprocess.STDOUT)
+            _child_argv = [sys.executable, self_path, path]
+            if opts["no_sub"]:
+                _child_argv.append("--no-subagent")
+            rc = subprocess.call(_child_argv, stdout=fh, stderr=subprocess.STDOUT)
         fails, passes = [], 0
         for line in open(log):
             if line.startswith("FAIL"):
@@ -168,6 +174,9 @@ if sys.argv[1].startswith("-"):
              "plain/stage form: pty-proof.py BINARY [--stage FAM]; --gated also "
              "accepts flags-first: pty-proof.py --gated BINARY [...]" % sys.argv[1])
 binary = sys.argv[1]
+SKIP_SUB = "--no-subagent" in sys.argv[2:]   # thin runs may drop the live-child family (R62)
+if "--dumps" in sys.argv[2:] and "--stage" not in sys.argv[2:]:
+    sys.exit("pty-proof: --dumps needs --stage FAM")
 verdicts = []
 check_secs = []          # parallel to verdicts: the FAM section each check ran under
 CUR_SECTION = None       # set by the --stage runner; None in the full run
@@ -200,6 +209,7 @@ PROOF_CWD = "/tmp/zct-proof-cwd"              # spawn cwd; diff/ym/pf fixtures l
 FAKE_EDITOR = "/tmp/zct-fake-editor.sh"       # the EDITOR the export/edit stages drive
 STASH_SEED_DIR = "/tmp/zct-proof-stash-seed"  # S8's isolated ZCODE_TUI_STATE_DIR
 TH_HOME = "/tmp/zct-proof-home"               # the theme family's isolated HOME
+READER_LOG = os.path.join(PROOF_CWD, "subagent-reader.log")  # SUB's protocol-reader stdout (R62)
 
 def provision_fixtures(binary_path):
     if not os.path.exists(binary_path):
@@ -209,8 +219,9 @@ def provision_fixtures(binary_path):
     os.chmod(FAKE_EDITOR, 0o755)
     for _d in (PROOF_CWD, STASH_SEED_DIR, TH_HOME):
         os.makedirs(_d, exist_ok=True)
-    print("fixtures provisioned: cwd=%s editor=%s seed=%s th_home=%s"
-          % (PROOF_CWD, FAKE_EDITOR, STASH_SEED_DIR, TH_HOME))
+    open(READER_LOG, "w").close()  # truncate: a stale verdict must never outlive its run
+    print("fixtures provisioned: cwd=%s editor=%s seed=%s th_home=%s reader=%s"
+          % (PROOF_CWD, FAKE_EDITOR, STASH_SEED_DIR, TH_HOME, READER_LOG))
 
 provision_fixtures(os.path.abspath(binary))
 
@@ -332,7 +343,7 @@ def kill(pid):
 # change screen dumps, pid-scoped cli-trace tail on fail, family verdict.
 def _fam_parse(argv):
     if len(argv) < 2:
-        sys.exit("usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR]")
+        sys.exit("usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR] [--no-subagent]")
     binary, stage, dumps = argv[1], None, None
     i = 2
     while i < len(argv):
@@ -340,8 +351,12 @@ def _fam_parse(argv):
             stage = argv[i + 1]; i += 2
         elif argv[i] == "--dumps" and i + 1 < len(argv):
             dumps = argv[i + 1]; i += 2
+        elif argv[i] == "--no-subagent":
+            i += 1
         else:
-            sys.exit("pty-proof: bad argument %r (usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR])" % argv[i])
+            sys.exit("pty-proof: bad argument %r (usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR] [--no-subagent])" % argv[i])
+    if stage == "SUB" and "--no-subagent" in argv:
+        sys.exit("pty-proof: --stage SUB is explicit — drop --no-subagent")
     return binary, stage, dumps
 
 def _fam_sections(src):
@@ -362,7 +377,7 @@ def _fam_sections(src):
         order.append(name)
     return secs, reqs_of, order
 
-if len(sys.argv) > 2:   # stage mode; the full run is the plain one-arg invocation
+if "--stage" in sys.argv[2:]:   # stage mode; the plain full run is the one-arg invocation (flag-only runs honor SKIP_SUB)
     _binary, _stage, _dumps = _fam_parse(sys.argv)
     if _stage is None:
         sys.exit("pty-proof: --dumps needs --stage FAM")
@@ -2137,6 +2152,136 @@ if alive(ym_pid) and ym_boot:
 else:
     for lbl in YM_LABELS[1:]:
         check(ym_pid, lbl, False)
+
+
+# ==== FAM:SUB ==== (own spawn --mode yolo; one typed ask spawns a real child)
+# The subagent surfaces proof (R62, dream ACK-606f5f326d): the strip shipped
+# 0.6.52 PTY-unproven because a fresh session paints nothing. This family
+# TYPES a needle-hygiene ask (compels exactly one general-purpose child; the
+# ask text contains none of the needle words, so the live transcript can
+# never satisfy a needle vacuously) into a yolo TUI while
+# tools/subagents-proof-reader.ts polls session/list + session/subagents
+# concurrently as the protocol truth channel, reporting the model-generated
+# facts (child title, summary vary per run) the row/body needles ride. The
+# running-row paint (active filter holding a row) stays unproven — it needs
+# a deterministic long child; recorded in the SSOT.
+SUB_LABELS = (
+    "SUB0 the running child paints the down-1 footer hint",
+    "SUB1 the picker opens with the provably-empty active filter",
+    "SUB2 the inactive row paints the child title with the done footer",
+    "SUB3 the inspector body carries the settled summary",
+)
+
+def _sub_bun_env():
+    # the R60 PATH law encoded: dev's bun lives at ~/.bun/bin, off PATH under
+    # non-interactive ssh — the reader inherits the patched env, never hopes
+    env = dict(os.environ)
+    _b = os.path.expanduser("~/.bun/bin")
+    if os.path.isdir(_b) and _b not in env.get("PATH", "").split(os.pathsep):
+        env["PATH"] = _b + os.pathsep + env.get("PATH", "")
+    if not any(os.path.exists(os.path.join(_p, "bun")) for _p in env.get("PATH", "").split(os.pathsep) if _p):
+        sys.exit("pty-proof: SUB needs bun for tools/subagents-proof-reader.ts and none is on PATH")
+    if not os.path.isdir(os.path.join(os.getcwd(), "node_modules")):
+        sys.exit("pty-proof: SUB reader must run IN-TREE (node_modules) — start pty-proof from the worktree root")
+    return env
+
+def _sub_wait_verdict(reader_proc, timeout_s):
+    # poll the reader's manifest-sworn log for its VERDICT json (R39 law:
+    # background output rides a file, never a pipe tail)
+    _end = time.time() + timeout_s
+    while time.time() < _end:
+        try:
+            for _line in open(READER_LOG):
+                if _line.startswith("VERDICT "):
+                    return json.loads(_line[8:])
+        except (OSError, ValueError):
+            pass
+        if reader_proc.poll() not in (None, 0):
+            break
+        time.sleep(1.0)
+    return {}
+
+def _sub_line_has(screen, token_a, token_b):
+    # same-line discipline (the M1 per-row pattern): ONE screen line carrying
+    # BOTH tokens — a whole-screen substring would match the transcript
+    for _ln in screen.display:
+        if token_a and token_b and token_a in _ln and token_b in _ln:
+            return True
+    return False
+
+if SKIP_SUB:
+    print("SUB skipped (--no-subagent)")
+else:
+    sub_reader = subprocess.Popen(
+        ["bun", "tools/subagents-proof-reader.ts"],
+        cwd=os.getcwd(), env=_sub_bun_env(),
+        stdout=open(READER_LOG, "w"), stderr=subprocess.STDOUT)
+    sub_pid, sub_master, sub_screen, sub_stream = spawn(args=["--mode", "yolo"])
+    read_for(sub_master, sub_stream, 9)
+    if "Ask anything" in "\n".join(sub_screen.display):
+        # the DEZOMBIFY-BEFORE-NEW-FAMILY law (b653fc0): a stale proof-scoped
+        # ask card must never eat this family's first keystroke
+        dezombify(sub_master, sub_stream, sub_screen, 4)
+        os.write(sub_master, b"Use the Agent tool exactly once. Spawn one general-purpose subagent whose only task is to reply with the single word banana. Wait for it to finish, then reply with exactly: acknowledged\r")
+        _sub_hint = False
+        for _ in range(90):                      # child spawn latency is seconds
+            read_for(sub_master, sub_stream, 1.0)
+            # the hint line truncates at the proof geometry ("down 1", the
+            # "subs" tail cut) — needle the same-line chrome pair instead
+            if _sub_line_has(sub_screen, "ctrl+p commands", "down 1"):
+                _sub_hint = True
+                break
+        check(sub_pid, SUB_LABELS[0], _sub_hint)
+        _sub_truth = _sub_wait_verdict(sub_reader, 180)
+        for _ in range(60):                      # the turn really stopped: poll
+            read_for(sub_master, sub_stream, 1.0)  # the busy footer GONE
+            if "esc stop" not in "\n".join(sub_screen.display):
+                break
+        if "esc stop" in "\n".join(sub_screen.display):
+            _sub_truth = {}
+        if _sub_truth.get("childTitle") and alive(sub_pid):
+            os.write(sub_master, b"\x1b[B")     # down on the empty draft
+            _sub_pick = False
+            for _ in range(30):
+                read_for(sub_master, sub_stream, 0.7)
+                _d = "\n".join(sub_screen.display)
+                if "Select subagent" in _d and "No subagents found" in _d:
+                    _sub_pick = True
+                    break
+            check(sub_pid, SUB_LABELS[1], _sub_pick)
+            os.write(sub_master, b"\t")         # tab: show inactive
+            _sub_row = False
+            for _ in range(30):
+                read_for(sub_master, sub_stream, 0.7)
+                if _sub_line_has(sub_screen, _sub_truth.get("childTitle", ""), "done"):
+                    _sub_row = True
+                    break
+            check(sub_pid, SUB_LABELS[2], _sub_row)
+            os.write(sub_master, b"\r")         # enter: inspect
+            _sub_body = False
+            for _ in range(30):
+                read_for(sub_master, sub_stream, 0.7)
+                if _sub_line_has(sub_screen, _sub_truth.get("summary", ""), "esc back"):
+                    _sub_body = True
+                    break
+            check(sub_pid, SUB_LABELS[3], _sub_body)
+        else:
+            for _lbl in SUB_LABELS[1:]:
+                check(sub_pid, _lbl, False)
+        kill(sub_pid)
+    else:
+        check(sub_pid, SUB_LABELS[0], False)
+        for _lbl in SUB_LABELS[1:]:
+            check(sub_pid, _lbl, False)
+        kill(sub_pid)
+    try:
+        sub_reader.terminate()
+        sub_reader.wait(timeout=10)
+    except Exception:
+        try:
+            sub_reader.kill()
+        except Exception:
+            pass
 
 # ==== FAM:PF ==== (own spawn; one real turn)
 # ---- PF-series: permission.prompt.fullscreen (the v2 SessionQuestion arm,
