@@ -57,7 +57,7 @@ async function main() {
     import("./app"),
   ]);
   if (launchMode && !(MODES as readonly string[]).includes(launchMode)) {
-    console.error(`zcode-tui: unknown mode "${launchMode}" (plan|build|edit|yolo|auto)`);
+    console.error(`zcode-tui: unknown mode "${launchMode}" (plan|build|edit|yolo)`);
     process.exit(1);
   }
   // The renderer must not eat ctrl+c: OpenCode disables the default

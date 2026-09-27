@@ -214,7 +214,10 @@ const ALLOWED_MODELS = [
   { label: "GLM-5.3", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "GLM-5.3", isDefault: false },
 ] as const;
 
-export const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
+// "auto" is daemon-ACCEPTED but RESERVED-unimplemented: host
+// checkPermission denies every tool with "mode.auto.unimplemented"
+// (measured 0.6.69 against the host bundle) — never offer it.
+export const MODES = ["plan", "build", "edit", "yolo"] as const;
 // v2 displayVersion: a 40/64-hex commit pin renders as the short sha, a
 // semver stays whole (feature-plugins/system/plugins.tsx footer grammar).
 const shortVersion = (version: string) =>
@@ -1396,7 +1399,7 @@ export function App({
   const askOptionsRef = useRef<{ id: string; response: unknown }[]>([]);
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
-  const [mode, setMode] = useState<string>("auto");
+  const [mode, setMode] = useState<string>("build");
   const [history, setHistory] = useState<string[]>([]);
   const historyIdx = useRef(-1);
   const [thoughtLevel, setThoughtLevel] = useState<string>("enabled");
@@ -3957,7 +3960,7 @@ export function App({
       <SelectDialog
         title="Select agent"
         menu
-        options={MODES.map((m) => ({ id: m, label: m, description: m === "auto" ? "ride the default agent (Build)" : m === "yolo" ? "no permission prompts" : "agent mode", value: m }))}
+        options={MODES.map((m) => ({ id: m, label: m, description: m === "yolo" ? "no permission prompts" : "agent mode", value: m }))}
         currentId={mode}
         theme={C}
         countLabel="mode"
