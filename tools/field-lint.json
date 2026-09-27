@@ -1,0 +1,29 @@
+[
+  {
+    "iface": "DialogOption",
+    "field": "status",
+    "retired_in": "0.6.59",
+    "note": "The legacy status cell drained with the MCP menu migration (0.6.59); the meta-column riders followed with the plugins migration (0.6.64). status is a GENERIC name: every allow below is a verified producer/decl of a DIFFERENT surface, classified at the seed sitting (0.6.68). Broad tree allows: src/tui/diff (git file status added|deleted|modified), src/tui/session (the session row model: ToolState/PartInfo/SubagentInfo/ToolPartModel), src/tui/util/tool-display.ts (ExecuteCall, the v2.0.18 verbatim port), src/tui/planQuota.ts (subscription status). Shape-scoped app.tsx allows: SessionRow (interface + builder), tool part state writes, MCP ready-state type + statuses reads + helper fn params, anchor/footer meta column (m.createdAt), session-summary object literals, InlineToolRow meta. Anything NEW matching none of these fails the gate on purpose.",
+    "allow": [
+      "^src/tui/diff/",
+      "^src/tui/planQuota\\.ts:",
+      "^src/tui/session/",
+      "^src/tui/util/tool-display\\.ts:",
+      "^src/tui/subagent-strip\\.tsx:\\d+:.*subagentStatus(Color|Icon)\\(.*status: SubagentStatus",
+      "^src/tui/app\\.tsx:\\d+:\\s*status: string;$",
+      "^src/tui/app\\.tsx:\\d+:\\s*status: String\\(value\\.status",
+      "^src/tui/app\\.tsx:\\d+:\\s*status: ok \\? ",
+      "^src/tui/app\\.tsx:\\d+:\\s*.*\\(part\\.state as Record<string, unknown>\\), status: \"error\"",
+      "^src/tui/app\\.tsx:\\d+:\\s*status: props\\.part\\.state\\.status,",
+      "^src/tui/app\\.tsx:\\d+:\\s*.*\\{ name: string; status: string; error\\?: string \\}",
+      "^src/tui/app\\.tsx:\\d+:\\s*.*Record<string, \\{ status\\?: string \\}>",
+      "^src/tui/app\\.tsx:\\d+:\\s*.*\\{ name, status: s\\.status \\?\\? \"\"",
+      "^src/tui/app\\.tsx:\\d+:\\s*.*status: \"\", updatedAt: Date\\.now\\(\\)",
+      "^src/tui/app\\.tsx:\\d+:\\s*status: m\\.createdAt \\? \\{ text:",
+      "^src/tui/app\\.tsx:\\d+:\\s*state: \\{ status: \"running\", input:",
+      "^src/tui/app\\.tsx:\\d+:\\s*const statusColor = \\(status: string\\)",
+      "^src/tui/app\\.tsx:\\d+:\\s*const statusText = \\(server: \\{ status: string; error\\?: string \\}\\)",
+      "^src/tui/app\\.tsx:\\d+:\\s*const statusFooter = \\(status: string\\)"
+    ]
+  }
+]

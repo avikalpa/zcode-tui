@@ -156,7 +156,7 @@ def probe_procs(now):
 def probe_tree(opts, now):
     """git status + newest mtime under the worktree (pruned walk)."""
     wt = opts["worktree"]
-    lines, dirty, branch, head = [], 0, "?", "?"
+    lines, dirty, branch, head, ahead = [], 0, "?", "?", 0
     try:
         st = subprocess.run(["git", "-C", wt, "status", "--porcelain=v1", "-b"],
                             capture_output=True, text=True, timeout=20).stdout.splitlines()
@@ -167,6 +167,8 @@ def probe_tree(opts, now):
             head = subprocess.run(["git", "-C", wt, "rev-parse", "--short", "HEAD"],
                                   capture_output=True, text=True, timeout=10).stdout.strip()
             dirty = sum(1 for l in st[1:] if l.strip())
+            ma = re.search(r"\[ahead (\d+)(?:, behind \d+)?\]", first)
+            ahead = int(ma.group(1)) if ma else 0
         else:
             dirty = 0
     except Exception as exc:
@@ -192,10 +194,16 @@ def probe_tree(opts, now):
     if newest_ts is not None:
         age = _age_minutes(newest_ts, now)
         newest = {"path": newest_path, "age_min": round(age, 1)}
-        tree_hot = age < opts["fresh_minutes"]
-        lines.append("[tree] branch %s head %s dirty=%d; newest mtime %s (%s ago)%s"
-                     % (branch, head, dirty, newest_path, _fmt_age(age),
-                        " — FRESH (< %gm)" % opts["fresh_minutes"] if tree_hot else ""))
+        # R58 law: liveness is UNCOMMITTED or UNPUSHED work. A clean
+        # tree at a synced head is cold no matter how fresh the
+        # mtimes are — they belong to committed, pushed history (the
+        # R57 SSOT-edit false HOT, posted-OUTCOME floor).
+        tree_hot = ahead > 0 or (dirty > 0 and age < opts["fresh_minutes"])
+        note = "" if (dirty or ahead) else " (committed, synced)"
+        lines.append("[tree] branch %s head %s dirty=%d ahead=%d; newest mtime %s (%s ago)%s%s"
+                     % (branch, head, dirty, ahead, newest_path, _fmt_age(age),
+                        " — FRESH (< %gm)" % opts["fresh_minutes"] if tree_hot else "",
+                        note))
     else:
         lines.append("[tree] branch %s head %s dirty=%d; no files found" % (branch, head, dirty))
     status = "HOT" if tree_hot else "ok"
