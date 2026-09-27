@@ -28,6 +28,36 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **FIELD-RETIREMENT LINT** SHIPPED 0.6.68 — tools-only, ZERO runtime
+  delta, NO ride. Dream ACK-2b455747e9 (born the 0.6.59 five-red class)
+  MATERIALIZED: the producer-sweep law is a verb — tools/field-lint.py +
+  the manifest tools/field-lint.json. One entry per recorded retirement
+  {iface, field, retired_in, allow[]}; the lint greps EVERY assignment
+  shape across src (object key `status:` direct-or-ternary, `{ status }`
+  shorthand, `.status =` writes, `status?:` re-declarations — re-adding
+  the field is re-opening the drain) and FAILS the gate on any survivor
+  the entry's allow regexes do not cover. Typecheck is not a producer
+  sweep (.map() inference loses literal freshness — excess-property
+  never fired over the 0.6.59 ternary). Seeded with DialogOption.status
+  (retired 0.6.59; the meta column followed 0.6.64): 38 survivors at
+  tip, ALL classified and allowed WITH PROOF — the diff git-status
+  tree, the session row model (ToolState/PartInfo/SubagentInfo/
+  ToolPartModel), ExecuteCall (the v2.0.18 verbatim port), planQuota,
+  SessionRow + its builder, the tool-state writes, the MCP ready type,
+  the anchor/footer meta column, session-summary literals, helper fn
+  params: status is generic, and the allow list is the honest record of
+  what else owns the name; anything NEW matching none of them fails the
+  gate on purpose. Proof: the R49 defect class REPLAYED on the real
+  corpus — the exact ternary producer seeded into src fails the lint
+  naming shape+site (exit 1), removal restores 0 survivors over 51
+  files; suffix identifiers (myStatus/statused) immune; the shorthand
+  detector earns its keep on two LIVE legit producers ({ tool, status }
+  in tool-display, {status} JSX attr in file-tree). GATES: py_compile
+  both tools (python 3.14); typecheck clean; bun 226 pass + the
+  documented auth-sync red (no TS delta); gen-keybinds lint 243 binds 0
+  lies; generators stamp-only; field-lint 0 survivors over 51 files.
+  Rider in the same sitting: the floor-check liveness law below.
+
 - **AUTOMATIC TABS MODE (#50456)** SHIPPED 0.6.67 — the strip's config
   mode grammar, ported from upstream 5b9dc35eec (first shipped v2.0.13,
   inside our pin): tabs.mode auto|on|off — "on" always, "off" never,
@@ -713,6 +743,28 @@ on the clean lane is what separates them.
   keeps the immediate fork-at-tail (our chrome, pending owner like
   leader-q). Locale.time ported (toLocaleTimeString timeStyle short — Bun
   ICU renders `8:23 AM` verbatim).
+
+(0.6.68) FIELD RETIREMENTS SWEAR IN AT THE MANIFEST. Retiring a field
+from an interface adds its tools/field-lint.json entry in the same commit
+(`field-lint.py --add IFACE FIELD --retired-in V [--allow RX]...`), and the
+gates run `python3 tools/field-lint.py` beside gen-keybinds lint. The verb
+greps EVERY assignment shape — object key direct-or-ternary, object
+shorthand, property writes, re-declarations; the 0.6.59 producer-sweep law
+mechanized, because typecheck is NOT a producer sweep. Generic names live
+by per-entry allow regexes, each a VERIFIED different-surface producer;
+anything unanticipated FAILS — a review prompt, never a silent pass
+(vacuous-pass law).
+
+(0.6.68) FLOOR LIVENESS IS UNCOMMITTED-OR-UNPUSHED WORK, NOT MTIMES. The
+floor-check tree probe read HOT for <fresh-minutes> after EVERY push — the
+previous seat's committed SSOT edit (the most common post-commit state on
+this floor) held the next claim's gate while the OUTCOME was already
+posted and the R57 seat gone. The probe now reads: hot = ahead>0
+(committed, unpushed — a seat mid-wave) OR (dirty>0 AND fresh mtime); a
+clean tree at a synced head annotates its line "(committed, synced)" and
+is cold at any mtime age. Measured live: the dirty+fresh leg fired HOT
+during the wave itself; the ahead leg fires between commit and push; the
+synced leg went COLD with a 21-minute-old committed mtime.
 
 ## Stage microscope (0.6.38 — dream ACK-c4026a1ec6)
 
