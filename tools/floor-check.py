@@ -22,7 +22,10 @@ Probes:
           mtime under the worktree (.git/node_modules/dist pruned). A
           fresher-than --fresh-minutes mtime means a seat is mid-edit — HOT.
   logs    newest /tmp proof/launcher log (--logs-glob) + its last line.
-          Fresher than --fresh-minutes means a run is firing or just did — HOT.
+          Fresher than --fresh-minutes means a run is firing or just did — HOT;
+          a terminal verdict line (RESULT: / WAVE LAW: / SUPERVISION INVALID)
+          marks a COMPLETED run and does not vote HOT on freshness alone
+          (a finished launcher is designed death, not liveness).
   board   msgboard tail since --since-hours filtered to --lane-marker;
           computes silence-since-last-word and whether a claim-class post
           (note/hold/blocked/veto) sits UNANSWERED. Only answer-kind posts
@@ -239,14 +242,23 @@ def probe_logs(opts, now):
             last = tail[-1][:160] if tail else ""
     except OSError:
         pass
+    # A terminal verdict line means the newest run FINISHED — freshness
+    # alone must not vote HOT on it (a finished launcher is designed
+    # death, not liveness; mid-run logs carry no terminal line and keep
+    # voting HOT).
+    completed = last.startswith(("RESULT:", "STAGE RESULT:", "WAVE LAW:", "SUPERVISION INVALID"))
     line = "[logs] %d log(s) under %s; newest %s (%s ago)" % (
         len(logs), opts["logs_glob"], newest_path, _fmt_age(age))
     if last:
         line += "; last: %s" % last
     if hot:
         line += " — FRESH (< %gm)" % opts["fresh_minutes"]
-    status = "HOT" if hot else "ok"
-    return {"status": status, "lines": [line], "newest": {"path": newest_path, "age_min": round(age, 1)}}
+    if hot and completed:
+        line += " — COMPLETED-RUN (terminal verdict; not HOT on freshness alone)"
+    status = "HOT" if hot and not completed else "ok"
+    return {"status": status, "lines": [line],
+            "newest": {"path": newest_path, "age_min": round(age, 1)},
+            "completed_run": completed}
 
 
 def _board_cmd():

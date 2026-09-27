@@ -28,6 +28,24 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **HARNESS: FLOOR-CHECK COMPLETED-RUN DOWNGRADE + PTY-PROOF FLAGS-FIRST**
+  SHIPPED 0.6.71 — tools-only, ZERO runtime delta, NO ride. Two harness
+  dreams materialized. (1) Dream ACK-d075ca8354: the floor-check logs
+  probe no longer votes HOT on freshness alone — a newest log whose
+  terminal line is a completion marker (RESULT: / STAGE RESULT: /
+  WAVE LAW: / SUPERVISION INVALID) is a FINISHED run, annotated
+  "COMPLETED-RUN", and cold without a live process (the R50 law:
+  launcher exhaustion is designed death); mid-run logs (no terminal
+  line) keep voting HOT, and procs HOT still carries the verdict. Since
+  --gated (0.6.63) every wave ends with a fresh finished log, so the
+  raw-freshness vote false-HOTed most sitting starts (the R60 class,
+  hit again at the R61 claim itself before the fix landed).
+  (2) Dream ACK-73deee5444: pty-proof --gated accepts flags-first
+  invocations — --gated is detected anywhere in argv and the FIRST
+  NON-FLAG token is the binary (value-taking flags skipped); a
+  leading-flag plain/stage invocation dies naming the positional-binary
+  usage instead of eating the flag as the binary path ("binary not
+  found: …--gated", the R57 sitting's one-failed-launch).
 - **FUZZYSORT WEIGHTED FILTER** SHIPPED 0.6.70 — the 0.6.48 audit line
   closed: the reference DialogSelect filter (dialog-select.tsx) ported
   onto SelectDialog, and every menu-grammar dialog with it. Upstream
@@ -836,6 +854,19 @@ clean tree at a synced head annotates its line "(committed, synced)" and
 is cold at any mtime age. Measured live: the dirty+fresh leg fired HOT
 during the wave itself; the ahead leg fires between commit and push; the
 synced leg went COLD with a 21-minute-old committed mtime.
+
+(0.6.71) A FINISHED RUN'S TERMINAL VERDICT IS NOT LIVENESS. The
+floor-check logs probe votes HOT only on a fresh log that is still
+mid-run; a newest log whose terminal line is a completion marker
+(RESULT: / STAGE RESULT: / WAVE LAW: / SUPERVISION INVALID) annotates
+"COMPLETED-RUN" and goes cold without a live process — since --gated
+(0.6.63) every wave ends with a fresh finished log, and raw freshness
+false-HOTed sitting starts against the board's posted OUTCOME (the R60
+class). The verb stays conservative elsewhere: procs HOT still carries
+the verdict; a fresh log with no terminal line is HOT as before. Same
+wave: pty-proof --gated takes the binary as the FIRST NON-FLAG token
+(flags-first invocations parse), and a leading-flag plain invocation
+dies with the positional-usage error, never "binary not found: …--gated".
 
 ## Stage microscope (0.6.38 — dream ACK-c4026a1ec6)
 

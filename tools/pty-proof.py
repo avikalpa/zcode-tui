@@ -37,7 +37,8 @@ def _gated_parse(argv):
     opts = {"max_load": 11.0, "cont_load": 12.0, "max_runs": 6, "expect_md5": None,
             "log_prefix": "/tmp/zct-proof", "allow": "F0", "sleep": 60.0,
             "wait_max": 150.0}
-    i = 2
+    binary = None
+    i = 1
     def val():
         nonlocal i
         if i + 1 >= len(argv):
@@ -65,11 +66,19 @@ def _gated_parse(argv):
             opts["sleep"] = float(val())
         elif a == "--wait-max":
             opts["wait_max"] = float(val())
-        else:
+        elif a.startswith("-"):
             sys.exit("pty-proof: bad argument %r (usage: pty-proof.py BINARY [--gated] "
                      "[--max-load N] [--cont-load N] [--max-runs N] [--expect-md5 MD5] "
                      "[--log-prefix P] [--allow FAM,FAM] [--sleep S] [--wait-max MIN])" % a)
-    return opts
+        elif binary is None:
+            binary = a
+            i += 1
+        else:
+            sys.exit("pty-proof --gated: unexpected extra argument %r (binary already %r)" % (a, binary))
+    if binary is None:
+        sys.exit("pty-proof --gated: no BINARY given — the binary is positional "
+                 "(pty-proof.py BINARY --gated [...] or pty-proof.py --gated BINARY [...])")
+    return binary, opts
 
 def _gated_md5(path):
     import hashlib
@@ -81,9 +90,7 @@ def _gated_md5(path):
 def _gated_main(argv):
     sys.stdout.reconfigure(line_buffering=True)   # the supervisor's own
     # progress must stay tail-able, like the per-run logs it keeps
-    if len(argv) < 2 or argv[1].startswith("-"):
-        sys.exit("usage: pty-proof.py BINARY --gated [flags]")
-    binary, opts = argv[1], _gated_parse(argv)
+    binary, opts = _gated_parse(argv)
     path = os.path.abspath(binary)
     os.makedirs(os.path.dirname(os.path.abspath(opts["log_prefix"])), exist_ok=True)
     digest = _gated_md5(path)
@@ -151,11 +158,15 @@ def _gated_main(argv):
           % (opts["max_runs"], opts["allow"]))
     sys.exit(0)
 
-if "--gated" in sys.argv[2:]:
+if "--gated" in sys.argv[1:]:
     _gated_main(sys.argv)
 
 if len(sys.argv) < 2:
     sys.exit("usage: pty-proof.py BINARY [--stage FAM] [--dumps DIR] | pty-proof.py BINARY --gated [flags]")
+if sys.argv[1].startswith("-"):
+    sys.exit("pty-proof: the BINARY is positional and comes FIRST (got %r) — "
+             "plain/stage form: pty-proof.py BINARY [--stage FAM]; --gated also "
+             "accepts flags-first: pty-proof.py --gated BINARY [...]" % sys.argv[1])
 binary = sys.argv[1]
 verdicts = []
 check_secs = []          # parallel to verdicts: the FAM section each check ran under

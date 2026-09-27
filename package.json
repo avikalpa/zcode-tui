@@ -1,6 +1,6 @@
 {
   "name": "@avikalpa/zcode-tui",
-  "version": "0.6.70",
+  "version": "0.6.71",
   "private": false,
   "type": "module",
   "scripts": {
