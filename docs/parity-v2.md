@@ -28,6 +28,33 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **FLOOR-CHECK CLAIM-SEAT PROBE** SHIPPED 0.6.76 — tools-only, ZERO
+  runtime delta (dist untouched, md5 d6a04f722d4311c02ded726e25ee587c
+  unchanged; no ride; offer stays topped at 0.6.73). Dream
+  ACK-9ab15ef2cc (R65 recon sitting #4) MATERIALIZED:
+  tools/floor-check.py grows --claim-seat SESS — the AGENT-host half of
+  the two-host liveness composite every R65 recon sitting hand-assembled
+  (dev procs + mtimes + logs vs jojo rollout mtime). The probe globs
+  ~/.zcode/cli/rollout/model-io-<SESS>*.jsonl (--rollout-dir overrides,
+  for tests) and votes HOT when the newest rollout is fresher than
+  --fresh-minutes: the claim seat is mid-grind. The R38 rollback law is
+  ENCODED in the verdict: rollout ABSENCE or staleness is NEVER cold
+  evidence — the probe can raise the verdict, never lower it
+  (sess_431a246e was alive and gating while its rollout was unfindable
+  at the standard path). WORKTREE becomes optional with --claim-seat
+  (agent-host mode: board + claim_seat probes only); on the work host
+  the flag composes with the existing four probes (all five); a <9-char
+  seat prefix dies at the parser (a short glob would false-HOT on
+  foreign sessions). PROOF: A/B 9/9 on dev (fresh to HOT exit 1; stale
+  to COLD exit 0 with the not-cold-evidence line; absent to COLD exit
+  0; missing rollout dir to DEGRADED exit 3; short prefix to usage-die
+  exit 2; agent-host probe keys exactly board+claim_seat; compose keys
+  all five; pre/post regression identical probe statuses and exit code
+  against the preserved pre-patch verb in ~/floor-check-pre-r66.py);
+  live-fire on jojo: the verb flags the sitting's OWN rollout (0s
+  fresh) HOT — the R65 witness case (rollout 90s fresh while work-host
+  probes said cold) is now ONE command. NO PTY runs (pty-proof
+  untouched — the R61/R64 tools-only precedent).
 - **SUB RUNNING-ROW PROOF (the 0.6.72 recorded gap closes)** SHIPPED
   0.6.75 — tools-only, ZERO runtime delta (dist untouched, md5
   d6a04f722d4311c02ded726e25ee587c unchanged; no ride; offer stays

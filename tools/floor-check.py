@@ -11,8 +11,14 @@ and prints a HOT/COLD verdict with the evidence lines.
 
     python3 tools/floor-check.py WORKTREE [--board infra/meta]
         [--lane-marker STR] [--claim-ack ACK] [--self-ack ACK]
+        [--claim-seat SESS] [--rollout-dir DIR]
         [--since-hours H] [--fresh-minutes M] [--logs-glob GLOB]
         [--wait-window MIN] [--poll SEC] [--json]
+
+With --claim-seat the WORKTREE argument is OPTIONAL (agent-host mode):
+only the claim_seat and board probes run — the work-host probes need the
+worktree. A jojo-agent/dev-floor sitting thus runs the verb twice, once
+per host, and HOT wins; neither invocation hand-assembles the composite.
 
 Probes:
   procs   live processes matching pty-proof | bun | launch.sh (ps -eo,
@@ -39,6 +45,15 @@ Probes:
           its own floor must not flag itself). --claim-ack narrows the
           probe to one thread (transitively: the post and everything
           citing it).
+  claim_seat  (--claim-seat SESS) the AGENT-host half of the two-host
+          composite (dream ACK-9ab15ef2cc, R65 recon sitting #4): the
+          newest ~/.zcode/cli/rollout/model-io-<SESS>*.jsonl mtime
+          (--rollout-dir overrides, for tests). Fresher than
+          --fresh-minutes means the claim seat is mid-grind — HOT.
+          R38 rollback law, encoded: rollout ABSENCE (or staleness) is
+          NEVER COLD evidence — sess_431a246e was alive while its
+          rollout was unfindable; only fresh PRESENCE is HOT evidence,
+          so this probe can raise the verdict, never lower it.
 
 Verdict/exit: 0 COLD, 1 HOT, 3 DEGRADED (computed COLD but >=1 probe
 could not run — treat as UNKNOWN, never as a clean cold). --wait-window
@@ -78,6 +93,7 @@ def _parse_opts(argv):
         "worktree": None, "board": "infra/meta", "lane_marker": DEFAULT_LANE_MARKER,
         "claim_ack": None, "self_ack": None, "since_hours": 24.0,
         "fresh_minutes": 20.0, "logs_glob": DEFAULT_LOGS_GLOB,
+        "claim_seat": None, "rollout_dir": os.path.expanduser("~/.zcode/cli/rollout"),
         "wait_window": 0.0, "poll": 60.0, "json": False,
     }
     i = 0
@@ -100,6 +116,10 @@ def _parse_opts(argv):
             opts["fresh_minutes"] = float(argv[i + 1]); i += 2
         elif a == "--logs-glob":
             opts["logs_glob"] = argv[i + 1]; i += 2
+        elif a == "--claim-seat":
+            opts["claim_seat"] = argv[i + 1]; i += 2
+        elif a == "--rollout-dir":
+            opts["rollout_dir"] = argv[i + 1]; i += 2
         elif a == "--wait-window":
             opts["wait_window"] = float(argv[i + 1]); i += 2
         elif a == "--poll":
@@ -110,10 +130,14 @@ def _parse_opts(argv):
             print(__doc__); sys.exit(0)
         else:
             _die("unknown argument %r" % a)
-    if not opts["worktree"]:
-        _die("WORKTREE path is required")
-    if not os.path.isdir(opts["worktree"]):
+    if not opts["worktree"] and not opts["claim_seat"]:
+        _die("WORKTREE path is required (unless --claim-seat is given: agent-host mode)")
+    if opts["worktree"] and not os.path.isdir(opts["worktree"]):
         _die("worktree %r is not a directory" % opts["worktree"])
+    if opts["claim_seat"] and len(opts["claim_seat"]) < 9:
+        # A short prefix would glob foreign sessions and false-HOT the floor.
+        _die("claim seat id %r too short — prefix must be at least sess_XXXX"
+             % opts["claim_seat"])
     return opts
 
 
@@ -261,6 +285,48 @@ def probe_logs(opts, now):
             "completed_run": completed}
 
 
+def probe_claim_seat(opts, now):
+    """Agent-host rollout freshness for the claim seat (dream ACK-9ab15ef2cc).
+
+    The R38 rollback law, encoded: rollout ABSENCE is never COLD evidence
+    (sess_431a246e was alive and gating while its rollout was unfindable at
+    the standard path); only fresh PRESENCE votes, and it votes HOT — this
+    probe can raise the verdict, never lower it.
+    """
+    sess = opts["claim_seat"]
+    rdir = opts["rollout_dir"]
+    if not os.path.isdir(rdir):
+        return {"status": "ERROR",
+                "lines": ["[claim-seat] ERROR: rollout dir missing: %s" % rdir],
+                "newest": None}
+    matches = [p for p in glob.glob(os.path.join(rdir, "model-io-%s*.jsonl" % sess))
+               if os.path.isfile(p)]
+    if not matches:
+        return {"status": "ok",
+                "lines": ["[claim-seat] no rollout matching %s under %s — absence is NOT "
+                          "cold evidence (R38 law): the seat may be alive unfindable"
+                          % (sess, rdir)],
+                "newest": None}
+    newest_path, newest_ts = None, None
+    for p in matches:
+        try:
+            mt = os.stat(p).st_mtime
+        except OSError:
+            continue
+        if newest_ts is None or mt > newest_ts:
+            newest_ts, newest_path = mt, p
+    age = _age_minutes(newest_ts, now)
+    hot = age < opts["fresh_minutes"]
+    line = "[claim-seat] %d rollout(s) matching %s; newest %s (%s ago)" % (
+        len(matches), sess, os.path.basename(newest_path), _fmt_age(age))
+    if hot:
+        line += " — FRESH (< %gm): claim seat mid-grind" % opts["fresh_minutes"]
+    else:
+        line += " — stale; not cold evidence by itself (R38 law)"
+    return {"status": "HOT" if hot else "ok", "lines": [line],
+            "newest": {"path": newest_path, "age_min": round(age, 1)}}
+
+
 def _board_cmd():
     """msgboard CLI: PATH first, then the known install homes — the board
     probe must work under NON-INTERACTIVE ssh, where ~/.local/bin is
@@ -378,12 +444,17 @@ def probe_board(opts, now):
 
 
 def run_probes(opts, now):
-    return {
-        "procs": probe_procs(now),
-        "tree": probe_tree(opts, now),
-        "logs": probe_logs(opts, now),
-        "board": probe_board(opts, now),
-    }
+    probes = {}
+    if opts["worktree"]:
+        probes.update({
+            "procs": probe_procs(now),
+            "tree": probe_tree(opts, now),
+            "logs": probe_logs(opts, now),
+        })
+    probes["board"] = probe_board(opts, now)
+    if opts["claim_seat"]:
+        probes["claim_seat"] = probe_claim_seat(opts, now)
+    return probes
 
 
 def verdict_of(probes):
