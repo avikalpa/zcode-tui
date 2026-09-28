@@ -31,7 +31,7 @@ async function main() {
 
   await c.request("session/send", {
     sessionId,
-    content: "Use the Agent tool exactly once. Spawn one general-purpose subagent whose only task is to count slowly from 1 to 30, waiting two seconds between each number, and then reply with the final count. Wait for it to finish. Then reply with exactly: done",
+    content: "Use the Agent tool exactly once. Spawn one general-purpose subagent whose only task is to count slowly from one to thirty, waiting two seconds between each number, and then reply with the final count. Wait for it to finish. Then reply with exactly: done",
   }, 45000);
   console.log("SENT ask at", new Date().toISOString());
 

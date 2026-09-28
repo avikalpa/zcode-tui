@@ -28,6 +28,28 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **PROOF-ASK HYGIENE LINT (the ask-hygiene law becomes a gate)** SHIPPED
+  0.6.74 — tools-only, ZERO runtime delta (dist untouched, md5 unchanged).
+  tools/proof-ask-hygiene.py + tools/proof-ask-hygiene.json enforce the
+  ask-hygiene law at the gates: every ask literal (pty-proof os.write
+  prose writes; `content:` sends in tools/*.ts probes) carries NO
+  standalone digits (`\b\d+\b` — the B4/TB poison class "count 1 to
+  30"; identifiers like pf636 are exempt by word-boundary), NO chrome
+  tokens (ctrl+/shift+/… substrings; esc/enter/tab/… key words), NO
+  asserted-absence vocabulary (manifest list — new absence needles swear
+  in at the manifest, the field-lint pattern). Keystroke-class writes
+  (control bytes, bare slash commands) are skipped; a prose literal that
+  must keep a hit goes in allow[] with its reason recorded here.
+  --self-test pins the rule table (the R63 ask fails D, the chrome forms
+  fail C, "Permission required" fails A, pf636 passes, the prose
+  classifier holds). In-tree sweep rode the same commit: the
+  r63-child-stop-probe ask is digit-free ("one to thirty", the ~60s child
+  the interrupt probe needs preserved) — the ask that generated the
+  "Spawn subagent to count 1 to 30" title and poisoned B4 twice in R63.
+  Gate order: proof-ask-hygiene runs beside field-lint. Proof legs:
+  seeded in-situ violation fails naming file+rule (exit 1); clean tree
+  exit 0; six-case self-test green.
+
 - **COMPOSER TAB OVERLAY (the reference routes/session/composer plane:
   subagents + shell tabs)** SHIPPED 0.6.73 — the last un-gated surface of
   the v2.0.18 audit. src/tui/composer-tabs.tsx ports index.tsx + context.ts
@@ -2097,6 +2119,19 @@ own fresh edit), COLD exit 0 on the cold sibling checkout and after a
 --wait-window ladder (decoy dying mid-window: compact HOT polls then
 full-evidence COLD), DEGRADED exit 3 observed organically before the
 fallback landed.
+
+Ask-hygiene law (0.6.74): an ask's TEXT is model-facing input whose
+MODEL-GENERATED session title enters the shared corpus — the sessions
+dialog renders titles, and the store is protocol-unremovable
+(session/close refuses inactive sessions), so ask text must be
+needle-inert BY CONSTRUCTION, not by regex repair after a poisoning.
+The rule table and its enforcement live in tools/proof-ask-hygiene.py +
+tools/proof-ask-hygiene.json (standalone digits / chrome tokens /
+asserted-absence vocabulary; keystroke-class writes exempt); a new
+absence needle swears in at the manifest, and the gate runs beside
+field-lint. The companion one-shot tools/cleanup-proof-sessions.ts
+(0.6.44) closes proof-pattern-titled sessions that are still ACTIVE —
+the inactive tail stays with the session/delete host filing.
 
 ## Maintenance law
 

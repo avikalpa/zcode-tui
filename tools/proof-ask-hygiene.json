@@ -1,0 +1,7 @@
+{
+  "_law": "proof-ask hygiene (0.6.74, dream ACK-aa2f75ee28): an ask's text is model-facing input whose generated session TITLE enters the shared daemon corpus (the R63 'count 1 to 30' ask poisoned B4's absence regex twice; the corpus is protocol-unremovable). Rules: D no standalone digits (\\b\\d+\\b — identifiers like pf636 exempt); C no chrome tokens; A no asserted-absence vocabulary. New absence needles swear in at absence_vocabulary; a literal that must stay despite a hit goes in allow with its reason recorded in docs/parity-v2.md.",
+  "chrome_substrings": ["ctrl+", "shift+", "alt+", "meta+", "cmd+"],
+  "chrome_words": ["esc", "escape", "enter", "tab", "leader", "backspace", "arrow"],
+  "absence_vocabulary": ["permission required"],
+  "allow": []
+}
