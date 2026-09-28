@@ -28,6 +28,38 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **SUB RUNNING-ROW PROOF (the 0.6.72 recorded gap closes)** SHIPPED
+  0.6.75 — tools-only, ZERO runtime delta (dist untouched, md5
+  d6a04f722d4311c02ded726e25ee587c unchanged; no ride; offer stays
+  topped at 0.6.73). The SUB family's ask is now the r63 proven long
+  child ("count slowly from one to thirty, waiting two seconds between
+  each number" — digit-free, ask-hygiene-gate-clean, ~60s child), and
+  the new SUB1 opens the composer tab overlay under the ACTIVE filter
+  right after the down-1 hint: the row line must carry the titlecased
+  "General-Purpose" AND the "Running" cell on ONE line (chrome-only
+  needle — the transcript only ever carries the lowercase form, so the
+  pair cannot match it vacuously). TALLY
+
+  Measured host-side truths this sitting (all three are load-bearing
+  for any future subagent proof): the host ABORTS the parent turn at
+  spawn (row idle ~5s after send, the model-generated title lands while
+  the child still runs — the "esc stop" window collapses to seconds);
+  session/subagents serves the LIVE running[] only to the session's
+  OWNING client and a stale running=[] to bystanders (the raw-payload
+  probe: running=0 for ~30s then the item, for the creating client);
+  session/subscribe refuses non-owning clients outright ("Session is
+  not active", one attempt per session now, never retried). The TUI's
+  own tab state is therefore the ONLY live channel — SUB1 rides it.
+  SUB4's needle rides the whitespace-normalized 20-char prefix of the
+  reader-reported summary + "esc back" (the body renders the summary's
+  first WRAPPED line; a whole-summary same-line needle can never fit —
+  it passed only on one-word summaries). The reader: per-run logs
+  (subagent-reader.log.<ts> — the shared single name was truncated by
+  the next run, destroying fail evidence twice), the status-
+  qualification for a live child (a RUNNING item never satisfied the
+  numeric startedAt window), and the S2/ST0 fail-screen microscope on
+  every SUB check.
+
 - **PROOF-ASK HYGIENE LINT (the ask-hygiene law becomes a gate)** SHIPPED
   0.6.74 — tools-only, ZERO runtime delta (dist untouched, md5 unchanged).
   tools/proof-ask-hygiene.py + tools/proof-ask-hygiene.json enforce the
@@ -2005,6 +2037,20 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   stroke. The strip itself SHIPPED 0.6.52 on the summary/empty-state
   body; the detail plane returns when the host exposes child reads.
 
+- **subagent live-plane contract (0.6.75 measured)** — three host
+  behaviors bound the TUI's subagent surfaces: (a) session/subagents
+  serves the LIVE running[] only to the owning client — a bystander
+  client polls running=[] through the whole running phase and first
+  sees the child in ended[] (tools/r65-raw-payload-probe.ts); (b)
+  session/subscribe refuses non-owning clients with "Session is not
+  active" even mid-turn — there is no subscribe path for a second
+  client to inherit the live view; (c) the parent turn ABORTS at the
+  spawn itself (row idle ~5s after send, the model title generated
+  while the child still runs) — the parent no longer waits on the
+  child the 0.6.52/R62-era framing assumed. None of the three is a
+  TUI defect; the overlays degrade gracefully. Filed so the host
+  campaign can rule whether (c) is intended semantics or a regression.
+
 - **session.undo / session.redo** — v2 = server-side session.revert
   stage/clear; zcode has fork-at-message only (timeline). Needs
   `session/revert` (stage/clear) in the app-server. The 0.6.31 Message
@@ -2131,7 +2177,25 @@ asserted-absence vocabulary; keystroke-class writes exempt); a new
 absence needle swears in at the manifest, and the gate runs beside
 field-lint. The companion one-shot tools/cleanup-proof-sessions.ts
 (0.6.44) closes proof-pattern-titled sessions that are still ACTIVE —
-the inactive tail stays with the session/delete host filing.
+  the inactive tail stays with the session/delete host filing.
+
+SUB-family laws (0.6.75, all measured live): (1) the reader log is
+PER-RUN (subagent-reader.log.<ts>) — a shared name is truncated by the
+next run and destroys the evidence; (2) every SUB check carries the
+fail-screen microscope (an undumped SUB fail cost two blind runs);
+(3) a live child qualifies in the reader by status, never by the
+numeric startedAt window (running items never satisfied it); (4) the
+mid-run row needle is CHROME-ONLY (titlecased agent label + the
+Running cell) — the dynamic child title is unobtainable mid-run (the
+bystander-stale running[] + the parent-turn abort, see the Shipped
+0.6.75 entry), and the transcript's lowercase form can never satisfy
+the titlecased pair; (5) a body-summary needle rides the normalized
+20-char prefix, never the whole string (the body renders the first
+wrapped line); (6) TB needles: the tabs strip renders ALL tabs on ONE
+row and the sessions dialog's rows are INDENTED — anchor to the
+gutter+title pair and the row's first token, never the line start (the
+v7/v8 microscopes named both; the ask-hygiene gate keeps digits out of
+proof titles, so no title can fake a gutter).
 
 ## Maintenance law
 

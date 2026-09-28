@@ -33,6 +33,7 @@ async function main() {
   const deadline = t0 + 180_000;
   let locked: string | null = null;
   let reportedRunning = false;
+  const subscribed = new Set<string>();
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 2000));
     let rows: any[] = [];
@@ -47,6 +48,28 @@ async function main() {
     for (const row of cand) {
       const sid = String(row?.sessionId ?? "");
       if (!sid) continue;
+      // subscribe EARLY (the raw-payload probe: a bystander client polls
+      // running=0 through the whole running phase — the live view rides
+      // the subscription; the TUI's verbatim contract). Fresh = updated
+      // after the reader started; the proof TUI's session qualifies
+      // within one poll of its creation, mid-turn, while "active" holds.
+      if (!subscribed.has(sid) && Number(row?.updatedAt ?? 0) >= t0 - 5_000) {
+        try {
+          await c.request("session/subscribe", {
+            sessionId: sid,
+            deliveryKind: "desktop-continuous",
+            includeSnapshot: false,
+          });
+          subscribed.add(sid);
+          console.log("SUBSCRIBED " + sid);
+        } catch (e) {
+          // one attempt per session, success or not — the verb refuses
+          // bystanders outright ("Session is not active"), so a retry
+          // loop only spams the log
+          subscribed.add(sid);
+          console.log("SUBSCRIBE failed " + sid + ": " + String(e).slice(0, 160));
+        }
+      }
       let snap: any;
       try {
         snap = await c.request("session/subagents", { sessionId: sid });
@@ -57,7 +80,18 @@ async function main() {
         ...((snap?.running ?? []) as any[]),
         ...((snap?.ended?.items ?? []) as any[]),
       ];
-      const mine = items.filter((it) => (it?.startedAt ?? 0) >= t0 - 5_000);
+      // R65 measured: a RUNNING item never satisfied the numeric window
+      // (the reader stayed silent ~120s into a live child and first
+      // qualified the ENDED item), while the r63 stop probe proves
+      // running[] carries the child live. A live child qualifies by
+      // status — nothing else on the daemon is running during a proof
+      // window; the startedAt rule keeps guarding ENDED items against
+      // earlier runs' children (the lock law above).
+      const mine = items.filter(
+        (it) =>
+          it?.status === "running" ||
+          (typeof it?.startedAt === "number" && it.startedAt >= t0 - 5_000),
+      );
       if (!mine.length) continue;
       if (sid !== locked) {
         locked = sid;
@@ -84,7 +118,12 @@ async function main() {
         reportedRunning = true;
         console.log(
           "RUNNING " +
-            JSON.stringify({ childTitle: mine[0]?.title, type: mine[0]?.subagentType }),
+            JSON.stringify({
+              childTitle: mine[0]?.title,
+              type: mine[0]?.subagentType,
+              status: mine[0]?.status,
+              startedAt: mine[0]?.startedAt,
+            }),
         );
       }
       break; // locked: keep polling THIS session until its child ends

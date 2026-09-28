@@ -1290,14 +1290,20 @@ if b0 and alive(pid):
           re.search(r"^1\s+\S", disp, re.M) is not None)
     os.write(master, b"/new\r")
     tb2 = False
-    for _ in range(12):                # poll: the /new round-trip lags under
-        read_for(master, stream, 0.6)  # daemon load (was a fixed 4.0 settle)
-        disp = "\n".join(screen.display)
-        if (re.search(r"^2\s+\S", disp, re.M) is not None
-                and "Untitled session" in disp):
+    for _ in range(30):                # poll: the /new round-trip lags under
+        read_for(master, stream, 0.6)  # daemon load (the 0.6.75 widening: the
+        disp = "\n".join(screen.display)  # daemon now loads MCP servers per
+        # the strip renders ALL tabs on ONE row (the v7 microscope) — the
+        # gutter+title pair, not a line-start gutter, is the assertion
+        if re.search(r"2\s+Untitled session", disp) is not None:
             tb2 = True
             break
     disp = "\n".join(screen.display)
+    if not tb2:
+        print("---- TB2 FAIL SCREEN ----")
+        for _i, _line in enumerate(screen.display):
+            if _line.strip():
+                print(f"{_i:2}|{_line.rstrip()}")
     check(pid, "TB2 /new opens a second tab (gutter 2 + Untitled session)", tb2)
     before_switch = disp
     os.write(master, b"\x181"); read_for(master, stream, 2.0)   # leader 1: tab 1
@@ -1321,13 +1327,25 @@ if b0 and alive(pid):
     # positional gutters were a deadlock invention, repaired this wave).
     os.write(master, b"\x18l")
     tb6 = False
-    for _ in range(16):
+    for _ in range(20):
         read_for(master, stream, 0.6)
         disp = "\n".join(screen.display)
         if "Sessions" in disp and "Search" in disp:
+            # poll the WHOLE window: the dialog shell paints before the
+            # session rows land (the daemon round-trip lags under load —
+            # the old break-on-shell graded the empty dialog)
+            # the dialog's rows are INDENTED (the v7 microscope) —
+            # anchor to the row's first token, not the line start
             tb6 = ("switch ctrl+1-9" in disp
-                   and re.search(r"^1\s+\S", disp, re.M) is not None)
-            break
+                   and re.search(r"^\s*1\s+\S", disp, re.M) is not None)
+            if tb6:
+                break
+    disp = "\n".join(screen.display)
+    if not tb6:
+        print("---- TB6 FAIL SCREEN ----")
+        for _i, _line in enumerate(screen.display):
+            if _line.strip():
+                print(f"{_i:2}|{_line.rstrip()}")
     check(pid, "TB6 sessions dialog wears the tab-slot gutter + switch hint", tb6)
     os.write(master, b"\x1b"); read_for(master, stream, 0.6)   # close sessions
     os.write(master, b"\x03"); time.sleep(0.3)
@@ -2166,13 +2184,17 @@ else:
 # tools/subagents-proof-reader.ts polls session/list + session/subagents
 # concurrently as the protocol truth channel, reporting the model-generated
 # facts (child title, summary vary per run) the row/body needles ride. The
-# running-row paint (active filter holding a row) stays unproven — it needs
-# a deterministic long child; recorded in the SSOT.
+# ask is the r63 proven LONG child (digit-free, hygiene-gate-clean, ~60s):
+# SUB1 opens the overlay under the ACTIVE filter while the child still runs
+# and requires the row line to carry the reader-reported title AND the
+# Running cell (the R62 recorded gap, closed R65). The settled legs follow
+# unchanged; labels are numbered in execution order.
 SUB_LABELS = (
     "SUB0 the running child paints the down-1 footer hint",
-    "SUB1 the overlay opens with the provably-empty active filter",
-    "SUB2 the inactive row paints the child title with its agent label",
-    "SUB3 the inspector body carries the settled summary",
+    "SUB1 the running row paints its Running cell under the active filter",
+    "SUB2 the overlay opens with the provably-empty active filter",
+    "SUB3 the inactive row paints the child title with its agent label",
+    "SUB4 the inspector body carries the settled summary",
 )
 
 def _sub_bun_env():
@@ -2188,13 +2210,16 @@ def _sub_bun_env():
         sys.exit("pty-proof: SUB reader must run IN-TREE (node_modules) — start pty-proof from the worktree root")
     return env
 
-def _sub_wait_verdict(reader_proc, timeout_s):
+def _sub_wait_verdict(reader_proc, timeout_s, log_path=None):
     # poll the reader's manifest-sworn log for its VERDICT json (R39 law:
-    # background output rides a file, never a pipe tail)
+    # background output rides a file, never a pipe tail). The log is
+    # PER-RUN since R65 — every run keeps its own reader evidence; the
+    # shared single name was truncated by the next run's SUB section and
+    # destroyed the fail evidence twice in one sitting.
     _end = time.time() + timeout_s
     while time.time() < _end:
         try:
-            for _line in open(READER_LOG):
+            for _line in open(log_path or READER_LOG):
                 if _line.startswith("VERDICT "):
                     return json.loads(_line[8:])
         except (OSError, ValueError):
@@ -2212,20 +2237,40 @@ def _sub_line_has(screen, token_a, token_b):
             return True
     return False
 
+
+def _sub_check(pid, label, ok, screen):
+    # the S2/ST0 microscope law for the SUB family: a fail carries its
+    # viewport into the run log — an undumped SUB fail cost this sitting
+    # two blind runs
+    if not ok and alive(pid):
+        print("---- %s FAIL SCREEN ----" % label.split(" ")[0])
+        for _i, _line in enumerate(screen.display):
+            if _line.strip():
+                print(f"{_i:2}|{_line.rstrip()}")
+    check(pid, label, ok)
+
 if SKIP_SUB:
     print("SUB skipped (--no-subagent)")
 else:
+    SUB_LOG = READER_LOG + "." + time.strftime("%Y%m%d-%H%M%S")
+    print("SUB reader log: %s" % SUB_LOG)
     sub_reader = subprocess.Popen(
         ["bun", "tools/subagents-proof-reader.ts"],
         cwd=os.getcwd(), env=_sub_bun_env(),
-        stdout=open(READER_LOG, "w"), stderr=subprocess.STDOUT)
+        stdout=open(SUB_LOG, "w"), stderr=subprocess.STDOUT)
     sub_pid, sub_master, sub_screen, sub_stream = spawn(args=["--mode", "yolo"])
     read_for(sub_master, sub_stream, 9)
     if "Ask anything" in "\n".join(sub_screen.display):
         # the DEZOMBIFY-BEFORE-NEW-FAMILY law (b653fc0): a stale proof-scoped
         # ask card must never eat this family's first keystroke
         dezombify(sub_master, sub_stream, sub_screen, 4)
-        os.write(sub_master, b"Use the Agent tool exactly once. Spawn one general-purpose subagent whose only task is to reply with the single word banana. Wait for it to finish, then reply with exactly: acknowledged\r")
+        # (the r65c "mode-set gate" lived here for two runs and is
+        # REVERTED: the TUI boots session-less — the badge reads the
+        # app default until the first send creates the session with
+        # mode: launchMode (app.tsx submit -> newSession). A pre-send
+        # badge poll can never see Yolo. The ask types immediately; the
+        # session is created yolo at send, the R62/63-proven flow.)
+        os.write(sub_master, b"Use the Agent tool exactly once. Spawn one general-purpose subagent whose only task is to count slowly from one to thirty, waiting two seconds between each number, and then reply with the final count. Wait for it to finish. Then reply with exactly: done\r")
         _sub_hint = False
         for _ in range(90):                      # child spawn latency is seconds
             read_for(sub_master, sub_stream, 1.0)
@@ -2234,9 +2279,30 @@ else:
             if _sub_line_has(sub_screen, "ctrl+p commands", "down 1"):
                 _sub_hint = True
                 break
-        check(sub_pid, SUB_LABELS[0], _sub_hint)
-        _sub_truth = _sub_wait_verdict(sub_reader, 180)
-        for _ in range(60):                      # the turn really stopped: poll
+        _sub_check(sub_pid, SUB_LABELS[0], _sub_hint, sub_screen)
+        # SUB1 (R65): the running-row paint — the overlay opens RIGHT
+        # after the hint (the TUI's tab state is the only live channel:
+        # the host aborts the parent turn at spawn and serves bystander
+        # clients a stale running=[]; subscribe refuses them — all three
+        # measured this sitting), and the row must carry the titlecased
+        # agent label AND the Running cell on ONE line. Chrome-only
+        # needle: the transcript only ever carries the lowercase
+        # "general-purpose", so the pair cannot match it vacuously.
+        _sub_rowrun = False
+        if alive(sub_pid):
+            os.write(sub_master, b"\x1b[B")     # down on the empty draft: the overlay
+            for _ in range(30):
+                read_for(sub_master, sub_stream, 0.7)
+                if _sub_line_has(sub_screen, "General-Purpose", "Running"):
+                    _sub_rowrun = True
+                    break
+        _sub_check(sub_pid, SUB_LABELS[1], _sub_rowrun, sub_screen)
+        if _sub_rowrun:
+            os.write(sub_master, b"\x1b")       # esc closes the overlay; the child keeps running
+            read_for(sub_master, sub_stream, 2.0)
+        _sub_truth = _sub_wait_verdict(sub_reader, 180, SUB_LOG)
+        # window sized for the long child's parent tail under load (R65)
+        for _ in range(90):                      # the turn really stopped: poll
             read_for(sub_master, sub_stream, 1.0)  # the busy footer GONE
             if "esc stop" not in "\n".join(sub_screen.display):
                 break
@@ -2251,7 +2317,7 @@ else:
                 if "Subagents" in _d and "No active subagents" in _d:
                     _sub_pick = True
                     break
-            check(sub_pid, SUB_LABELS[1], _sub_pick)
+            _sub_check(sub_pid, SUB_LABELS[2], _sub_pick, sub_screen)
             os.write(sub_master, b"\x01")       # ctrl+a: show inactive
             _sub_row = False
             for _ in range(30):
@@ -2262,17 +2328,21 @@ else:
                 if _sub_line_has(sub_screen, _sub_truth.get("childTitle", ""), "General-Purpose"):
                     _sub_row = True
                     break
-            check(sub_pid, SUB_LABELS[2], _sub_row)
+            _sub_check(sub_pid, SUB_LABELS[3], _sub_row, sub_screen)
             os.write(sub_master, b"\r")         # enter: inspect
+            # the body renders the summary's first WRAPPED line (esc back
+            # rides it) — needle the normalized 20-char prefix, never the
+            # whole string (a multi-line summary cannot fit one line)
+            _sub_body_needle = " ".join(_sub_truth.get("summary", "").split())[:20]
             _sub_body = False
             for _ in range(30):
                 read_for(sub_master, sub_stream, 0.7)
-                if _sub_line_has(sub_screen, _sub_truth.get("summary", ""), "esc back"):
+                if _sub_body_needle and _sub_line_has(sub_screen, _sub_body_needle, "esc back"):
                     _sub_body = True
                     break
-            check(sub_pid, SUB_LABELS[3], _sub_body)
+            _sub_check(sub_pid, SUB_LABELS[4], _sub_body, sub_screen)
         else:
-            for _lbl in SUB_LABELS[1:]:
+            for _lbl in SUB_LABELS[2:]:
                 check(sub_pid, _lbl, False)
         kill(sub_pid)
     else:
