@@ -19,6 +19,7 @@
 #   bun tools/resolve-theme-v2.ts       # resolve the v2 default theme (opencode doc)
 #   python3 tools/gen-themes.py         # refresh the theme arms (pin + v2 json)
 #   tools/parity-report.py --stale      # which of our ports the bump touches
+#   Check whether a re-pin is owed BEFORE pinning: python3 tools/upstream-check.py
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

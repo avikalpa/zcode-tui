@@ -28,6 +28,31 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **UPSTREAM-CHECK VERB** SHIPPED 0.6.77 — tools-only, ZERO
+  runtime delta (dist untouched, md5 d6a04f72 unchanged; no ride; offer
+  stays topped at 0.6.73). Dreams ACK-0102f5f28f + ACK-04a0d3c459 (the
+  ls-remote hash-strip trap + the vscode-namespace refinement,
+  unanswered since 09-21/09-24) MATERIALIZED: tools/upstream-check.py
+  is the maintenance law's recon chore — "did upstream release past our
+  pin?" — as a verb with the traps in code, not prose: live `git
+  ls-remote --tags` off the sync-opencode.sh SRC origin resolution
+  (OPENCODE_REPO env, else ~/gh/opencode — never a guessed remote: the
+  vendored reference's own origin points at our repo and mis-led this
+  wave's first recon), the hash stripped BEFORE any sort, release tags
+  anchored ^v[0-9]+\. AND filtered to the pin's family (v2.* for a
+  v2.0.x pin), annotated-tag `^{}` peel deduped, and a release OUTSIDE
+  the pin family (a v3-class major) reported LOUD on exit 1 — the
+  family filter kills false winners (vscode-v0.0.x elects newest under
+  raw `sort -V`), it never hides a real release. Exit discipline
+  matches floor-check (0 up to date / 1 re-pin owed / 3
+  DEGRADED-unverifiable — a degraded check is UNKNOWN, never silently
+  up-to-date). --self-test builds adversarial fixture bare repos
+  (foreign-namespace election, family gap, major beyond family,
+  up-to-date, missing clone, tagless) — 10/10; live-fire at the 0.6.76
+  pin: v2.0.18 == family newest, exit 0 (twelfth consecutive no-fire,
+  now one command). Discovery pointer added to tools/sync-opencode.sh
+  usage text.
+
 - **FLOOR-CHECK CLAIM-SEAT PROBE** SHIPPED 0.6.76 — tools-only, ZERO
   runtime delta (dist untouched, md5 d6a04f722d4311c02ded726e25ee587c
   unchanged; no ride; offer stays topped at 0.6.73). Dream
@@ -2230,3 +2255,10 @@ Owner directive 2026-09-17: after EVERY UX iteration, re-write the Remaining
 section to the truth (move lines to Shipped with the wave version, re-pull
 upstream when it releases) — continue until this file's Remaining is empty
 (modulo the non-parities and host-verb blocks).
+
+The recon half of the law is a verb since 0.6.77: `python3
+tools/upstream-check.py` (live ls-remote, trap-safe, exit 0/1/3)
+answers "does the re-pin fire?" in one command — the hand-assembled
+ls-remote one-liner with its hash-strip and namespace-anchor traps
+(dreams ACK-0102f5f28f / ACK-04a0d3c459) is retired from the ritual;
+the verb's --self-test carries the traps as fixtures.
