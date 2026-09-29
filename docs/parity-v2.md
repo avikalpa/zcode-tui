@@ -28,6 +28,48 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **SYNC-REFSPEC LIVE RESOLUTION** SHIPPED 0.6.78 — tools-only, ZERO
+  runtime delta (dist untouched, md5 d6a04f72 unchanged; no ride; offer
+  stays topped at 0.6.73). Dream ACK-807bfb2681 (the R67 sitting's own:
+  the re-pin CHECK read the LIVE remote while the re-pin EXECUTOR —
+  sync-opencode.sh's default ref — read the LOCAL clone's possibly-stale
+  tag set, so a stale ~/gh/opencode could "re-pin" to the version it
+  already had with the backwards guard blind, while the check verb
+  correctly said re-pin owed) MATERIALIZED both halves:
+  sync-opencode.sh now resolves its default ref LIVE via ls-remote
+  against the SRC origin URL — the check verb's traps in bash (hash
+  stripped before any sort, release tags anchored ^v<digits>\., pin
+  family filtered, ^{} peel deduplicated; the vscode-v0.0.x + v3.0.0
+  election fixture passes) — and because the archive still reads the
+  local clone's object store, a live newest missing locally is a LOUD
+  exit-1 naming `git -C <src> fetch --tags --prune` (live resolution
+  alone would only have moved the silence into git archive). New
+  `--print-default-ref` dry mode: resolve + verify presence + print the
+  bare ref, touches nothing — the ritual's preview and the fixture
+  seam. tools/upstream-check.py grows the belt half: on the default
+  path it weighs the local clone (clone_staleness: local family newest
+  vs live family newest) and prints a [stale] note + JSON clone_stale
+  field, exit code UNCHANGED — the verdict stays about the LIVE remote,
+  the note warns about the executor's old failure mode. PROOF:
+  upstream-check --self-test 14/14 (new fixture E: writer/reader
+  clones, the reader cut before v2.0.19 is pushed — stale detected,
+  fetch named, fresh=None; a no-family-tags clone is maximally stale);
+  the sync fixture suite tools/test-sync-refspec.sh (sandboxed via a
+  temp ROOT copy so the real DEST is never touched) 9/9: adversarial
+  election, stale-clone loud fail, explicit-ref echo, a FULL sandboxed
+  pin run (VERSION written = live newest, tui/ archived) and the
+  backwards guard intact; live-fire `--print-default-ref` = exactly
+  `v2.0.18` on the real clone (verified fresh). ★ FIXTURE LAWS: `git
+  init` creates no origin — `git remote add origin` before any push or
+  the fixture silently tests nothing; a stale-clone fixture must tag
+  the ORIGIN only (tagging in the reader clone makes it fresh and the
+  test vacuous — the suite caught this twice in one sitting). GATES:
+  py_compile; bash -n; typecheck clean; bun 248 + THE documented
+  auth-sync red (zero test-surface files touched); keybinds lint 243/0;
+  field-lint 0 survivors/52; ask-hygiene 0; dist md5 d6a04f72
+  UNCHANGED; NO PTY runs (R61/R64/R66/R67 tools-only precedent); NO
+  ynpm ride.
+
 - **UPSTREAM-CHECK VERB** SHIPPED 0.6.77 — tools-only, ZERO
   runtime delta (dist untouched, md5 d6a04f72 unchanged; no ride; offer
   stays topped at 0.6.73). Dreams ACK-0102f5f28f + ACK-04a0d3c459 (the

@@ -18,6 +18,12 @@ measured traps encoded in code instead of prose:
 Annotated tags arrive twice over ls-remote (ref + ref^{}); the peel
 suffix is stripped and the set deduplicated.
 
+On the default path the verb also weighs the LOCAL clone (dream
+ACK-807bfb2681): the sync executor's archive reads this clone's object
+store, so a clone whose family tags lag the live family newest gets a
+[stale] note ("fetch before re-pin"). The note never changes the exit
+code — the check's own verdict is about the LIVE remote and stays honest.
+
 Exit discipline (matches tools/floor-check.py, composable in gates):
   0  up to date — the re-pin does not fire
   1  re-pin owed (family newest > pin, or a release outside the family)
@@ -66,16 +72,19 @@ def run(cmd, **kw):
         ) from e
 
 
-def resolve_url(override):
+def resolve_src(override):
+    """(src, url): the local clone path (None under --url) and the origin
+    URL the live check runs against."""
     if override:
-        return override
+        return None, override
     src = os.environ.get("OPENCODE_REPO") or str(Path.home() / "gh" / "opencode")
     if not Path(src).exists():
         raise Degraded(
             f"upstream clone not found at {src} (OPENCODE_REPO resolves it); "
             "pass --url for a one-shot check"
         )
-    return run(["git", "-C", src, "remote", "get-url", "origin"]).stdout.strip()
+    url = run(["git", "-C", src, "remote", "get-url", "origin"]).stdout.strip()
+    return src, url
 
 
 def resolve_pin(override):
@@ -166,6 +175,29 @@ def check(url, pin):
     }
 
 
+def clone_staleness(src, family_prefix, live_newest):
+    """Executor-direction warning (dream ACK-807bfb2681): the sync
+    script's archive reads the local clone's object store, so a clone
+    whose family tags lag the live family newest must fetch before any
+    re-pin. Returns a note dict, or None when the clone is fresh."""
+    out = run(["git", "-C", src, "tag", "-l", f"{family_prefix}*"]).stdout.split()
+    local = max(
+        (t for t in out if RELEASE_ANCHOR.match(t)), key=vkey, default=None
+    )
+    if local is None or vkey(local) < vkey(live_newest):
+        return {
+            "src": src,
+            "local_newest": local,
+            "live_newest": live_newest,
+            "note": (
+                f"local clone {src} has {local or 'no family tags'} but "
+                f"live family newest is {live_newest} — run: git -C {src} "
+                f"fetch --tags --prune (the sync archive reads this clone)"
+            ),
+        }
+    return None
+
+
 def report(res, as_json):
     if as_json:
         print(json.dumps(res, indent=2))
@@ -177,6 +209,8 @@ def report(res, as_json):
              if res["all_newest"] != res["family_newest"] else ""))
     for t in res["outside_family"]:
         print(f"[outside-family] {t}")
+    if res.get("clone_stale"):
+        print(f"[stale] {res['clone_stale']['note']}")
     print(f"VERDICT: {res['verdict']}")
 
 
@@ -254,6 +288,43 @@ def self_test():
     finally:
         run(["rm", "-rf", tmp])
 
+    # Fixture E: clone staleness (dream ACK-807bfb2681). Clone B is cut
+    # BEFORE the newest tag is pushed to the origin by writer clone A, so
+    # B's local family newest lags the live one.
+    tmp = tempfile.mkdtemp(prefix="upstream-check-stale-")
+    bare = os.path.join(tmp, "origin.git")
+    writer = os.path.join(tmp, "writer")
+    reader = os.path.join(tmp, "reader")
+    run(["git", "init", "--bare", "-q", bare])
+    run(["git", "clone", "-q", bare, writer])
+    cfg = ["git", "-C", writer]
+    run(cfg + ["config", "user.email", "fixture@example.invalid"])
+    run(cfg + ["config", "user.name", "fixture"])
+    run(cfg + ["config", "tag.gpgSign", "false"])
+    (Path(writer) / "f.txt").write_text("fixture\n")
+    run(cfg + ["add", "f.txt"])
+    run(cfg + ["commit", "-q", "-m", "fixture"])
+    for tag in ("v2.0.17", "v2.0.18"):
+        run(cfg + ["tag", "-a", tag, "-m", f"fixture {tag}"])
+    run(cfg + ["push", "-q", "origin", "--tags"])
+    run(["git", "clone", "-q", bare, reader])  # reader sees ..v2.0.18 only
+    run(cfg + ["commit", "-q", "--allow-empty", "-m", "fixture2"])
+    run(cfg + ["tag", "-a", "v2.0.19", "-m", "fixture v2.0.19"])
+    run(cfg + ["push", "-q", "origin", "v2.0.19"])
+    try:
+        st = clone_staleness(reader, "v2.", "v2.0.19")
+        expect("E stale clone detected (local v2.0.18 < live v2.0.19)",
+               st is not None and st["local_newest"] == "v2.0.18",
+               str(st and st["local_newest"]))
+        expect("E stale note names the fetch",
+               st is not None and "fetch --tags --prune" in st["note"],
+               str(st and st["note"])[:60])
+        st_fresh = clone_staleness(reader, "v2.", "v2.0.18")
+        expect("E fresh clone (local == live) is None",
+               st_fresh is None, str(st_fresh))
+    finally:
+        run(["rm", "-rf", tmp])
+
     # Degraded: unreachable URL, and a tagless bare repo.
     try:
         check("/nonexistent/upstream-check-missing.git", "v2.0.18")
@@ -267,6 +338,11 @@ def self_test():
             expect("D tagless degrades", False, "no exception")
         except Degraded as e:
             expect("D tagless degrades exit-3 class", True, str(e)[:60])
+        # A clone with NO family tags is maximally stale (local_newest None).
+        st = clone_staleness(bare, "v2.", "v2.0.18")
+        expect("D2 no-family-tags clone is stale with local_newest None",
+               st is not None and st["local_newest"] is None,
+               str(st and st["local_newest"]))
     finally:
         run(["rm", "-rf", tmp])
 
@@ -274,7 +350,7 @@ def self_test():
     # arbitrary by nature; the structural guard is that the verb sorts the
     # STRIPPED tag field only. Assert the fixture itself ordered cases A/B
     # above regardless of the hashes git assigned.
-    expect("self-test ran", len(cases) >= 8, f"{len(cases)} cases")
+    expect("self-test ran", len(cases) >= 11, f"{len(cases)} cases")
 
     fails = [c for c in cases if not c[1]]
     for name, ok, detail in cases:
@@ -297,7 +373,14 @@ def main():
     if args.self_test:
         sys.exit(self_test())
     try:
-        res = check(resolve_url(args.url), resolve_pin(args.pin))
+        src, url = resolve_src(args.url)
+        res = check(url, resolve_pin(args.pin))
+        # The staleness note is default-path only: under --url there is no
+        # local clone to weigh.
+        res["clone_stale"] = (
+            clone_staleness(src, res["family"], res["family_newest"])
+            if src else None
+        )
     except Degraded as e:
         print(f"DEGRADED: {e}")
         print("VERDICT: DEGRADED (could not verify — treat as UNKNOWN, "

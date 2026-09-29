@@ -2,17 +2,26 @@
 # Re-pin the vendored opencode TUI reference (tools/opencode-reference/) to a
 # tag or branch of the upstream checkout and print which ports it touches.
 #
-#   tools/sync-opencode.sh [ref]        # ref = upstream tag/branch
-#                                       # (default: newest v2.* tag)
+#   tools/sync-opencode.sh [ref]          # ref = upstream tag/branch
+#                                         # (default: newest v2.* tag, LIVE)
+#   tools/sync-opencode.sh --print-default-ref [ref]
+#                                         # resolve + print the ref, touch
+#                                         # nothing — the dry preview
 #
 # The reference tree is MIT code (Copyright (c) 2025 opencode), vendored
 # VERBATIM as the porting surface — our own sources never import it; it
 # exists so a parity wave is a diff job, not a rediscovery job.
 #
-# The default ref is the newest v2.* tag in the upstream checkout — the
-# maintenance law's natural invocation. A default-path resolution that
-# would move the pin BACKWARDS vs the current tools/opencode-reference/VERSION
-# is refused; pass the ref explicitly to force a downgrade.
+# The default ref is the newest v2.* tag resolved LIVE from the origin
+# remote (ls-remote), never from this clone's possibly-stale local tag set —
+# dream ACK-807bfb2681: with a stale clone the executor could "re-pin" to
+# the version it already had, the backwards guard saw an equal pin and
+# passed, while tools/upstream-check.py (live) correctly said re-pin owed.
+# The archive still reads THIS clone's object store, so a live newest that
+# is missing locally is a LOUD failure naming the fetch to run. A
+# default-path resolution that would move the pin BACKWARDS vs the current
+# tools/opencode-reference/VERSION is refused; pass the ref explicitly to
+# force a downgrade.
 #
 # After pinning, run:
 #   tools/gen-keybinds.py               # refresh the keybind registry + gap report
@@ -26,16 +35,58 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${OPENCODE_REPO:-$HOME/gh/opencode}"
 DEST="$ROOT/tools/opencode-reference"
 
+PRINT_ONLY=0
+if [ "${1:-}" = "--print-default-ref" ]; then
+  PRINT_ONLY=1
+  shift
+fi
+
 EXPLICIT_REF="${1:-}"
+
+# Same traps as tools/upstream-check.py, in bash: the ls-remote hash is
+# stripped before any sort (sorting whole lines elects by hash), release
+# tags are anchored ^v<digits>. (foreign namespaces like vscode-v0.0.x
+# elect newest under raw sort -V), filtered to the pin family (v2.*), and
+# the annotated-tag ^{} peel is deduplicated.
+resolve_default_ref() {
+  local url tags
+  url="$(git -C "$SRC" remote get-url origin 2>/dev/null)" || {
+    echo "no origin remote on $SRC — pass an explicit ref: $0 <tag|branch>" >&2
+    exit 1
+  }
+  if ! tags="$(git ls-remote --tags "$url")"; then
+    echo "live tag listing failed for $url — pass an explicit ref: $0 <tag|branch>" >&2
+    exit 1
+  fi
+  printf '%s\n' "$tags" \
+    | sed -e 's/^[^\t]*\t//' -e 's/\^{}$//' -e 's|^refs/tags/||' \
+    | grep -E '^v[0-9]+\.' \
+    | grep -E '^v2\.' \
+    | sort -u -V \
+    | tail -n1
+}
+
 if [ -n "$EXPLICIT_REF" ]; then
   REF="$EXPLICIT_REF"
 else
-  REF="$(git -C "$SRC" tag -l 'v2.*' --sort=-v:refname | head -n1)"
+  REF="$(resolve_default_ref || true)"
   if [ -z "$REF" ]; then
-    echo "no v2.* tag found in $SRC — pass an explicit ref: $0 <tag|branch>" >&2
+    echo "no v2.* release tag at the origin of $SRC — pass an explicit ref: $0 <tag|branch>" >&2
     exit 1
   fi
-  echo "default ref: $REF (newest v2.* tag)"
+  # Live resolution is not local presence: git archive reads $SRC's store.
+  if ! git -C "$SRC" rev-parse -q --verify "refs/tags/$REF" >/dev/null 2>&1; then
+    echo "live newest $REF is NOT in local clone $SRC — run: git -C $SRC fetch --tags --prune" >&2
+    exit 1
+  fi
+  if [ "$PRINT_ONLY" = 0 ]; then
+    echo "default ref: $REF (newest v2.* tag, live at origin)"
+  fi
+fi
+
+if [ "$PRINT_ONLY" = 1 ]; then
+  printf '%s\n' "$REF"
+  exit 0
 fi
 
 COMMIT="$(git -C "$SRC" rev-parse "$REF")"
