@@ -13,6 +13,14 @@ import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { formatSessionTranscript } from "./session/transcript";
 import { errorMessage } from "./error";
+import { appendFileSync } from "node:fs";
+
+// probe/composer-submit-pty: env-gated keylog — zero effect when ZCODE_TUI_KEYLOG unset
+const KLOG = process.env.ZCODE_TUI_KEYLOG as string | undefined;
+const klog = (e: Record<string, unknown>) => {
+  if (!KLOG) return;
+  try { appendFileSync(KLOG, JSON.stringify({ t: Date.now(), ...e }) + "\n"); } catch {}
+};
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -2187,6 +2195,7 @@ export function App({
   };
 
   const newSession = async (): Promise<string | null> => {
+    klog({ k: "newSession", phase: "enter" });
     setStatus("creating session…");
     try {
       const selected = modelId && models.some((m) => m.modelId === modelId)
@@ -2218,16 +2227,19 @@ export function App({
       setView("session");
       await subscribe(row.sessionId);
       setTyping(true);
+      klog({ k: "newSession", phase: "ok", id: row.sessionId });
       setStatus(`${displayTitle(row)} · ready`);
       return row.sessionId;
     } catch (e) {
+      klog({ k: "newSession", phase: "error", err: errorMessage(e) });
       setStatus(`create failed: ${errorMessage(e)}`);
       return null;
     }
   };
 
   const send = async (content: string, targetId = activeId, parts = promptFilesRef.current.filter((f) => content.includes(f.label))) => {
-    if (!targetId || running) return;
+    klog({ k: "send", hasTargetId: !!targetId, running });
+    if (!targetId || running) { klog({ k: "send", phase: "gate-refused", hasTargetId: !!targetId, running }); return; }
     probe("turn-start", content.slice(0, 40));
     // v2 submit: the alive labels leave the text (virtual text), the parts
     // ride as attachments — uploaded begin/chunk/commit, sent by ref. Parts
@@ -2290,6 +2302,7 @@ export function App({
 
   const submitPrompt = async (content: string) => {
     const route = submitRoute(content);
+    klog({ k: "submitPrompt", route, hasActiveId: !!activeId, running });
     // The alive parts are captured BEFORE the draft clears — after it,
     // the pruning effect treats the labels as deleted.
     const submitParts = promptFilesRef.current.filter((f) => content.includes(f.label));
@@ -3216,6 +3229,7 @@ export function App({
   });
 
   useKeyboard((key) => {
+    klog({ k: "key", name: key.name, ctrl: key.ctrl, shift: (key as { shift?: boolean }).shift, meta: (key as { meta?: boolean }).meta, seq: key.sequence });
     if (dialog !== null) return;
 
     if (askRef.current) {
@@ -3650,6 +3664,7 @@ export function App({
         return;
       }
       if (key.name === "return") {
+        klog({ k: "return-branch", running, hasActiveId: !!activeId, draftLen: draftRef.current.length, sugOpen: sugOpenNow, fileMatches: fileMatchesNow.length });
         clearSelection();
         // A PTY can deliver a fast text burst and the Enter stroke before
         // React has committed the previous setState. The ref is the immediate
@@ -3673,7 +3688,7 @@ export function App({
           return;
         }
         const content = draftRef.current.trim();
-        if (!content) return;
+        if (!content) { klog({ k: "return-sub", sub: "empty-draft" }); return; }
         if (running) {
           // Never drop or mangle a prompt typed mid-turn: queue it visibly.
           const next = [...queueRef.current, content];
@@ -3681,9 +3696,11 @@ export function App({
           setQueue(next);
           draftRef.current = "";
           setDraft("");
+          klog({ k: "return-sub", sub: "queued" });
           flashStatus("queued · sends when the turn finishes");
           return;
         }
+        klog({ k: "return-sub", sub: "submit", content: content.slice(0, 30) });
         void submitPrompt(content);
         return;
       }
