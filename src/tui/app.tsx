@@ -1439,7 +1439,7 @@ export function App({
     setModelIdx(i);
     rememberModel({ providerId: next.providerId, modelId: next.modelId, label: next.modelId });
     if (activeIdRef.current) {
-      void client.request("session/setModel", { sessionId: activeIdRef.current, model: { providerId: next.providerId, modelId: next.modelId, variant: effort } })
+      void client.request("session/setModel", { sessionId: activeIdRef.current, model: { providerId: next.providerId, modelId: next.modelId, options: { reasoningLevel: effort } } })
         .catch(() => {});
     }
     flashStatus(`model → ${next.modelId}`);
@@ -1848,13 +1848,15 @@ export function App({
       const selected = modelId && models.some((m) => m.modelId === modelId)
         ? models.find((m) => m.modelId === modelId)!
         : activeModel;
-      // The chosen model AND its effort variant ride creation — a new session
-      // starts with exactly what the composer advertises.
+      // The registry, not this allowlist, decides what may ride creation — a
+      // stale advertised model kills the whole create (measured: "Provider
+      // Registry 中不存在 Model"). Create bare (the backend default) and
+      // reconcile the composer's advertised choice below, so an unavailable
+      // model degrades to a warning instead of eating the turn.
       const res = (await client.request("session/create", {
         workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() },
         mode: "build",
         persistence: "immediate",
-        model: { providerId: selected.providerId, modelId: selected.modelId, variant: effort },
       })) as { session?: Record<string, unknown>; settings?: unknown };
       // A brand-new model with no remembered variant adopts the catalog's
       // defaultLevel for it (3.12.x: the catalog rides this reply).
@@ -1872,6 +1874,15 @@ export function App({
       resetToTail();
       setView("session");
       await subscribe(row.sessionId);
+      // Reconcile the advertised model + effort onto the live session.
+      try {
+        await client.request("session/setModel", {
+          sessionId: row.sessionId,
+          model: { providerId: selected.providerId, modelId: selected.modelId, options: { reasoningLevel: effort } },
+        });
+      } catch {
+        flashStatus(`${selected.providerId}/${selected.modelId} unavailable — session stays on the backend default`, "warning");
+      }
       setTyping(true);
       setStatus(`${displayTitle(row)} · ready`);
       return row.sessionId;
@@ -2269,13 +2280,15 @@ export function App({
   };
 
   // Effort select: persist per model (opencode variant map) AND carry it to
-  // the active session — setModel accepts model.variant (measured live
-  // 2026-09-16) and the backend persists it as workspace last-used.
+  // the active session — the strict request schema is options.reasoningLevel
+  // (backend Pu; `variant` is output-echo vocabulary and both create and
+  // setModel are .strict() — bundle-measured 2026-09-29), and
+  // persistAsWorkspaceLastUsed defaults true, so the backend persists it.
   const applyEffort = (e: (typeof EFFORTS)[number]) => {
     setEffort(e);
     uiState.current = uiStateRepository.update((cur) => ({ variant: { ...cur.variant, [modelKey(activeModel)]: e } }));
     if (!activeId) { flashStatus(`effort → ${e}`); return; }
-    void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
+    void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, options: { reasoningLevel: e } } })
       .then(() => flashStatus(`effort → ${e}`))
       .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${err instanceof Error ? err.message : err}`));
   };
