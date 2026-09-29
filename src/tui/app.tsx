@@ -13,7 +13,6 @@ import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { formatSessionTranscript } from "./session/transcript";
 import { errorMessage } from "./error";
-import { appendFileSync } from "node:fs";
 
 // probe/composer-submit-pty: env-gated keylog — zero effect when ZCODE_TUI_KEYLOG unset
 const KLOG = process.env.ZCODE_TUI_KEYLOG as string | undefined;
