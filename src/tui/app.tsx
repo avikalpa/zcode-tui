@@ -2710,13 +2710,16 @@ export function App({
   };
 
   // Effort select: persist per model (opencode variant map) AND carry it to
-  // the active session — setModel accepts model.variant (measured live
-  // 2026-09-16) and the backend persists it as workspace last-used.
+  // the active session — the strict request schema is options.reasoningLevel
+  // (backend Pu; `variant` is output-echo vocabulary and both create and
+  // setModel are .strict() — bundle-measured 2026-09-29; the earlier
+  // "accepts model.variant" reading was falsified), and
+  // persistAsWorkspaceLastUsed defaults true, so the backend persists it.
   const applyEffort = (e: (typeof EFFORTS)[number]) => {
     setEffort(e);
     uiState.current = uiStateRepository.update((cur) => ({ variant: { ...cur.variant, [modelKey(activeModel)]: e } }));
     if (!activeId) { flashStatus(`effort → ${e}`); return; }
-    void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
+    void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, options: { reasoningLevel: e } } })
       .then(() => flashStatus(`effort → ${e}`))
       .catch((err) => flashStatus(`effort ${e} · stored locally, host refused: ${errorMessage(err)}`));
   };
