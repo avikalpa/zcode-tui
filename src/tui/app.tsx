@@ -1780,7 +1780,7 @@ export function App({
     setModelIdx(i);
     rememberModel({ providerId: next.providerId, modelId: next.modelId, label: next.modelId });
     if (activeIdRef.current) {
-      void client.request("session/setModel", { sessionId: activeIdRef.current, model: { providerId: next.providerId, modelId: next.modelId, variant: effort } })
+      void client.request("session/setModel", { sessionId: activeIdRef.current, model: { providerId: next.providerId, modelId: next.modelId, options: { reasoningLevel: effort } } })
         .catch(() => {});
     }
     flashStatus(`model → ${next.modelId}`);
@@ -2203,11 +2203,15 @@ export function App({
         : activeModel;
       // The chosen model AND its effort variant ride creation — a new session
       // starts with exactly what the composer advertises.
+      // The registry, not this allowlist, decides what may ride creation — a
+      // stale advertised model kills the whole create (measured: "Provider
+      // Registry 中不存在 Model"). Create bare (the backend default) and
+      // reconcile the composer's advertised choice below, so an unavailable
+      // model degrades to a warning instead of eating the turn.
       const res = (await client.request("session/create", {
         workspace: { workspacePath: process.cwd(), workspaceKey: process.cwd() },
         mode: launchMode ?? "build",
         persistence: "immediate",
-        model: { providerId: selected.providerId, modelId: selected.modelId, variant: effort },
       })) as { session?: Record<string, unknown>; settings?: unknown };
       // A brand-new model with no remembered variant adopts the catalog's
       // defaultLevel for it (3.12.x: the catalog rides this reply).
@@ -2226,6 +2230,15 @@ export function App({
       resetToTail();
       setView("session");
       await subscribe(row.sessionId);
+      // Reconcile the advertised model + effort onto the live session.
+      try {
+        await client.request("session/setModel", {
+          sessionId: row.sessionId,
+          model: { providerId: selected.providerId, modelId: selected.modelId, options: { reasoningLevel: effort } },
+        });
+      } catch {
+        flashStatus(`${selected.providerId}/${selected.modelId} unavailable — session stays on the backend default`, "warning");
+      }
       setTyping(true);
       klog({ k: "newSession", phase: "ok", id: row.sessionId });
       setStatus(`${displayTitle(row)} · ready`);
