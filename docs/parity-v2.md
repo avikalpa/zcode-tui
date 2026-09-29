@@ -28,6 +28,39 @@ ports AROUND the logo, never over it).
 
 ## Shipped (1:1 unless noted)
 
+- **V2.0.19 RE-PIN** SHIPPED 0.6.79 — the maintenance law's SIXTH live
+  fire, after FIFTEEN consecutive no-fire sittings (upstream released
+  v2.0.19 past the v2.0.18 pin). Vendored reference re-pinned through
+  the 0.6.78 live default-ref resolution — elected v2.0.19 on its
+  first live fire — and the same sitting proved the clone-staleness
+  half: upstream-check printed [stale] + the exact fetch command
+  BEFORE the fetch, then went quiet after it. 13 reference files
+  moved (+105/−58); keybind surface UNCHANGED at 243 binds (lint
+  243/0). ZERO behavior delta PORTED — the ten-file delta decomposes
+  to: SIX no-plane (the /btw answer-header truncation, dialog-open's
+  project dedupe, args.newSessionID + the home auto-submit catalog
+  gate + prompt create-with-id — none of these surfaces exist in our
+  ports, our argv parses --version/--resume/--model/--mode only; the
+  Shell background-badge condition — our shell display never renders
+  the badge, there is no background-shell output client;
+  webSearchProviderName's opencode special case — our websearch row
+  renders the query only); TWO ledgered rides (dialog-integration's
+  MCP-source skip rides the provider_connect deviation; config's
+  DiffSource schema rides the turn source below); ONE host-blocked
+  (the diff viewer "turn" source — the Blocked-on-host line grew the
+  v2.0.19 mechanics); ONE code-shape-only refactor (DIFF_SOURCES map +
+  sources-prop threading + the needsBase error condition — logically
+  identical over our 3-source domain and our dialog already carries
+  the exact upstream description text; NOT ported: zero behavior
+  change, churn only). Generated stamps ride (keybinds-generated.ts +
+  docs/parity-keybinds.md → v2.0.19); UPSTREAM_KEYBIND_VERSION has
+  ZERO in-app usages — the stamp is inert audit surface: dist BYTES
+  change, behavior cannot. GATES: keybinds lint 243/0; field-lint 0
+  survivors/52; ask-hygiene 0; typecheck clean; bun + THE documented
+  auth-sync red; NO PTY runs (stamp-only src delta, tools-only
+  precedent R61/R64/R66-R68); dist md5 bb67cab5 (stamp-only delta
+  over d6a04f72); ride OFFERED from the lane tip.
+
 - **SYNC-REFSPEC LIVE RESOLUTION** SHIPPED 0.6.78 — tools-only, ZERO
   runtime delta (dist untouched, md5 d6a04f72 unchanged; no ride; offer
   stays topped at 0.6.73). Dream ACK-807bfb2681 (the R67 sitting's own:
@@ -1867,7 +1900,7 @@ plugins meta fix): run 6 **136/1 {F0}** — the best full run of the
 campaign memory; wave law MET (the only red is the documented persistent
 fail). M1 green in every run since the needle fix (runs 2-6).
 
-## Remaining (v2.0.18 → us)
+## Remaining (v2.0.19 → us)
 
 - ~~**DIFF-VIRTUALIZATION (#51122 render half, opened 0.6.60)**~~
   SHIPPED 0.6.61 — VirtualAddedPatch windowing on our React diff viewer
@@ -2150,7 +2183,17 @@ fail). M1 green in every run since the needle fix (runs 2-6).
   `session/revert` (stage/clear) in the app-server. The 0.6.31 Message
   Actions dialog omits v2's Revert row for this same gap.
 - **diff last-turn source** — needs a session-diff verb (v2: client.session.
-  diff). Git/branch sources ship TUI-side.
+  diff). Git/branch sources ship TUI-side. v2.0.19 GREW the mechanics
+  (measured off the vendored reference): turn is the FOURTH entry in
+  the switch-source dialog (label "Last turn", description "Latest
+  session turn"), offered only INSIDE a session — the source list is
+  session-scoped, plain VCS sources everywhere else — served from
+  session.diff({sessionID, context: 12}) instead of the vcs adapter,
+  auto-refetching when the session status flips running→idle (each
+  completed turn replaces the last), rendering "Diff unavailable" on
+  error, with config diffs.source gaining "turn" ("...falls back to
+  branch outside a session"). The port lands whole once the host verb
+  exists.
 - **session.rename** — needs session/title update verb (long-standing).
 - **session.export JSON arm** — v2 json/sanitize export rides
   client.api.session.export({sessionID, sanitize}); the zcode protocol has
