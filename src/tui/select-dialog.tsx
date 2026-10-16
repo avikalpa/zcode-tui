@@ -24,6 +24,9 @@ export interface DialogOption<T> {
   label: string;
   description?: string;
   meta?: string;
+  /** Slice-1 plans guardrail (sol consult 2026-10-16): a disabled row is
+   * rendered but NEVER reaches onSelect — the mutation boundary refuses it. */
+  disabled?: boolean;
   /** Right-edge status cell — port of the v2.0.7 dialog-select option
    * footer + footerColor pair (the MCP dialog's Connected ✓ column). */
   status?: { text: string; color?: string; bold?: boolean };
@@ -157,8 +160,13 @@ export function SelectDialog<T>({
 
   const select = () => {
     const option = shown[sel];
-    if (option) onSelect(option.value, option.id);
-    else onClose();
+    if (!option) { onClose(); return; }
+    // The disabled gate is the plans guardrail: an informational/disabled
+    // route (e.g. read-only AutoClaw rows, not-entitled plans) can be
+    // highlighted but never crosses the mutation boundary (sol 2026-10-16
+    // falsifier: a disabled route must never reach the mutation boundary).
+    if (option.disabled) { setFilter(""); return; }
+    onSelect(option.value, option.id);
   };
 
   // Fire the preview whenever the highlighted row moves (arrows, typing,
@@ -244,7 +252,7 @@ export function SelectDialog<T>({
           // Reference row shape (dialog-select.tsx): titles align at column 3;
           // the CURRENT row donates its gutter to a ● so its title stays put,
           // and its label wears the accent when not selected.
-          const rowFg = selected ? C.accentText : current ? C.accent : C.fg;
+          const rowFg = selected ? C.accentText : current ? C.accent : o.disabled ? C.faint : C.fg;
           return (
             <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
               {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}

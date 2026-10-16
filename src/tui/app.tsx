@@ -13,8 +13,8 @@ import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { formatSessionTranscript } from "./session/transcript";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { probe } from "./probes";
 import { Announcer, type AnnouncePhase } from "./announce";
@@ -176,6 +176,48 @@ const ALLOWED_MODELS = [
   { label: "GLM-5.3-Flash", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "GLM-5.3-Flash", isDefault: true },
   { label: "GLM-5.3", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "GLM-5.3", isDefault: false },
 ] as const;
+
+// ── PLANS MODEL CATALOG (sol HIGH consult 2026-10-16, slice 1 "route model") ──
+// Law: selectable = approved exact route AND backend supports it AND auth ready
+// AND entitlement permits. Catalog discovery adds INFORMATIONAL rows only —
+// they can be displayed but never become executable routes. ZCode's
+// coding-plan-cache.json says nothing about AutoClaw entitlement, and AutoClaw
+// auth (credentials.enc, in-process) is NOT obtainable from this TUI — so the
+// AutoClaw group is read-only with honest unavailable states. No silent
+// billing fallback; commit selection only after backend acceptance/readback.
+type PlanId = "zai-coding-plan" | "zai-start-plan" | "autoclaw";
+type RouteBackend = "zcode" | "autoclaw";
+interface PlanModelRoute {
+  planId: PlanId;
+  backend: RouteBackend;
+  providerId?: string;   // set only for executable zcode routes
+  modelId?: string;      // set only for executable zcode routes
+  label: string;
+  description?: string;
+  disabled: boolean;
+  disabledReason?: string;
+}
+const AUTOCLAW_CATALOG: readonly { label: string; id: string; credit?: string }[] = [
+  { label: "Auto", id: "zai_auto" },
+  { label: "Auto-Fast", id: "zai_auto-fast" },
+  { label: "GLM-5.3", id: "zaicoding_glm-5.3", credit: "High" },
+  { label: "GLM-5.3-Flash", id: "zai_glm-5.3-flash", credit: "Low" },
+];
+// Read ZCode plan entitlements (~/.zcode/v2/coding-plan-cache.json). Timestamped
+// evidence, not authorization: stale/missing ⇒ "unknown". Never implies
+// AutoClaw entitlement (a different product, account, and meter).
+const readPlanEntitlements = (): Record<string, { status: string; reason?: string }> => {
+  try {
+    const raw = readFileSync(join(homedir(), ".zcode", "v2", "coding-plan-cache.json"), "utf8");
+    const parsed = JSON.parse(raw) as { entryStatus?: { items?: Record<string, { status?: string; reason?: string }> } };
+    const items = parsed.entryStatus?.items ?? {};
+    const out: Record<string, { status: string; reason?: string }> = {};
+    for (const [k, v] of Object.entries(items)) out[k.replace(/^builtin:/, "")] = { status: v.status ?? "unknown", reason: v.reason };
+    return out;
+  } catch {
+    return {};
+  }
+};
 
 const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
 // v2 displayVersion: a 40/64-hex commit pin renders as the short sha, a
@@ -3361,12 +3403,43 @@ export function App({
       const metas: string[] = [];
       if (favKeys.includes(modelKey(m))) metas.push("★");
       if (recentKeys.includes(modelKey(m))) metas.push("recent");
-      return { id: m.modelId, label: modelLabel(m), description: `${m.providerId}/${m.modelId}`, meta: metas.join(" · ") || undefined, value: m };
+      return {
+        id: m.modelId, label: modelLabel(m),
+        description: `${m.providerId}/${m.modelId}`,
+        meta: metas.join(" · ") || undefined,
+        group: m.providerLabel ?? "ZCode Coding Plan",
+        value: m,
+      };
     });
+    // ── Plans sections (sol HIGH 2026-10-16, slice 1): informational groups.
+    // Entitlements from ~/.zcode/v2/coding-plan-cache.json (ZCode plans only —
+    // it says NOTHING about AutoClaw). AutoClaw rows are READ-ONLY: its auth
+    // (credentials.enc) is in-process to the desktop, so selection is
+    // impossible from this TUI today; the rows carry honest credit levels
+    // from the measured catalog, never invented prices.
+    const planEnt = readPlanEntitlements();
+    const planOpts: DialogOption<ModelChoice>[] = [];
+    const starter = planEnt["zai-start-plan"];
+    planOpts.push({
+      id: "plan:zai-start-plan", group: "ZCode Starter Plan", value: models[0],
+      label: "ZCode Starter Plan",
+      description: starter?.status === "available" ? "available" : `unavailable: ${starter?.reason ?? starter?.status ?? "unknown"}`,
+      disabled: true,
+    });
+    for (const m of AUTOCLAW_CATALOG) {
+      planOpts.push({
+        id: `autoclaw:${m.id}`, group: "AutoClaw · separate account · AutoClaw credits", value: models[0],
+        label: m.label,
+        description: `1M ctx${m.credit ? ` · credit level: ${m.credit}` : ""}`,
+        meta: "not switchable from this TUI",
+        disabled: true,
+      });
+    }
+    const allOpts = [...modelOpts, ...planOpts].map((o) => ({ ...o })) as DialogOption<ModelChoice>[];
     return (
       <SelectDialog
         title="Model"
-        options={modelOpts}
+        options={allOpts}
         footerHints={[
           { key: "enter", label: "select" },
           { key: "ctrl+f", label: "favorite" },
