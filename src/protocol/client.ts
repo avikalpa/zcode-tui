@@ -71,10 +71,22 @@ export class AppServer {
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
+    let stderrTail = "";
     proc.on("exit", (code) => {
+      // Honest diagnostics: desktop-first ZCode builds exit(1) on a headless
+      // spawn when their provider config never landed in ~/.zcode/v2/config
+      // (the runtime then probes /config). dev/oc builds serve app-server
+      // without any of this - host that accordingly.
+      const detail = code !== 0
+        ? stderrTail.includes("zcode-builtin")
+          ? " - this ZCode build could not locate its provider config for a headless spawn. Fix: cp /opt/ZCode/resources/config/provider/zcode-builtin.json ~/.zcode/v2/config/provider/ or run dream/work legs on a servable host (dev/oc)."
+          : stderrTail
+            ? ` - stderr: ${stderrTail.slice(-200)}`
+            : ""
+        : "";
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
-        p.reject(new Error(`app-server exited (${code})`));
+        p.reject(new Error(`app-server exited (${code})${detail}`));
       }
       this.pending.clear();
       if (!this.closing) {
@@ -83,7 +95,10 @@ export class AppServer {
       }
     });
     proc.stderr?.setEncoding("utf8");
-    proc.stderr?.on("data", (c: string) => this.opts.onStderr?.(c));
+    proc.stderr?.on("data", (c: string) => {
+      stderrTail = (stderrTail + c).slice(-400);
+      this.opts.onStderr?.(c);
+    });
     proc.stdout?.setEncoding("utf8");
     proc.stdout?.on("data", (c: string) => this.#ingest(c));
     return proc;
