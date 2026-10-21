@@ -18,10 +18,34 @@ if (args.includes("--version") || args.includes("-V") || !process.stdin.isTTY) {
   console.log(`zcode-tui ${version}`);
   if (args.includes("--version") || args.includes("-V")) process.exit(0);
 }
+// Headless worker verb: one session, one brief, transcript out. No TTY
+// needed - this is how other agents run zcode-tui (owner directive
+// 2026-10-21: dream composers + the z.ai batch executor ride this).
+if (args[0] === "run") {
+  const bunCandidates = [
+    process.env.BUN_INSTALL && join(process.env.BUN_INSTALL, "bin", "bun"),
+    join(homedir(), ".bun", "bin", "bun"),
+    "bun",
+  ].filter(Boolean);
+  const bun = bunCandidates.find((c) => c === "bun" || existsSync(c));
+  if (!bun) {
+    console.error("zcode-tui run needs bun (https://bun.sh).");
+    process.exit(1);
+  }
+  const p = spawn(bun, [join(pkg, "src/bin/run.ts"), ...args.slice(1)], { stdio: "inherit" });
+  p.on("exit", (c) => process.exit(c ?? 0));
+}
 if (args.includes("--help") || args.includes("-h")) {
   console.log("zcode-tui - a TUI for the ZCode runtime (GPL-3.0-or-later)");
   console.log("usage: zcode-tui [--resume <sessionId>] [--model <modelId>]");
+  console.log("       zcode-tui run --content-file BRIEF.md --workspace DIR [--model ID]");
   console.log("requires bun (https://bun.sh) or a compiled dist/zcode-tui binary");
+  process.exit(0);
+}
+// A TTY-less bare invocation must not boot the full-screen UI (it would hang
+// the caller). Print the identity and exit honestly; `run` was handled above.
+if (!process.stdin.isTTY && !args.includes("--version") && !args.includes("-V")) {
+  console.log("zcode-tui: no TTY - use `zcode-tui run --content-file ... --workspace ...` for headless work.");
   process.exit(0);
 }
 
