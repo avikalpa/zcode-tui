@@ -96,7 +96,7 @@ function cmdEnqueue(db: Database, v: Record<string, string | boolean | undefined
   }
   db.query(`INSERT INTO tasks (id,route,title,prompt,prompt_file,prompt_sha256,workspace,model,priority,status,
     attempts,max_attempts,next_eligible_at,created_at,updated_at,started_at,finished_at,last_error,last_exit,run_log,result_ref,expect_file)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(t.id, t.route, t.title, t.prompt, t.prompt_file, t.prompt_sha256, t.workspace, t.model, t.priority, t.status,
       t.attempts, t.max_attempts, t.next_eligible_at, t.created_at, t.updated_at, t.started_at, t.finished_at,
       t.last_error, t.last_exit, t.run_log, t.result_ref, t.expect_file);
