@@ -10,8 +10,9 @@ const sv = new AppServer({}, { onStderr: (c) => process.stderr.write(c.slice(0, 
 const res = (await sv.request("workspace/readState", {
   workspace: { workspacePath: values.workspace, workspaceKey: values.workspace },
 }, 30000)) as Record<string, unknown>;
-const cat = (res as Record<string, unknown>).modelCatalog ?? {} as Record<string, unknown>;
-for (const [i, e] of ((cat as Record<string, unknown>).available ?? [] as unknown[]).entries()) {
+const cat = ((res as Record<string, unknown>).modelCatalog ?? {}) as Record<string, unknown>;
+const available = (cat.available ?? []) as unknown[];
+for (const [i, e] of available.entries()) {
   const { reasoning, ...rest } = e as Record<string, unknown>;
   void reasoning;
   console.log(JSON.stringify({ i, ...rest }));
