@@ -14,7 +14,7 @@
 // Route policy (peak window Mon-Fri 11:30-15:30 IST blocks zai-coding-plan
 // and autoclaw) mirrors tools/zai_peak_window.py — see src/queue/core.ts.
 import { parseArgs } from "node:util";
-import { mkdirSync, appendFileSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, appendFileSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
@@ -38,6 +38,9 @@ export function openDb(stateDir: string): Database {
   mkdirSync(stateDir, { recursive: true });
   const db = new Database(join(stateDir, "queue.sqlite3"));
   db.exec(SCHEMA_SQL);
+  // Forward migrations for DBs created before a column existed.
+  const cols = new Set((db.query(`PRAGMA table_info(tasks)`).all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has("expect_file")) db.exec(`ALTER TABLE tasks ADD COLUMN expect_file TEXT NOT NULL DEFAULT ''`);
   return db;
 }
 
@@ -85,17 +88,18 @@ function cmdEnqueue(db: Database, v: Record<string, string | boolean | undefined
     next_eligible_at: now, created_at: now, updated_at: now,
     started_at: null, finished_at: null, last_error: "", last_exit: null,
     run_log: "", result_ref: "",
+    expect_file: v["expect-file"] ? String(v["expect-file"]) : "",
   };
   if (ROUTES[route] && !ROUTES[route].available) {
     console.error(`queue: NOTE — route '${route}' is config-ready but NOT dispatchable today: ${ROUTES[route].unavailableReason}`);
     console.error("queue: task enqueued anyway; serve will hold it until the route becomes available.");
   }
   db.query(`INSERT INTO tasks (id,route,title,prompt,prompt_file,prompt_sha256,workspace,model,priority,status,
-    attempts,max_attempts,next_eligible_at,created_at,updated_at,started_at,finished_at,last_error,last_exit,run_log,result_ref)
+    attempts,max_attempts,next_eligible_at,created_at,updated_at,started_at,finished_at,last_error,last_exit,run_log,result_ref,expect_file)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(t.id, t.route, t.title, t.prompt, t.prompt_file, t.prompt_sha256, t.workspace, t.model, t.priority, t.status,
       t.attempts, t.max_attempts, t.next_eligible_at, t.created_at, t.updated_at, t.started_at, t.finished_at,
-      t.last_error, t.last_exit, t.run_log, t.result_ref);
+      t.last_error, t.last_exit, t.run_log, t.result_ref, t.expect_file);
   const pos = positionOf(db, t.id);
   console.log(`queued ${t.id} route=${route} position=${pos} attempts_cap=${t.max_attempts}`);
   if (v.json) console.log(JSON.stringify({ id: t.id, route, position: pos }));
@@ -415,7 +419,8 @@ export class QueueServer {
       if (m) resultRef = m[1];
     }
 
-    if (res.code === 0 && (task.route !== "zai-offpeak" || resultRef)) {
+    const expectOk = !task.expect_file || existsSync(task.expect_file);
+    if (res.code === 0 && expectOk && (task.route !== "zai-offpeak" || resultRef)) {
       this.finish(task.id, attempts, "completed", res.code, "", resultRef, runLog);
       this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "completed", dur_ms: durMs });
       this.log(`done ${task.id} completed in ${Math.round(durMs / 1000)}s${resultRef ? ` (${resultRef})` : ""}`);
@@ -508,6 +513,7 @@ async function main() {
       "metrics-ms": { type: "string", default: "30000" },
       routes: { type: "string", default: "" },
       "state-dir": { type: "string", default: "" },
+      "expect-file": { type: "string", default: "" },
       "dry-run": { type: "boolean", default: false },
     },
   });

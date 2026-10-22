@@ -122,13 +122,13 @@ function makeServer(spawnFn: SpawnFn, now: () => number, routes: RouteName[] = [
 function insertTask(db: ReturnType<typeof openDb>, over: Record<string, unknown> = {}) {
   const now = 1_700_000_000_000;
   db.query(`INSERT INTO tasks (id,route,title,prompt,prompt_file,prompt_sha256,workspace,model,priority,status,
-    attempts,max_attempts,next_eligible_at,created_at,updated_at,started_at,finished_at,last_error,last_exit,run_log,result_ref)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    attempts,max_attempts,next_eligible_at,created_at,updated_at,started_at,finished_at,last_error,last_exit,run_log,result_ref,expect_file)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(
       String(over.id ?? "ztq-test"), String(over.route ?? "opencode-free"), String(over.title ?? "t"), "do the thing",
       "/tmp/p.md", "x", "/tmp", String(over.model ?? ""), 100, "queued",
       Number(over.attempts ?? 0), Number(over.max_attempts ?? 3), Number(over.next_eligible_at ?? 0),
-      now, now, null, null, "", null, "", "",
+      now, now, null, null, "", null, "", "", String(over.expect_file ?? ""),
     );
 }
 
@@ -245,6 +245,14 @@ describe("QueueServer state machine", () => {
     insertTask(db, { route: "autoclaw" });
     await srv.tick();
     expect((db.query(`SELECT status FROM tasks`).get() as { status: string }).status).toBe("queued");
+  });
+
+  test("rc0 without the expected deliverable is NOT completed (honesty gate)", async () => {
+    const { db, srv } = makeServer(fakeSpawn(0, "all done"), () => 1_700_000_000_000);
+    insertTask(db, { expect_file: "/tmp/ztq-does-not-exist-9177.md" });
+    await srv.tick();
+    await new Promise((r) => setTimeout(r, 20));
+    expect((db.query(`SELECT status FROM tasks`).get() as { status: string }).status).toBe("retry_wait");
   });
 });
 
