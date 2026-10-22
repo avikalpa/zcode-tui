@@ -1,0 +1,27 @@
+# zcode-tui worker queue — the fleet dream dispatcher (owner directive
+# 2026-10-22). Run as a USER unit on an always-on host (dev):
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/zcode-tui-queue.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now zcode-tui-queue
+#   loginctl enable-linger $USER   # survive logout (already on dev)
+# State: ~/.local/state/zcode-tui/queue (SQLite WAL + run logs + metrics).
+[Unit]
+Description=zcode-tui worker queue (dream dispatcher, unofficial client)
+Documentation=https://github.com/avikalpa/zcode-tui
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/gh/zcode-tui
+ExecStart=%h/.bun/bin/bun run src/bin/queue.ts serve
+Restart=always
+RestartSec=10
+Environment=PATH=%h/.bun/bin:%h/.yggterm/ynpm/bin:/usr/local/bin:/usr/bin:/bin
+Environment=BUN_INSTALL=%h/.bun
+# Journald keeps dispatch lines; full transcripts/metrics live in the state dir.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

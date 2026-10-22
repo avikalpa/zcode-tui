@@ -18,10 +18,11 @@ if (args.includes("--version") || args.includes("-V") || !process.stdin.isTTY) {
   console.log(`zcode-tui ${version}`);
   if (args.includes("--version") || args.includes("-V")) process.exit(0);
 }
-// Headless worker verb: one session, one brief, transcript out. No TTY
-// needed - this is how other agents run zcode-tui (owner directive
-// 2026-10-21: dream composers + the z.ai batch executor ride this).
-if (args[0] === "run") {
+// Headless worker verbs: no TTY needed — run (one session, owner directive
+// 2026-10-21), queue (fleet worker queue, 2026-10-22), idle (ZCode idle-time
+// tasks client). All execute under bun straight from the repo tree.
+const headlessVerbs = { run: "run.ts", queue: "queue.ts", idle: "idle.ts" };
+if (headlessVerbs[args[0]]) {
   const bunCandidates = [
     process.env.BUN_INSTALL && join(process.env.BUN_INSTALL, "bin", "bun"),
     join(homedir(), ".bun", "bin", "bun"),
@@ -29,16 +30,19 @@ if (args[0] === "run") {
   ].filter(Boolean);
   const bun = bunCandidates.find((c) => c === "bun" || existsSync(c));
   if (!bun) {
-    console.error("zcode-tui run needs bun (https://bun.sh).");
+    console.error(`zcode-tui ${args[0]} needs bun (https://bun.sh).`);
     process.exit(1);
   }
-  const p = spawn(bun, [join(pkg, "src/bin/run.ts"), ...args.slice(1)], { stdio: "inherit" });
+  const p = spawn(bun, [join(pkg, "src/bin", headlessVerbs[args[0]]), ...args.slice(1)], { stdio: "inherit" });
   p.on("exit", (c) => process.exit(c ?? 0));
 }
 if (args.includes("--help") || args.includes("-h")) {
   console.log("zcode-tui - a TUI for the ZCode runtime (GPL-3.0-or-later)");
   console.log("usage: zcode-tui [--resume <sessionId>] [--model <modelId>]");
   console.log("       zcode-tui run --content-file BRIEF.md --workspace DIR [--model ID]");
+  console.log("       zcode-tui queue enqueue --prompt-file F --workspace DIR --route R");
+  console.log("       zcode-tui queue list|status|serve   (fleet worker queue)");
+  console.log("       zcode-tui idle list|create          (ZCode idle-time tasks)");
   console.log("requires bun (https://bun.sh) or a compiled dist/zcode-tui binary");
   process.exit(0);
 }

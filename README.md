@@ -38,6 +38,18 @@ can be distributed to the rest of the yggterm fleet. For source development,
 run `bun install && bun run tui` (bun ≥ 1.1), then publish or distribute the
 dev build with `ynpm dev`.
 
+## Fleet worker queue (0.7.2)
+
+Headless verbs beyond `run`: the **worker queue** (`queue enqueue|list|status|serve`)
+dispatches briefs across funding routes with fault tolerance (attempt cap 3,
+refusal-cooldown parsing, 30/60/120s+jitter backoff, one in-flight per route),
+and **idle** (`idle list|create`) speaks ZCode's Idle-time-task surface as an
+unofficial client — `idle create` drives the runtime's own `OffPeakCreate`
+tool; `idle list` is a read-only view of the Automations panel's table.
+Peak-window law (Mon–Fri 11:30–15:30 IST blocks Z.AI subscription routes) is
+enforced in the dispatcher. Serve installs as a systemd user unit
+(`systemd/zcode-tui-queue.service`). Details: `docs/queue.md`.
+
 ## Auth
 
 zcode-tui's auth IS the zcode machine settings. At startup it syncs the
