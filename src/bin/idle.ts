@@ -71,6 +71,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
 
   let sawToolResult = "";
   let refusal = "";
+  let lastToolError = "";
   let lastEventAt = Date.now();
   let sessionId = "";
   const events: { ms: number; kind: string; summary: string }[] = [];
@@ -86,6 +87,10 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       events.push({ ms: Date.now(), kind, summary: text.slice(0, 200) });
       if (text.includes("offPeakTaskId") || text.includes("Created idle-time task")) sawToolResult = text.slice(0, 4000);
       if (/free tier|limit reached|can create another task/i.test(text)) refusal = text.slice(0, 800);
+      // Extract the error MESSAGE (not the JSON preamble) so the queue's
+      // classifier can pattern-match service-transient refusals in the tail.
+      const errMsg = (p.error as Record<string, unknown> | undefined)?.message;
+      if (typeof errMsg === "string" && errMsg) lastToolError = errMsg.slice(0, 400);
     },
     onServerRequest: (m) => {
       const method = String(m.method), id = String(m.id);
@@ -166,11 +171,9 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       process.exit(3); // queue serve parses the cooldown from this output
     }
     console.error(`idle create: no OffPeakCreate result observed (tool unavailable or turn empty) — transcript: ${out}`);
-    // Surface the last tool error verbatim: the queue's classifier reads
-    // this tail (service-transient refusals park the route, not the task).
-    const toolErr = [...events].reverse().find((e) => e.kind === "tool_error" || e.kind === "error"
-      || e.summary.includes("\"error\""));
-    if (toolErr) console.error(`idle create: last tool error: ${toolErr.summary.slice(0, 300)}`);
+    // Surface the last tool error message verbatim: the queue's classifier
+    // reads this tail (service-transient refusals park the route, not the task).
+    if (lastToolError) console.error(`idle create: last tool error: ${lastToolError}`);
     await sv.close();
     process.exit(4);
   } catch (e) {
