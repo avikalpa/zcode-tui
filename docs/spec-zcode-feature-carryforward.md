@@ -28,11 +28,16 @@ strings, then probing them against a servable app-server:
   found as dispatch-table keys (`automationCreate: "automation/create"`,
   …). Trigger/schedule vocabulary co-located (`trigger`, `schedule`,
   `triggerbindings`, `triggertemplates`).
-- MEASURED: dev's app-server build answers `automation/list` with
-  **Method not found** → the Automations panel is NOT served by this
-  app-server build. Working hypothesis: the desktop main process serves
-  it (possibly backed by the Z.AI cloud account — the creation cooldown
-  "Free tier limit reached … in 4 hr 38 min" is server-enforced state).
+- MEASURED (2026-10-22, both hosts): dev's app-server AND jojo's
+  app-server (same packaged build as the desktop showing the panel, after
+  fixing its provider-config servability) both answer `automation/list`
+  with **Method not found** → the Automations panel is served by the
+  desktop MAIN process (Electron main side — likely backed by the Z.AI
+  cloud account; the creation cooldown "Free tier limit reached … in
+  4 hr 38 min" is server-enforced state). The dispatch-table keys in the
+  runtime bundle belong to the desktop main ↔ cloud/renderer channel,
+  not the app-server protocol. CONFIRMED: app-server mode never routes
+  automations on any host tested.
 - Per-host capability must therefore be DISCOVERED (probe + version),
   never assumed. `zcode-tui automations list` on an unservable host
   reports the gap honestly instead of failing.
@@ -82,7 +87,12 @@ strings, then probing them against a servable app-server:
 
 ## 5. Slices
 
-- **S1 (this commit): the discovery verb.** `zcode-tui automations list`
+- **S0 (measured 2026-10-22): automations are NOT app-server-reachable.**
+  Interim path for the dream batch: desktop-interface automation (HID
+  class, on the host whose desktop owns the tasks) OR the upstream ask.
+  zcode-tui still ships the S1 capability probe so fleet schedulers can
+  verify per host/build.
+- **S1: the capability probe verb.** `zcode-tui automations list`
   probes the method family on the host's runtime and prints the
   capability verdict + any returned tasks; `--json` for machines.
   Discovery of the serving channel (desktop main vs app-server vs cloud)
@@ -98,11 +108,15 @@ strings, then probing them against a servable app-server:
 
 ## 6. Open questions (blocking S2)
 
-- Which channel serves `automation/*` (desktop main process? cloud REST?
-  a newer app-server build?) — candidates to test: jojo's desktop runtime
-  (provider-config quirk must be solved first), a protocol trace of the
-  desktop while clicking "Create idle-time task" (the microscope pattern
-  from 0.6.38), and newer ZCode builds.
+- RESOLVED 2026-10-22: the channel is the desktop main process (measured
+  on jojo: app-server answers Method-not-found even with the desktop's
+  own build and a servable spawn). Remaining: recover the main-process
+  params schema via a desktop protocol trace while creating an idle-time
+  task, or an upstream ask to expose automations in app-server mode.
+- Also queued: run.ts --model must map string ids to {modelId,
+  providerId:"zai"} object refs (session/create rejects strings —
+  measured); idle-plan models are catalog-invisible (black box) until
+  upstream exposure.
 - The exact create-params schema (prompt, kind=idle, queue binding,
   schedule) — recover from the desktop main bundle or a traced session.
 - Whether idle-task execution requires the desktop awake on the machine
