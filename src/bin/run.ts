@@ -18,6 +18,7 @@ const { values } = parseArgs({
     "content-file": { type: "string" },
     workspace: { type: "string", default: process.cwd() },
     model: { type: "string", default: "" },
+    provider: { type: "string", default: "zai" },
     "collect-ms": { type: "string", default: "900000" },
     "quiet-sec": { type: "string", default: "150" },
     out: { type: "string", default: "/tmp/zt-run-transcript.json" },
@@ -116,9 +117,22 @@ async function main() {
     mode: "build",
     persistence: "immediate",
   };
-  if (values.model) createParams.model = values.model;
+  if (values.model) {
+    // 0.7.2: session/create takes an OBJECT ref {modelId, providerId};
+    // a string id is mapped with the --provider route (default zai).
+    try {
+      createParams.model = JSON.parse(values.model);
+    } catch {
+      createParams.model = { modelId: values.model, providerId: values.provider || "zai" };
+    }
+  }
   const created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
-  sessionId = String((created.session ?? created) as Record<string, unknown>["sessionId"]);
+  const sAny = (created.session ?? created) as unknown;
+  sessionId = typeof sAny === "string"
+    ? sAny
+    : String((sAny as Record<string, unknown>)?.sessionId
+      ?? Object.values(sAny ?? {}).find((v) => typeof v === "string" && String(v).startsWith("sess_"))
+      ?? "");
   console.log(`zt-run: session ${sessionId} model=${values.model || "(config default)"}`);
   await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true });
   await sv.request("session/send", { sessionId, content });
