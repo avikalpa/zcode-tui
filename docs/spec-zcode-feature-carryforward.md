@@ -123,3 +123,20 @@ strings, then probing them against a servable app-server:
   that owns the task (the "keep computer awake" toggle suggests yes) —
   this decides which fleet host should own dream idle-tasks (dev/oc are
   always-on; jojo sleeps).
+
+## 7. Replication map for Idle-time tasks (owner question 2026-10-22: "jojo + other hosts?")
+
+The automation splits into three tiers with different answers per host:
+
+| Tier | jojo (desktop host) | dev / oc (headless) |
+|---|---|---|
+| **Create** (register 3/day idle tasks) | Interim: HID drive of the ZCode window (works today). Proper: recover the desktop-main create channel via protocol trace. | NOT POSSIBLE — no desktop; task registration is desktop-main + server-account scoped. |
+| **Execute** (idle compute runs the task) | Native — ZCode desktop runs tasks when the machine is idle (this is Z.AI's design: the owner's idle local compute). | NOT POSSIBLE — the idle compute privilege is tied to the desktop identity/machine. |
+| **Consume results** | Native (same store). | FULLY POSSIBLE — task runs create sessions in the shared store; zcode-tui `session/resume`, sessions-index, and ygg-memory ingest all work. |
+
+Bottom line: jojo replicates creation (interim HID, proper via trace); the
+other hosts consume results. No host other than the desktop owner-machine
+can host execution — that is Z.AI's design, not a gap we can close.
+Fleet integration therefore = HID-created tasks on jojo + fleet-wide
+result consumption + the existing protocol-composable dream routes
+(zt-run/codex/opencode) everywhere else.
