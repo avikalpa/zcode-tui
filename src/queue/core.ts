@@ -132,6 +132,9 @@ export function parseCooldownMs(text: string): number | null {
 }
 
 const REFUSAL_CONTEXT = /limit|quota|tier|rate|again|cooldown|capacity|free tier|usage|throttl/i;
+const STRONG_USAGE_LIMIT = /free usage limit|usage limit reached|rate limit|quota (exceeded|reached)/i;
+/** Heuristic park for route-level limits that refuse without a timestamp. */
+export const UNTIMED_LIMIT_PARK_MS = 3 * 3_600_000;
 const AUTHISH = /auth|credential|api[ _-]?key|permission|forbidden|unauthorized|invalid model|unsupported model/i;
 
 export type FailureKind = "cooldown" | "auth" | "retry" | "terminal-cap";
@@ -159,6 +162,12 @@ export function classifyFailure(
   const cd = parseCooldownMs(tail);
   if (cd !== null && cd > 0 && REFUSAL_CONTEXT.test(tail)) {
     return { kind: "cooldown", cooldownMs: cd, next_eligible_at: nowMs + cd + 60_000, note: "refusal cooldown parsed" };
+  }
+  if (STRONG_USAGE_LIMIT.test(tail)) {
+    // Route-level exhaustion refusing WITHOUT a timestamp (measured:
+    // opencode "Free usage limit reached" carries no time). Park the route
+    // on a heuristic window instead of burning every queued task to cap.
+    return { kind: "cooldown", cooldownMs: UNTIMED_LIMIT_PARK_MS, next_eligible_at: nowMs + UNTIMED_LIMIT_PARK_MS, note: "untimed usage limit — heuristic 3h park" };
   }
   if (AUTHISH.test(tail)) {
     return { kind: "auth", note: "deterministic auth/config error — no retry" };
