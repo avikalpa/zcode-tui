@@ -89,6 +89,11 @@ describe("classifyFailure", () => {
     expect(p.kind).toBe("cooldown");
     expect(p.cooldownMs).toBe(3 * 3_600_000);
   });
+  test("service-transient refusal parks the route 2h", () => {
+    const p = classifyFailure("idle create: last tool error: {\"error\":{\"message\":\"Cannot verify whether this session already has a pending idle-time task; try again later.\"}}", 1, 3, t0);
+    expect(p.kind).toBe("cooldown");
+    expect(p.cooldownMs).toBe(2 * 3_600_000);
+  });
   test("auth is terminal", () => {
     expect(classifyFailure("Error: invalid api key", 1, 3, t0).kind).toBe("auth");
   });
