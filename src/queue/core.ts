@@ -133,6 +133,11 @@ export function parseCooldownMs(text: string): number | null {
 
 const REFUSAL_CONTEXT = /limit|quota|tier|rate|again|cooldown|capacity|free tier|usage|throttl/i;
 const STRONG_USAGE_LIMIT = /free usage limit|usage limit reached|rate limit|quota (exceeded|reached)/i;
+/** Service-side transient refusals (OffPeakCreate ticket service: "Cannot
+ *  verify … try again later" — measured 2026-10-23) park longer than the
+ *  30/60/120s ladder; minutes-scale retries only burn dispatcher turns. */
+export const SERVICE_TRANSIENT_PARK_MS = 2 * 3_600_000;
+const SERVICE_TRANSIENT = /cannot verify|try again later|service is unreachable|temporarily unavailable/i;
 /** Heuristic park for route-level limits that refuse without a timestamp. */
 export const UNTIMED_LIMIT_PARK_MS = 3 * 3_600_000;
 const AUTHISH = /auth|credential|api[ _-]?key|permission|forbidden|unauthorized|invalid model|unsupported model/i;
@@ -168,6 +173,9 @@ export function classifyFailure(
     // opencode "Free usage limit reached" carries no time). Park the route
     // on a heuristic window instead of burning every queued task to cap.
     return { kind: "cooldown", cooldownMs: UNTIMED_LIMIT_PARK_MS, next_eligible_at: nowMs + UNTIMED_LIMIT_PARK_MS, note: "untimed usage limit — heuristic 3h park" };
+  }
+  if (SERVICE_TRANSIENT.test(tail)) {
+    return { kind: "cooldown", cooldownMs: SERVICE_TRANSIENT_PARK_MS, next_eligible_at: nowMs + SERVICE_TRANSIENT_PARK_MS, note: "service-side transient — heuristic 2h park" };
   }
   if (AUTHISH.test(tail)) {
     return { kind: "auth", note: "deterministic auth/config error — no retry" };

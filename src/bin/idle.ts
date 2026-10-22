@@ -166,6 +166,11 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       process.exit(3); // queue serve parses the cooldown from this output
     }
     console.error(`idle create: no OffPeakCreate result observed (tool unavailable or turn empty) — transcript: ${out}`);
+    // Surface the last tool error verbatim: the queue's classifier reads
+    // this tail (service-transient refusals park the route, not the task).
+    const toolErr = [...events].reverse().find((e) => e.kind === "tool_error" || e.kind === "error"
+      || e.summary.includes("\"error\""));
+    if (toolErr) console.error(`idle create: last tool error: ${toolErr.summary.slice(0, 300)}`);
     await sv.close();
     process.exit(4);
   } catch (e) {
