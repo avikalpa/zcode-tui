@@ -226,6 +226,7 @@ export function buildCommand(
     case "zai-offpeak": {
       // Runs against jojo (ticket + row land in jojo's task index; jojo's
       // desktop/runtime executes queued tickets). Prompt rides stdin.
+      // Keepalives: a bare rc=255 (dropped ssh) killed a live attempt once.
       const inner = [
         `cd ${ctx.repo} && ${bun} run src/bin/idle.ts create`,
         "--prompt-file", "-", "--out", ctx.runLog, "--json",
@@ -233,7 +234,14 @@ export function buildCommand(
       ];
       if (task.title) inner.push("--title", JSON.stringify(task.title.slice(0, 120)));
       if (task.model) inner.push("--model", JSON.stringify(task.model));
-      const cmd = ["ssh", ROUTES["zai-offpeak"].remoteHost!, inner.join(" ")];
+      const cmd = [
+        "ssh",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=4",
+        "-o", "ConnectTimeout=10",
+        ROUTES["zai-offpeak"].remoteHost!,
+        inner.join(" "),
+      ];
       return { cmd, cwd: ctx.repo, stdin: task.prompt };
     }
     case "opencode-free": {
