@@ -84,6 +84,11 @@ describe("classifyFailure", () => {
   test("quota without parseable time retries", () => {
     expect(classifyFailure("quota exhausted for today", 1, 3, t0).kind).toBe("retry");
   });
+  test("strong usage limit without time parks the route (heuristic)", () => {
+    const p = classifyFailure("Error: Free usage limit reached. Connect a provider or subscribe to keep going.", 1, 3, t0);
+    expect(p.kind).toBe("cooldown");
+    expect(p.cooldownMs).toBe(3 * 3_600_000);
+  });
   test("auth is terminal", () => {
     expect(classifyFailure("Error: invalid api key", 1, 3, t0).kind).toBe("auth");
   });
