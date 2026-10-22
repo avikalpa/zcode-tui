@@ -41,6 +41,18 @@ strings, then probing them against a servable app-server:
 - Per-host capability must therefore be DISCOVERED (probe + version),
   never assumed. `zcode-tui automations list` on an unservable host
   reports the gap honestly instead of failing.
+- BREAKTHROUGH (2026-10-22 late, bundle-mined + measured): idle-task
+  CREATION is session-tool-reachable. The packaged runtime exposes an
+  `OffPeakCreate` agent tool (`offPeakCreateHandler`: schema
+  `{title, prompt, permissionMode?, model?}` → result `{offPeakTaskId,
+  queuePosition?, sessionId?}`) opted into a session via
+  `session/create {offPeakToolEnabled:true}`. The handler calls
+  `offPeakPort.create` → server ticket → `off_peak_tasks` row (with
+  `server_ticket_id`). This is the desktop's own path — no HID, no
+  desktop-main trace needed. `zcode-tui idle create` (0.7.2) drives it;
+  execution still requires a polling runtime on the creating host, so
+  create runs against the desktop host (queue route `zai-offpeak` rides
+  ssh dev→jojo).
 
 ## 3. Observed first-party behavior to replicate (ZCode desktop, screenshot 2026-10-22)
 
@@ -97,10 +109,13 @@ strings, then probing them against a servable app-server:
   capability verdict + any returned tasks; `--json` for machines.
   Discovery of the serving channel (desktop main vs app-server vs cloud)
   is part of the output (`servedBy`).
-- **S2: create/list parity.** `zcode-tui automations create --kind idle
-  --prompt-file F` mapping to `automation/create` once the params schema
-  is recovered (from the desktop main bundle or protocol trace); includes
-  queue-number display and cooldown-aware refusal.
+- **S2: create/list parity.** LANDED for idle-time tasks (0.7.2):
+  `zcode-tui idle list` (read-only off_peak_tasks with queue positions)
+  and `zcode-tui idle create` (drives the OffPeakCreate tool in a
+  session with offPeakToolEnabled:true; cooldown-aware refusal surfaces
+  verbatim with parsed wait). Scheduled/cron automations parity (the
+  desktop-main `automation/create` channel) remains open — the
+  owner-UI-creation protocol trace is still the recovery path there.
 - **S3: dream scaffold integration.** The dream batch executor registers
   its 3 daily jobs (1 BIG + 2 MODERATE) as idle-time tasks via S2, and
   reconciles their Succeeded/Failed states into dream-log telemetry.
@@ -113,10 +128,11 @@ strings, then probing them against a servable app-server:
   own build and a servable spawn). Remaining: recover the main-process
   params schema via a desktop protocol trace while creating an idle-time
   task, or an upstream ask to expose automations in app-server mode.
-- Also queued: run.ts --model must map string ids to {modelId,
-  providerId:"zai"} object refs (session/create rejects strings —
-  measured); idle-plan models are catalog-invisible (black box) until
-  upstream exposure.
+- RESOLVED (0.7.2): run.ts --model maps string ids to {modelId,
+  providerId:"zai"} refs and passes JSON refs verbatim — live-falsified
+  (glm-5.3-flash session settled, MODEL-REF-OK). Idle-plan models stay
+  catalog-invisible upstream (the OffPeakCreate `model` param takes the
+  idle-plan id string; default omits it).
 - The exact create-params schema (prompt, kind=idle, queue binding,
   schedule) — recover from the desktop main bundle or a traced session.
 - Whether idle-task execution requires the desktop awake on the machine
@@ -176,3 +192,25 @@ result consumption + the existing protocol-composable dream routes
   model-ref extraction from an idle-task run, then the fast-catch create
   design (timer from v4/usage/stats or the create-refusal message;
   FCFS 3-task burst with per-task fault tolerance).
+
+## 10. 0.7.2 landing record (2026-10-23 night sitting)
+
+- The worker queue SHIPPED native: `zcode-tui queue enqueue|list|status|
+  serve` (src/bin/queue.ts + src/queue/core.ts), state in
+  ~/.local/state/zcode-tui/queue (SQLite WAL, crash-safe reclaim),
+  fault tolerance per the owner spec (attempt cap 3, "in X hr Y min"
+  refusal parsing → route+task park, 30/60/120s+jitter backoff, one
+  in-flight per route, terminal never retried), routes
+  zai-coding-plan (peak-gated) / zai-offpeak (ssh→desktop host) /
+  opencode-free / codex / autoclaw (honestly unavailable).
+- Live-falsified: systemd serve on dev (user unit, linger); codex
+  dispatch end-to-end (8KB protocol report); untimed "Free usage limit
+  reached" parks the route 3h (measured: opencode free tier exhausted
+  account-wide on dev AND oc tonight); run.ts --model object-ref.
+- Metrics: metrics.jsonl tick/dispatch events carry queue positions
+  (drain series).
+- Remaining for the falsification chain: the off_peak_tasks row from a
+  queue-dispatched idle create (in flight at writing), one idle-task
+  session completing end-to-end (owner's two live tasks running), and
+  the 40/day pressure actuals (opencode parked → tonight's volume ran on
+  codex; zai-offpeak gated by the 3/24h allowance).
