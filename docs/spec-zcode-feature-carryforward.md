@@ -140,3 +140,23 @@ can host execution — that is Z.AI's design, not a gap we can close.
 Fleet integration therefore = HID-created tasks on jojo + fleet-wide
 result consumption + the existing protocol-composable dream routes
 (zt-run/codex/opencode) everywhere else.
+
+## 8. Session-store findings (2026-10-22 late)
+
+- Idle-task runs ARE app-server-addressable: the dream-campaign idle-task
+  sessions live in jojo's session store and `session/resume` works on them
+  (with the standard server-ask handlers). Summary exposes `sessionKind`,
+  `status`, `target`, `workspace`, `traceId` — sessionKind/target are the
+  discriminating fields for listing idle-task sessions (next probe: print
+  them for an idle session vs an ordinary one).
+- The model ref is NOT in the summary; it lives deeper (messages/parts or
+  run records) — next drill: resume + inspect parts, or read the store db
+  read-only.
+- Fleet tools landed from this sitting: `src/bin/session-dump.ts`
+  (session list with full ids), `src/bin/session-model-probe.ts`
+  (resume + field extractor — needs the onServerRequest handlers when
+  copied). These are the microscope's eyes for the create-channel trace.
+- PERMISSION PROTOCOL (owner): the next idle-time task creation happens
+  only after the owner says go — and ideally DURING the armed
+  desktop-channel trace, so the create-schema is recovered in the same
+  act (his 3/24h allowance is not spent on a bare repeat).
