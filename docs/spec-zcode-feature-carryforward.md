@@ -160,3 +160,19 @@ result consumption + the existing protocol-composable dream routes
   only after the owner says go — and ideally DURING the armed
   desktop-channel trace, so the create-schema is recovered in the same
   act (his 3/24h allowance is not spent on a bare repeat).
+
+## 9. v4 gateway breakthrough + probe.ts restored (2026-10-22 late)
+
+- The app-server's **v4 gateway IS routed** (unlike automation/*):
+  `v4/conversation/workflowRuns` validates params (wants `sessionId`) —
+  workflow runs are per-session and queryable from zcode-tui. This is the
+  register-view path for idle-task runs.
+- `v4/usage/stats` (range: all|7d|30d) works: rich usage telemetry
+  (tokens, cache hit rate, tool error rate, heatmap, favorite model).
+- `v4/offPeak/lifecycle` = Method not found on this build.
+- probe.ts upgraded with the standard server-ask handlers (needed by any
+  probe that resumes sessions) — fold into the next release commit.
+- Pending: workflowRuns{sessionId} first read (interrupted), then the
+  model-ref extraction from an idle-task run, then the fast-catch create
+  design (timer from v4/usage/stats or the create-refusal message;
+  FCFS 3-task burst with per-task fault tolerance).
