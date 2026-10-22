@@ -14,8 +14,8 @@
 // Carry-forward law: client, never reimplementation — we speak the same
 // protocol the desktop speaks; server cooldowns and refusals surface as-is.
 import { parseArgs } from "node:util";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
@@ -132,6 +132,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
     }
     try { await sv.request("session/stop", { sessionId }); } catch { /* already ended */ }
 
+    mkdirSync(dirname(out), { recursive: true }); // --out parent may not exist on a fresh host
     writeFileSync(out, JSON.stringify({ sessionId, title, sawToolResult, refusal, events }, null, 1));
 
     if (sawToolResult) {

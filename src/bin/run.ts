@@ -10,7 +10,8 @@
 // --max-run-min enforces a consumption budget (peak-window guard feeds it);
 // outcome in the transcript is honest: settled | budget | no-events.
 import { parseArgs } from "node:util";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { AppServer } from "../protocol/client";
 
 const { values } = parseArgs({
@@ -98,6 +99,7 @@ const sv = new AppServer({
 function writeTranscript(outcome: string) {
   const elapsedSec = Number(((Date.now() - t0) / 1000).toFixed(1));
   const outPath = String(values.out);
+  mkdirSync(dirname(outPath), { recursive: true }); // --out parent may not exist on a fresh host
   writeFileSync(outPath, JSON.stringify({
     sessionId,
     model: values.model || "(config default)",
