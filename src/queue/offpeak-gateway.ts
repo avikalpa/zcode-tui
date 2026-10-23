@@ -70,6 +70,11 @@ export function gatewayOrigin(): string {
   return process.env.ZCODE_OFFPEAK_ORIGIN ?? "https://zcode.z.ai";
 }
 
+/** Production envelopes payloads under `data`; the desktop's mock is flat. Accept both. */
+function unveil(body: any): any {
+  return (body && typeof body === "object" && "data" in body && body.data != null) ? body.data : body;
+}
+
 async function gatewayFetch(path: string, init: RequestInit & { key?: string } = {}): Promise<{ status: number; body: any; authKind: string }> {
   const origin = gatewayOrigin();
   const key = init.key ?? codingPlanApiKey();
@@ -113,7 +118,8 @@ export async function ticketStatus(ticketIds: string[]): Promise<{ nextPollAfter
       method: "POST", body: JSON.stringify({ ticket_ids: ticketIds.slice(0, 100) }),
     });
     if (status !== 200 || !body) return { tickets: [], error: `status ${status}` };
-    return { nextPollAfter: body.next_poll_after, tickets: body.tickets ?? [] };
+    const payload = unveil(body);
+    return { nextPollAfter: payload.next_poll_after, tickets: payload.tickets ?? [] };
   } catch (e) {
     return { tickets: [], error: e instanceof Error ? e.message : String(e) };
   }
@@ -192,7 +198,8 @@ export async function registerOffPeakTask(input: {
       db2.close();
       return { ok: false, refusal: "Free tier limit reached.", cooldownMs, error: `3103 next_take_at=${body?.data?.next_take_at ?? "?"}` };
     }
-    if (status !== 200 || !body?.ticket_id) {
+    const reg = unveil(body);
+    if (status !== 200 || !reg?.ticket_id) {
       const detail = status === 401
         ? "gateway 401 (stale zcodejwttoken — use the ZCode desktop once to rotate ~/.zcode/v2/credentials.json, then re-enqueue; the task row stays queued for retry)"
         : `ticket registration ${status}: ${JSON.stringify(body)?.slice(0, 200)}`;
@@ -202,10 +209,10 @@ export async function registerOffPeakTask(input: {
       db2.close();
       return { ok: false, refusal: status === 401 ? detail : undefined, error: detail };
     }
-    const position = typeof body.position === "number" ? body.position : undefined;
+    const position = typeof reg.position === "number" ? reg.position : undefined;
     const db2 = new Database(TASKS_INDEX());
     db2.query(`UPDATE off_peak_tasks SET server_ticket_id=?, queue_position=?, updated_at=? WHERE off_peak_task_id=?`)
-      .run(String(body.ticket_id), position ?? null, Date.now(), offPeakTaskId);
+      .run(String(reg.ticket_id), position ?? null, Date.now(), offPeakTaskId);
     db2.close();
     return {
       ok: true,
@@ -257,4 +264,101 @@ export async function handleOffPeakAsk(method: string, params: Record<string, un
     return { ok: false, failureStage: stage, errorCategory: category, errorCode: (res.error ?? res.refusal ?? "unknown").slice(0, 120) };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Execution: poll local tickets, admit through the off-peak anthropic
+// gateway (x-off-peak-ticket-id), settle. This is zcode-tui's equivalent of
+// the desktop main's claim loop + dispatchOffPeakRun — idle tasks run on
+// THIS host with no desktop (owner goal 2026-10-23).
+// ---------------------------------------------------------------------------
+
+export interface LocalTicketRow { offPeakTaskId: string; serverTicketId: string; title: string; prompt: string; status: string; model: string; workspacePath: string }
+
+/** Local rows that hold a server ticket and are not terminal — repair candidates included. */
+export function localExecutableTasks(): LocalTicketRow[] {
+  const db = new Database(TASKS_INDEX(), { readonly: true });
+  try {
+    const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, title, prompt, status, model_selection, workspace_path
+      FROM off_peak_tasks
+      WHERE server_ticket_id IS NOT NULL AND status IN ('queued','running')`).all() as any[];
+    return rows.map((r) => {
+      let model = "GLM-5.3-Flash";
+      try { model = String(JSON.parse(r.model_selection ?? "{}").modelId ?? model); } catch { /* default */ }
+      return { offPeakTaskId: r.off_peak_task_id, serverTicketId: String(r.server_ticket_id), title: r.title ?? "", prompt: r.prompt ?? "", status: r.status, model, workspacePath: r.workspace_path ?? process.cwd() };
+    });
+  } finally { db.close(); }
+}
+
+/**
+ * Adopt orphaned registrations: rows whose ticket id is only visible inside
+ * failure_reason JSON (the runtime tool sometimes reports "unreachable"
+ * AFTER the service accepted the ticket — measured on the canary, position
+ * 628). Returns the adopted ticket ids.
+ */
+export function adoptOrphanedTickets(): { task: string; ticket: string }[] {
+  const db = new Database(TASKS_INDEX());
+  const adopted: { task: string; ticket: string }[] = [];
+  try {
+    const rows = db.query(`SELECT off_peak_task_id, failure_reason FROM off_peak_tasks
+      WHERE server_ticket_id IS NULL AND failure_reason LIKE '%ticket_id%'`).all() as any[];
+    for (const r of rows) {
+      const m = /"ticket_id":"(\d+)"/.exec(String(r.failure_reason ?? ""));
+      const pos = /"position":(\d+)/.exec(String(r.failure_reason ?? ""));
+      if (!m) continue;
+      db.query(`UPDATE off_peak_tasks SET server_ticket_id=?, status='queued', queue_position=?, failure_reason='adopted from runtime registration', updated_at=? WHERE off_peak_task_id=?`)
+        .run(m[1], pos ? Number(pos[1]) : null, Date.now(), r.off_peak_task_id);
+      adopted.push({ task: r.off_peak_task_id, ticket: m[1] });
+    }
+  } finally { db.close(); }
+  return adopted;
+}
+
+export interface PolledTicket { ticketId: string; state: string; position?: number | null; nextPollAfter?: number }
+
+/** Poll the gateway for the given ticket ids (batch). */
+export async function pollTickets(ticketIds: string[]): Promise<{ tickets: PolledTicket[]; nextPollAfter?: number; error?: string }> {
+  const res = await ticketStatus(ticketIds);
+  return {
+    tickets: res.tickets.map((t) => ({ ticketId: t.ticket_id, state: t.state, position: t.position ?? null, nextPollAfter: res.nextPollAfter })),
+    nextPollAfter: res.nextPollAfter,
+    error: res.error,
+  };
+}
+
+/** Off-peak model admission — returns the raw response (streaming passthrough). */
+export async function offPeakMessages(ticketId: string, body: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
+  const key = codingPlanApiKey();
+  const jwt = cloudJwt();
+  return fetch(gatewayOrigin() + "/api/v1/off-peak/anthropic/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(jwt ? { authorization: `Bearer ${jwt}` } : {}),
+      ...(key ? { "x-coding-plan-api-key": key } : {}),
+      "x-off-peak-ticket-id": ticketId,
+    },
+    body,
+    signal: init.signal,
+  });
+}
+
+/** Mark the ticket settled after a completed run. */
+export async function settleTicket(ticketId: string): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const { status, body } = await gatewayFetch(`/api/v1/off-peak/ticket/${encodeURIComponent(ticketId)}/settle`, { method: "POST", body: "{}" });
+    return { ok: status === 200, detail: `${status} ${JSON.stringify(body ?? {}).slice(0, 120)}` };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Mark the local row running/completed/failed (desktop row conventions). */
+export function setLocalTaskState(offPeakTaskId: string, status: string, patch: { startedAt?: number; endedAt?: number; failureReason?: string; queuePosition?: number | null } = {}): void {
+  const db = new Database(TASKS_INDEX());
+  try {
+    db.query(`UPDATE off_peak_tasks SET status=?, started_at=COALESCE(?, started_at), ended_at=COALESCE(?, ended_at),
+        failure_reason=COALESCE(?, failure_reason), queue_position=COALESCE(?, queue_position), updated_at=? WHERE off_peak_task_id=?`)
+      .run(status, patch.startedAt ?? null, patch.endedAt ?? null, patch.failureReason ?? null, patch.queuePosition ?? null, Date.now(), offPeakTaskId);
+  } finally { db.close(); }
 }

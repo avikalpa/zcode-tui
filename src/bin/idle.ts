@@ -20,7 +20,14 @@ import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
 import { parseCooldownMs } from "../queue/core";
-import { handleOffPeakAsk, ticketAvailability } from "../queue/offpeak-gateway";
+import { handleOffPeakAsk, ticketAvailability,
+  localExecutableTasks,
+  adoptOrphanedTickets,
+  pollTickets,
+  offPeakMessages,
+  settleTicket,
+  setLocalTaskState} from "../queue/offpeak-gateway";
+import { autoclawPiCli, UNATTENDED_PREAMBLE } from "./autoclaw";
 import { syncAuthHeadless } from "../auth/sync";
 
 const TASKS_INDEX = () =>
@@ -247,6 +254,133 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
 
 // ---------------------------------------------------------------------------
 
+async function cmdPoll(json: boolean) {
+  const adopted = adoptOrphanedTickets();
+  for (const a of adopted) console.error(`idle poll: adopted orphaned registration ${a.task} -> ticket ${a.ticket}`);
+  const rows = localExecutableTasks();
+  if (rows.length === 0) { if (json) console.log(JSON.stringify({ tickets: [] })); else console.log("idle poll: no live tickets"); return 0; }
+  const res = await pollTickets(rows.map((r) => r.serverTicketId));
+  const byTicket = new Map(res.tickets.map((t) => [t.ticketId, t]));
+  const out: Record<string, unknown>[] = [];
+  for (const r of rows) {
+    const t = byTicket.get(r.serverTicketId);
+    const state = t?.state ?? "unknown";
+    if (state === "running") setLocalTaskState(r.offPeakTaskId, "running", { startedAt: Date.now() });
+    if (state === "completed" || state === "settled") setLocalTaskState(r.offPeakTaskId, "completed", { endedAt: Date.now() });
+    if (typeof t?.position === "number") setLocalTaskState(r.offPeakTaskId, r.status === "running" ? "running" : "queued", { queuePosition: t.position });
+    out.push({ task: r.offPeakTaskId, ticket: r.serverTicketId, title: r.title.slice(0, 60), state, ...(t?.position != null ? { position: t.position } : {}) });
+  }
+  if (json) console.log(JSON.stringify({ tickets: out, error: res.error }, null, 1));
+  else for (const o of out) console.log(`idle poll: ${o.ticket} ${o.state}${o.position != null ? ` #${o.position}` : ""} — ${o.title}`);
+  return 0;
+}
+
+async function cmdExec(v: Record<string, string | boolean | undefined>): Promise<number> {
+  adoptOrphanedTickets();
+  const rows = localExecutableTasks();
+  const taskSel = v.task ? String(v.task) : "";
+  const ticketSel = v.ticket ? String(v.ticket) : "";
+  let row = rows.find((r) => r.offPeakTaskId === taskSel || r.serverTicketId === ticketSel);
+  if (!row && !taskSel && !ticketSel && rows.length > 0) row = rows[0];
+  if (!row) { console.error("idle exec: no live ticket row matches (run `zcode-tui idle poll`)"); return 2; }
+
+  const st = await pollTickets([row.serverTicketId]);
+  const state = st.tickets[0]?.state ?? "unknown";
+  if (state !== "ready" && state !== "active") {
+    console.log(`idle exec: ticket ${row.serverTicketId} state=${state}${st.tickets[0]?.position != null ? ` #${st.tickets[0].position}` : ""} (not ready; poll again later)`);
+    return 3;
+  }
+
+  const model = v.model ? String(v.model) : row.model;
+  const workspace = v.workspace ? String(v.workspace) : row.workspacePath;
+  const out = v.out ? String(v.out) : `/tmp/zt-idle-exec-${row.serverTicketId}.json`;
+  const cli = autoclawPiCli();
+  if (!cli) { console.error("idle exec: pi harness not found (appimage or `--vendor` install)"); return 2; }
+
+  // Local admission proxy: forwards /v1/messages to the off-peak anthropic
+  // gateway with the ticket header; retries 429 not-ready on the gateway's
+  // own retry-after up to a bound; 3102 passes through (dead ticket).
+  const target = row;
+  const proxy = Bun.serve({
+    hostname: "127.0.0.1", port: 0, idleTimeout: 255,
+    async fetch(req): Promise<Response> {
+      const url = new URL(req.url);
+      if (url.pathname === "/healthz") return Response.json({ ok: true, ticket: target.serverTicketId });
+      const body = new Uint8Array(await req.arrayBuffer());
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const res = await offPeakMessages(target.serverTicketId, new TextDecoder().decode(body));
+        if (res.status === 429) {
+          const retryAfter = Number(res.headers.get("retry-after") ?? "5");
+          await new Promise((r) => setTimeout(r, Math.min(30, Math.max(2, retryAfter)) * 1000));
+          continue;
+        }
+        return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
+      }
+      return Response.json({ error: "admission_retry_exhausted" }, { status: 429 });
+    },
+  });
+
+  try {
+    const dir = join(process.env.HOME ?? homedir(), ".local", "state", "zcode-tui", "idle-agent");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "models.json"), JSON.stringify({
+      providers: { offpeak: {
+        name: "Z.AI off-peak idle plan (managed by zcode-tui)",
+        baseUrl: `http://127.0.0.1:${proxy.port}`,
+        apiKey: "managed-by-zcode-tui",
+        api: "anthropic-messages",
+        models: [{ id: model, name: model, reasoning: true, contextWindow: 262_144, maxTokens: 32_768 }],
+      } },
+    }, null, 2) + "\n");
+    setLocalTaskState(row.offPeakTaskId, "running", { startedAt: Date.now() });
+    const { spawn } = await import("node:child_process");
+    const t0 = Date.now();
+    const args = [cli, "--print", "--mode", "json", "--provider", "offpeak", "--model", model,
+      "--append-system-prompt", UNATTENDED_PREAMBLE, row.prompt];
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const p = spawn(process.execPath, args, { cwd: workspace, env: { ...process.env, PI_CODING_AGENT_DIR: dir }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "", stderr = "";
+      const cap = 8 << 20;
+      p.stdout.on("data", (d: Buffer) => { if (stdout.length < cap) stdout += d.toString(); });
+      p.stderr.on("data", (d: Buffer) => { if (stderr.length < cap) stderr += d.toString(); });
+      const timer = setTimeout(() => p.kill("SIGKILL"), 120 * 60_000);
+      p.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    });
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, JSON.stringify({ ticket: row.serverTicketId, task: row.offPeakTaskId, model, workspace, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
+    const settle = await settleTicket(row.serverTicketId);
+    setLocalTaskState(row.offPeakTaskId, result.code === 0 ? "completed" : "failed", { endedAt: Date.now(), failureReason: result.code === 0 ? undefined : `pi rc=${result.code}` });
+    console.log(`idle exec: rc=${result.code} in ${Math.round((Date.now() - t0) / 1000)}s, settle=${settle.ok ? "ok" : settle.detail} -> ${out}`);
+    return result.code === 0 ? 0 : 1;
+  } finally {
+    proxy.stop(true);
+  }
+}
+
+async function cmdServe(v: Record<string, string | boolean | undefined>): Promise<number> {
+  const pollS = Math.max(30, Number(v["poll-s"] ?? 120));
+  console.log(`idle serve: polling every ${pollS}s (ctrl-c to stop)`);
+  for (;;) {
+    try {
+      await cmdPoll(false);
+      const live = localExecutableTasks();
+      if (live.length > 0) {
+        const st = await pollTickets(live.map((r) => r.serverTicketId));
+        const readyTicket = st.tickets.find((t) => t.state === "ready" || t.state === "active");
+        if (readyTicket) {
+          console.log(`idle serve: ticket ${readyTicket.ticketId} is ${readyTicket.state} — executing`);
+          await cmdExec({ ticket: readyTicket.ticketId });
+        }
+      }
+    } catch (e) {
+      console.error(`idle serve: tick failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    await new Promise((r) => setTimeout(r, pollS * 1000));
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 async function cmdQuota(json: boolean) {
   const a = await ticketAvailability();
   const payload: Record<string, unknown> = a.nextTakeAt
@@ -270,6 +404,9 @@ if (import.meta.main) {
       title: { type: "string" },
       model: { type: "string" },
       "permission-mode": { type: "string" },
+      task: { type: "string" },
+      ticket: { type: "string" },
+      "poll-s": { type: "string" },
       warmup: { type: "boolean", default: false },
       resume: { type: "string", default: "" },
       out: { type: "string" },
@@ -279,6 +416,9 @@ if (import.meta.main) {
   if (sub === "list") cmdList(Boolean(values.json));
   else if (sub === "quota") await cmdQuota(Boolean(values.json));
   else if (sub === "create") await cmdCreate(values as Record<string, string | boolean | undefined>);
+  else if (sub === "poll") process.exit(await cmdPoll(Boolean(values.json)));
+  else if (sub === "exec") process.exit(await cmdExec(values as Record<string, string | boolean | undefined>));
+  else if (sub === "serve") process.exit(await cmdServe(values as Record<string, string | boolean | undefined>));
   else {
     console.error("usage: zcode-tui idle <list|quota|create> [...]");
     console.error("  list [--json]");
@@ -286,6 +426,10 @@ if (import.meta.main) {
     console.error("  create --prompt-file F [--workspace W] [--title T] [--model M]");
     console.error("         [--permission-mode yolo|build|edit|plan|guarded] [--json]");
     console.error("         (permission-mode defaults to yolo - full access, owner directive 2026-10-23)");
+    console.error("  poll [--json]     # refresh ticket states for local rows (+ orphan adoption)");
+    console.error("  exec [--task T | --ticket N] [--model M] [--workspace W] [--out O]");
+    console.error("                    # execute a READY ticket through the off-peak gateway (pi agent)");
+    console.error("  serve [--poll-s N] # poll + execute loop (the desktop claim loop, on this host)");
     process.exit(2);
   }
 }
