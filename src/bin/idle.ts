@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
 import { parseCooldownMs } from "../queue/core";
+import { syncAuthHeadless } from "../auth/sync";
 
 const TASKS_INDEX = () =>
   process.env.ZCODE_TASKS_INDEX ?? join(homedir(), ".zcode", "v2", "tasks-index.sqlite");
@@ -60,6 +61,7 @@ function cmdList(json: boolean) {
 // ---------------------------------------------------------------------------
 
 async function cmdCreate(v: Record<string, string | boolean | undefined>) {
+  syncAuthHeadless();
   const pf = String(v["prompt-file"] ?? "");
   if (!pf) { console.error("idle create: --prompt-file is required (- reads stdin)"); process.exit(2); }
   const prompt = pf === "-" ? await new Promise<string>((r) => { let s = ""; process.stdin.on("data", (d) => s += d); process.stdin.on("end", () => r(s)); }) : readFileSync(pf, "utf8");

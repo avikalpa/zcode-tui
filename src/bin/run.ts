@@ -13,6 +13,7 @@ import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { AppServer } from "../protocol/client";
+import { syncAuthHeadless } from "../auth/sync";
 
 const { values } = parseArgs({
   options: {
@@ -30,6 +31,9 @@ const { values } = parseArgs({
     // owner 2026-10-23): 5 steers instead of 3 and transport-drop errors are
     // explicitly steer-class (they already avoid the STOP list).
     resilient: { type: "boolean", default: false },
+    // --unattended: prepend the fleet unattended preamble (no questions, no
+    // plan mode, verify before done) — default for automated runs.
+    unattended: { type: "boolean", default: false },
   },
 });
 
@@ -37,7 +41,10 @@ if (!values["content-file"]) {
   console.error("zt-run: --content-file is required");
   process.exit(1);
 }
-const content = readFileSync(String(values["content-file"]), "utf8");
+const rawBrief = readFileSync(String(values["content-file"]), "utf8");
+const content = values.unattended
+  ? `You are running UNATTENDED (no human will answer).\n- Do not ask questions, do not request confirmation, do not enter plan mode; choose the sensible default and proceed to implement immediately.\n- Never declare work done that you have not executed: run the checks the task implies and read the real output.\n- Before your final summary, re-read the original task once and check each requirement against what you delivered, then stop.\n\n${rawBrief}`
+  : rawBrief;
 const t0 = Date.now();
 const events: { method: string; kind: string; ms: number; summary: string }[] = [];
 let lastEvent = 0;
@@ -121,6 +128,7 @@ function writeTranscript(outcome: string) {
 }
 
 async function main() {
+  syncAuthHeadless();
   const createParams: Record<string, unknown> = {
     workspace: { workspacePath: values.workspace, workspaceKey: values.workspace },
     mode: "build",
