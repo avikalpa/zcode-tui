@@ -27,7 +27,7 @@ import { handleOffPeakAsk, ticketAvailability,
   offPeakMessages,
   settleTicket,
   setLocalTaskState} from "../queue/offpeak-gateway";
-import { autoclawPiCli, UNATTENDED_PREAMBLE } from "./autoclaw";
+import { autoclawPiCli, UNATTENDED_PREAMBLE, piEventStreamHasError } from "./autoclaw";
 import { syncAuthHeadless } from "../auth/sync";
 
 const TASKS_INDEX = () =>
@@ -301,18 +301,36 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   // gateway with the ticket header; retries 429 not-ready on the gateway's
   // own retry-after up to a bound; 3102 passes through (dead ticket).
   const target = row;
+  const wire: Array<{ at: number; status: number; bodyHead: string; respHead: string; repaired?: boolean }> = [];
   const proxy = Bun.serve({
     hostname: "127.0.0.1", port: 0, idleTimeout: 255,
     async fetch(req): Promise<Response> {
       const url = new URL(req.url);
       if (url.pathname === "/healthz") return Response.json({ ok: true, ticket: target.serverTicketId });
       const body = new Uint8Array(await req.arrayBuffer());
+      let payload = new TextDecoder().decode(body);
       for (let attempt = 0; attempt < 60; attempt++) {
-        const res = await offPeakMessages(target.serverTicketId, new TextDecoder().decode(body));
+        let res = await offPeakMessages(target.serverTicketId, payload);
+        // Gateway 3001 "parameter error": one repair attempt with a normalized
+        // body (lowercased model id, no stream field) — the canary falsifier
+        // died here 2026-10-23 with zero diagnostics; never again silently.
+        if (res.status === 400 && /"code"\s*:\s*3001/.test(await res.clone().text()) && !wire.some((w) => w.repaired)) {
+          try {
+            const doc = JSON.parse(payload) as Record<string, unknown>;
+            if (typeof doc.model === "string") doc.model = doc.model.toLowerCase();
+            delete doc.stream;
+            payload = JSON.stringify(doc);
+            wire.push({ at: Date.now(), status: 400, bodyHead: payload.slice(0, 300), respHead: "3001 -> repair retry", repaired: true });
+            res = await offPeakMessages(target.serverTicketId, payload);
+          } catch { /* unparseable body — pass the original through */ }
+        }
         if (res.status === 429) {
           const retryAfter = Number(res.headers.get("retry-after") ?? "5");
           await new Promise((r) => setTimeout(r, Math.min(30, Math.max(2, retryAfter)) * 1000));
           continue;
+        }
+        if (res.status !== 200) {
+          wire.push({ at: Date.now(), status: res.status, bodyHead: payload.slice(0, 300), respHead: (await res.clone().text()).slice(0, 400) });
         }
         return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
       }
@@ -358,11 +376,17 @@ ${note}` : stderr });
       p.on("close", (code) => finish(code));
     });
     mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, JSON.stringify({ ticket: row.serverTicketId, task: row.offPeakTaskId, model, workspace, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
+    // pi --print exits 0 even on provider errors (measured 2026-10-23:
+    // stopReason "error" + zero tokens) — a zero-work turn must never ride
+    // home as completed, and the settle below must not mask it.
+    const providerError = result.code === 0 && piEventStreamHasError(result.stdout);
+    const errMatch = result.stdout.match(/"errorMessage":"([^"]{0,300})"/);
+    writeFileSync(out, JSON.stringify({ ticket: row.serverTicketId, task: row.offPeakTaskId, model, workspace, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, providerError, providerErrorMessage: providerError ? errMatch?.[1] : undefined, wire, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
     const settle = await settleTicket(row.serverTicketId);
-    setLocalTaskState(row.offPeakTaskId, result.code === 0 ? "completed" : "failed", { endedAt: Date.now(), failureReason: result.code === 0 ? undefined : `pi rc=${result.code}` });
-    console.log(`idle exec: rc=${result.code} in ${Math.round((Date.now() - t0) / 1000)}s, settle=${settle.ok ? "ok" : settle.detail} -> ${out}`);
-    return result.code === 0 ? 0 : 1;
+    const honestRc = providerError ? 1 : result.code;
+    setLocalTaskState(row.offPeakTaskId, honestRc === 0 ? "completed" : "failed", { endedAt: Date.now(), failureReason: honestRc === 0 ? undefined : providerError ? `provider error: ${errMatch?.[1] ?? "unknown"}` : `pi rc=${result.code}` });
+    console.log(`idle exec: rc=${honestRc}${providerError ? " (provider error inside pi stream)" : ""} in ${Math.round((Date.now() - t0) / 1000)}s, settle=${settle.ok ? "ok" : settle.detail} -> ${out}`);
+    return honestRc === 0 ? 0 : 1;
   } finally {
     proxy.stop(true);
   }
