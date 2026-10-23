@@ -8,8 +8,9 @@ intelligent work. This file is the doc spec.** Every surface must trace to a
 v2 source file (component structure, labels, colors, key behavior); where we
 shipped an invention in the past, it is a DEVIATION to be fixed, not a
 feature to keep. Audit pass 2026-09-17 filed the known deviations below
-(Deviation queue). The non-parities (model allowlist, provider_connect)
-remain the only exceptions.
+(Deviation queue). The historical exceptions were the model allowlist and provider connection.
+The 2026-10-23 plan-catalog pass below expands model discovery
+without routing AutoClaw models through the ZCode backend.
 
 **Reference:** opencode **v2.0.8** (stable) — VENDORED in-repo at
 `tools/opencode-reference/` (pinned by `tools/sync-opencode.sh <tag>`;
@@ -21,10 +22,38 @@ carry a grep-able header (`Ported from opencode <version> <ref path>`) —
 the port map IS the headers. Update the ledger AFTER EVERY WAVE — a line
 moves from Remaining to Shipped only with the wave version that shipped it.
 
-Non-parities BY OWNER LAW (never copy): model allowlist, provider_connect /
+Historical non-parities (model discovery updated 2026-10-23 below): model execution allowlist, provider_connect /
 console_org, and the zcodetui wordmark on the home screen (owner 2026-09-18:
 "Our home screen zcodetui logo stays btw" — a v2 session-destination home
 ports AROUND the logo, never over it).
+
+## 2026-10-23 plan and interaction pass (lane, not released)
+
+A substantial UX gap remains under review; historical shipped entries do
+not establish current whole-app parity. Reference for this targeted pass:
+local opencode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`.
+See [design decisions and evidence](../design/01-plan-dialogs.md).
+
+Implemented on the review lane:
+
+- Model dialog: provider-qualified row IDs, Favorites/Recent categories,
+  provider labels, all models from the managed AutoClaw catalog, live fetch
+  with cached fallback, an explicitly offline four-model baseline for configured
+  plans, and a setup state for unconfigured hosts. AutoClaw rows are
+  explicitly separate-runner entries; execution still uses `autoclaw run`.
+- Status: cached Coding Plan entitlements, used/limit meters when present,
+  seven-day runtime telemetry, AutoClaw plan presence/credential age/catalog
+  source and count, plus existing MCP state. Missing quota remains unknown.
+- Shared picker: mouse selection, clickable esc, readable secondary labels,
+  multiword/provider search and stable disabled-row behavior. Session delete
+  confirmation disarms when selection moves. Model preferences update after
+  the backend accepts an active-session switch.
+
+Remaining for this pass: AutoClaw execution inside this TUI needs a separate
+backend-routing contract; unavailable quota windows need upstream data;
+full live-pixel parity and the rest of the reported gap remain open.
+The deterministic component checks do not close those items. No release or
+main merge is part of this lane.
 
 ## Shipped (1:1 unless noted)
 

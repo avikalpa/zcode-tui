@@ -71,6 +71,9 @@ import { listBranches, type DiffMode } from "./diff/git";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import pkgJson from "../../package.json";
+import { ModelDialog, type ModelChoice } from "./model-dialog";
+import { StatusDialog, type PlanUsage } from "./status-dialog";
+import { readPlanState, refreshPlanCatalog } from "./plan-state";
 
 const VERSION = pkgJson.version;
 
@@ -177,48 +180,6 @@ const ALLOWED_MODELS = [
   { label: "GLM-5.3", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "GLM-5.3", isDefault: false },
 ] as const;
 
-// ── PLANS MODEL CATALOG (sol HIGH consult 2026-10-16, slice 1 "route model") ──
-// Law: selectable = approved exact route AND backend supports it AND auth ready
-// AND entitlement permits. Catalog discovery adds INFORMATIONAL rows only —
-// they can be displayed but never become executable routes. ZCode's
-// coding-plan-cache.json says nothing about AutoClaw entitlement, and AutoClaw
-// auth (credentials.enc, in-process) is NOT obtainable from this TUI — so the
-// AutoClaw group is read-only with honest unavailable states. No silent
-// billing fallback; commit selection only after backend acceptance/readback.
-type PlanId = "zai-coding-plan" | "zai-start-plan" | "autoclaw";
-type RouteBackend = "zcode" | "autoclaw";
-interface PlanModelRoute {
-  planId: PlanId;
-  backend: RouteBackend;
-  providerId?: string;   // set only for executable zcode routes
-  modelId?: string;      // set only for executable zcode routes
-  label: string;
-  description?: string;
-  disabled: boolean;
-  disabledReason?: string;
-}
-const AUTOCLAW_CATALOG: readonly { label: string; id: string; credit?: string }[] = [
-  { label: "Auto", id: "zai_auto" },
-  { label: "Auto-Fast", id: "zai_auto-fast" },
-  { label: "GLM-5.3", id: "zaicoding_glm-5.3", credit: "High" },
-  { label: "GLM-5.3-Flash", id: "zai_glm-5.3-flash", credit: "Low" },
-];
-// Read ZCode plan entitlements (~/.zcode/v2/coding-plan-cache.json). Timestamped
-// evidence, not authorization: stale/missing ⇒ "unknown". Never implies
-// AutoClaw entitlement (a different product, account, and meter).
-const readPlanEntitlements = (): Record<string, { status: string; reason?: string }> => {
-  try {
-    const raw = readFileSync(join(homedir(), ".zcode", "v2", "coding-plan-cache.json"), "utf8");
-    const parsed = JSON.parse(raw) as { entryStatus?: { items?: Record<string, { status?: string; reason?: string }> } };
-    const items = parsed.entryStatus?.items ?? {};
-    const out: Record<string, { status: string; reason?: string }> = {};
-    for (const [k, v] of Object.entries(items)) out[k.replace(/^builtin:/, "")] = { status: v.status ?? "unknown", reason: v.reason };
-    return out;
-  } catch {
-    return {};
-  }
-};
-
 const MODES = ["plan", "build", "edit", "yolo", "auto"] as const;
 // v2 displayVersion: a 40/64-hex commit pin renders as the short sha, a
 // semver stays whole (feature-plugins/system/plugins.tsx footer grammar).
@@ -226,7 +187,6 @@ const shortVersion = (version: string) =>
   /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(version) ? version.slice(0, 7) : version;
 const EFFORTS = ["low", "high", "max"] as const;
 
-type ModelChoice = { label: string; providerId: string; providerLabel?: string; modelId: string; isDefault?: boolean };
 type AppView = "home" | "session" | "diff";
 type DialogName = "sessions" | "model" | "mode" | "effort" | "palette" | "fork" | "themes" | "rename" | "help" | "queue" | "diffsource" | "diffbase" | "diffhelp" | "stash" | "skills" | "mcp" | "plugins" | "status" | "settings" | "msgactions" | "export" | "exportresult" | "imagepreview" | null;
 
@@ -1395,6 +1355,26 @@ export function App({
       };
     }
   }, [dialog, client]);
+  const [plans, setPlans] = useState(readPlanState);
+  const [planUsage, setPlanUsage] = useState<PlanUsage>({ kind: "loading" });
+  useEffect(() => {
+    if (dialog !== "model" && dialog !== "status") return;
+    let live = true;
+    const local = readPlanState();
+    setPlans(local);
+    void refreshPlanCatalog(local).then((next) => { if (live) setPlans(next); });
+    if (dialog === "status") {
+      setPlanUsage({ kind: "loading" });
+      void client.request("usage/stats", { range: "7d" }, 5000).then((res) => {
+        if (!live) return;
+        const summary = (res as { summary?: { totalTokens?: number; totalSessions?: number } }).summary;
+        setPlanUsage(typeof summary?.totalTokens === "number" && Number.isFinite(summary.totalTokens) && summary.totalTokens >= 0
+          ? { kind: "ready", tokens: summary.totalTokens, sessions: typeof summary.totalSessions === "number" && Number.isFinite(summary.totalSessions) && summary.totalSessions >= 0 ? summary.totalSessions : undefined }
+          : { kind: "unavailable" });
+      }).catch(() => { if (live) setPlanUsage({ kind: "unavailable" }); });
+    }
+    return () => { live = false; };
+  }, [dialog, client]);
   const [models, setModels] = useState<ModelChoice[]>(ALLOWED_MODELS.map((m) => ({ ...m })));
   const [modelIdx, setModelIdx] = useState(0);
   // modelsRef backs the push handler (registered once): model/effort patches
@@ -1488,6 +1468,7 @@ export function App({
   };
   const [pinned, setPinned] = useState<string[]>([]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const sessionDialogSelection = useRef<string | undefined>(undefined);
   const [renameTarget, setRenameTarget] = useState<SessionRow | null>(null);
   // Optional sidebar (leader b), armed leader chord, and the session paging.
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -2024,6 +2005,7 @@ export function App({
 
   const closeDialog = () => {
     setTimelineMode(false);
+    setDeleteId(null);
     setDialog(null);
     // The composer is always live once a dialog closes — the old home-only
     // restore left session-view dialogs (palette, model, effort, sessions)
@@ -3360,6 +3342,10 @@ export function App({
         title="Sessions"
         size="large"
         options={sessionOptions}
+        onHighlight={(option) => {
+          if (sessionDialogSelection.current !== option?.id) setDeleteId(null);
+          sessionDialogSelection.current = option?.id;
+        }}
         currentId={activeId ?? undefined}
         theme={C}
         footerHints={[
@@ -3386,84 +3372,22 @@ export function App({
     );
   }
   if (dialog === "model") {
-    // Reference model dialog: favorites first, then the recent list order,
-    // then the rest; rows wear their star/recent meta.
-    const recentKeys = uiState.current.recent.map(modelKey);
-    const favKeys = uiState.current.favorite.map(modelKey);
-    const orderedModels = [...models].sort((a, b) => {
-      const af = favKeys.includes(modelKey(a)) ? 0 : 1;
-      const bf = favKeys.includes(modelKey(b)) ? 0 : 1;
-      if (af !== bf) return af - bf;
-      const ar = recentKeys.indexOf(modelKey(a));
-      const br = recentKeys.indexOf(modelKey(b));
-      if (ar !== -1 || br !== -1) return (ar === -1 ? 999 : ar) - (br === -1 ? 999 : br);
-      return 0;
-    });
-    const modelOpts = orderedModels.map((m) => {
-      const metas: string[] = [];
-      if (favKeys.includes(modelKey(m))) metas.push("★");
-      if (recentKeys.includes(modelKey(m))) metas.push("recent");
-      return {
-        id: m.modelId, label: modelLabel(m),
-        description: `${m.providerId}/${m.modelId}`,
-        meta: metas.join(" · ") || undefined,
-        group: m.providerLabel ?? "ZCode Coding Plan",
-        value: m,
-      };
-    });
-    // ── Plans sections (sol HIGH 2026-10-16, slice 1): informational groups.
-    // Entitlements from ~/.zcode/v2/coding-plan-cache.json (ZCode plans only —
-    // it says NOTHING about AutoClaw). AutoClaw rows are READ-ONLY: its auth
-    // (credentials.enc) is in-process to the desktop, so selection is
-    // impossible from this TUI today; the rows carry honest credit levels
-    // from the measured catalog, never invented prices.
-    const planEnt = readPlanEntitlements();
-    const planOpts: DialogOption<ModelChoice>[] = [];
-    const starter = planEnt["zai-start-plan"];
-    planOpts.push({
-      id: "plan:zai-start-plan", group: "ZCode Starter Plan", value: models[0],
-      label: "ZCode Starter Plan",
-      description: starter?.status === "available" ? "available" : `unavailable: ${starter?.reason ?? starter?.status ?? "unknown"}`,
-      disabled: true,
-    });
-    for (const m of AUTOCLAW_CATALOG) {
-      planOpts.push({
-        id: `autoclaw:${m.id}`, group: "AutoClaw · separate account · AutoClaw credits", value: models[0],
-        label: m.label,
-        description: `1M ctx${m.credit ? ` · credit level: ${m.credit}` : ""}`,
-        meta: "not switchable from this TUI",
-        disabled: true,
-      });
-    }
-    const allOpts = [...modelOpts, ...planOpts].map((o) => ({ ...o })) as DialogOption<ModelChoice>[];
-    return (
-      <SelectDialog
-        title="Model"
-        options={allOpts}
-        footerHints={[
-          { key: "enter", label: "select" },
-          { key: "ctrl+f", label: "favorite" },
-          { key: "esc", label: "close" },
-        ]}
-        currentId={activeModel?.modelId}
-        theme={C}
-        countLabel="model"
-        onAction={(action, option) => {
-          if (action === "pin" && option) toggleFavoriteModel(option.value);
-        }}
-        onSelect={(choice) => {
-          const index = models.findIndex((m) => m.modelId === choice.modelId);
-          setModelIdx(Math.max(0, index));
+    return <ModelDialog models={models} plans={plans} prefs={uiState.current} current={activeModel} C={C}
+      onFavorite={toggleFavoriteModel} onClose={closeDialog}
+      onSelect={(choice) => {
+        const apply = () => {
+          const index = models.findIndex((m) => modelKey(m) === modelKey(choice));
+          if (index < 0) return;
+          setModelIdx(index);
           rememberModel(choice);
           closeDialog();
-          if (!activeId) { flashStatus(`model → ${modelLabel(choice)}`); return; }
-          void client.request("session/setModel", { sessionId: activeId, model: { providerId: choice.providerId, modelId: choice.modelId } })
-            .then(() => flashStatus(`model → ${modelLabel(choice)}`))
-            .catch((e) => flashStatus(`setModel failed: ${e instanceof Error ? e.message : e}`));
-        }}
-        onClose={closeDialog}
-      />
-    );
+          flashStatus(`model → ${modelLabel(choice)}`);
+        };
+        if (!activeId) { apply(); return; }
+        void client.request("session/setModel", { sessionId: activeId, model: { providerId: choice.providerId, modelId: choice.modelId } })
+          .then(apply)
+          .catch(() => flashStatus("Could not switch model. Try again.", "error"));
+      }} />;
   }
   if (dialog === "mode") {
     return (
@@ -3607,74 +3531,6 @@ footerHints={[
 
 
 // The keybind help overlay (opencode help_show): a flat panel of the
-// implemented grammar. Owns its keyboard — escape/enter close — because the
-// App-level hook goes silent while a dialog is open.
-// Ported from opencode v2.0.7 component/dialog-status.tsx: leader s — the
-// status view. Title row "Status" + the subdued esc hint (v2 verbatim; esc
-// only — enter does nothing in the reference dialog), then the MCP server
-// list on the same mcp/list payload the /mcps dialog reads: the "No MCP
-// servers" empty state, the "{n} MCP server(s)" header, rows
-// "• <name> <status>" with v2's status→colour map. v2 prints the payload's
-// error text on failed/needs_auth rows — the zcode protocol carries no
-// error text (host gap recorded 0.6.23), so the suffix renders only when a
-// payload ever provides one.
-function StatusDialog({ C, onClose, mcpState, width, height }: { C: ThemeTokens; onClose: () => void; mcpState: McpDialogState; width: number; height: number }) {
-  useKeyboard((key) => {
-    if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
-  });
-  const statusColor = (status: string) =>
-    status === "connected" ? C.success
-    : status === "failed" ? C.error
-    : status === "needs_auth" ? C.warning
-    : C.subtle;
-  const statusText = (server: { status: string; error?: string }) => {
-    if (server.status === "connected") return "Connected";
-    if (server.status === "failed") return server.error ? `Failed: ${server.error}` : "Failed";
-    if (server.status === "disabled") return "Disabled in configuration";
-    if (server.status === "needs_auth") return server.error ? `Needs authentication: ${server.error}` : "Needs authentication";
-    return server.status;
-  };
-  const servers = mcpState.kind === "ready" ? mcpState.servers : null;
-  return (
-    <ModalBackdrop C={C} width={width} height={height}>
-      <box
-        style={{
-          width: Math.min(72, Math.max(30, width - 4)),
-          flexDirection: "column",
-          flexShrink: 0,
-          backgroundColor: C.panel,
-          paddingTop: 1,
-          paddingBottom: 1,
-          paddingLeft: 2,
-          paddingRight: 2,
-        }}
-      >
-        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
-          <text content="Status" fg={C.fg} attributes={TextAttributes.BOLD} />
-          <text content="esc" fg={C.faint} />
-        </box>
-        <box style={{ height: 1, flexShrink: 0 }} />
-        {servers === null ? (
-          <text content="Connecting …" fg={C.subtle} />
-        ) : servers.length === 0 ? (
-          <text content="No MCP servers" fg={C.fg} />
-        ) : (
-          <box style={{ flexDirection: "column", flexShrink: 0 }}>
-            <text content={`${servers.length} MCP server${servers.length === 1 ? "" : "s"}`} fg={C.fg} />
-            {servers.map((server) => (
-              <box key={server.name} style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
-                <text content="• " fg={statusColor(server.status)} />
-                <text content={server.name} fg={C.fg} attributes={TextAttributes.BOLD} />
-                <text content={" " + statusText(server)} fg={C.subtle} />
-              </box>
-            ))}
-          </box>
-        )}
-      </box>
-    </ModalBackdrop>
-  );
-}
-
 function HelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose: () => void; width: number; height: number }) {
   useKeyboard((key) => {
     if (key.name === "escape" || key.name === "return" || (key.ctrl && key.name === "c")) { onClose(); return; }
@@ -4131,7 +3987,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     );
   }
   if (dialog === "status") {
-    return <StatusDialog C={C} mcpState={mcpState} onClose={closeDialog} width={dims.width} height={dims.height} />;
+    return <StatusDialog C={C} mcpState={mcpState} plans={plans} usage={planUsage} onClose={closeDialog} width={dims.width} height={dims.height} />;
   }
   if (dialog === "export") {
     return <ExportDialog C={C} onClose={closeDialog} onConfirm={(opts) => void runExport(opts)} width={dims.width} height={dims.height} />;
@@ -4166,7 +4022,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "skills", label: "skills…", description: "insert a skill mention · /skills", value: () => setDialog("skills") },
       { id: "mcp", label: "MCP servers", description: "connection status · /mcps", value: () => setDialog("mcp") },
       { id: "plugins", label: "Plugins", description: "enable or disable plugins · /plugins", value: () => setDialog("plugins") },
-      { id: "status", label: "View status", description: "MCP server status · leader s", value: () => setDialog("status") },
+      { id: "status", label: "View status", description: "Plans, usage and MCP servers · leader s", value: () => setDialog("status") },
       { id: "msg-next", label: "next message", description: "jump the transcript · v2 session.message.next", value: () => messageJump(1, false) },
       { id: "msg-prev", label: "previous message", value: () => messageJump(-1, false) },
       { id: "msg-user-next", label: "next user message", value: () => messageJump(1, true) },

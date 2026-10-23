@@ -39,7 +39,9 @@ afterEach(() => {
 });
 
 function deps(extra: Partial<SyncDeps> = {}): SyncDeps {
-  return { homeDir: home, configDir: join(home, ".config/zcode-tui"), ...extra };
+  // The default source may be a remote host. Never let a fixture test reach
+  // the real fleet or read a real account key.
+  return { homeDir: home, configDir: join(home, ".config/zcode-tui"), fetchRemote: () => SSOT, ...extra };
 }
 
 function machineSettings(providerConfigJson: string, cliKey: string | null): void {

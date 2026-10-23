@@ -3,7 +3,7 @@
 // (fleet SKILL law) — key-driven behavior is the pty-proof's to prove.
 import { describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
-import { SelectDialog, type DialogOption } from "./select-dialog";
+import { SelectDialog, matchesDialogFilter, type DialogOption } from "./select-dialog";
 
 const OPTIONS: DialogOption<string>[] = [
   { id: "alpha", label: "alpha", value: "alpha" },
@@ -67,5 +67,39 @@ describe("SelectDialog reference parity", () => {
     // point is that a real description renders, muted, beside the label.
     expect(frame).toContain("zai-api");
     setup.renderer.destroy();
+  });
+});
+
+
+describe("picker interaction parity", () => {
+  test("search accepts words across the model name and provider", () => {
+    const row = { label: "GLM-5.3-Flash", group: "AutoClaw", description: "cached model" };
+    expect(matchesDialogFilter(row, "glm flash")).toBe(true);
+    expect(matchesDialogFilter(row, "autoclaw flash")).toBe(true);
+    expect(matchesDialogFilter(row, "missing flash")).toBe(false);
+  });
+  test("mouse selects enabled rows and esc closes; disabled rows remain inert", async () => {
+    const picked: string[] = [];
+    let closed = false;
+    const setup = await testRender(<SelectDialog title="Fixture picker" options={[
+      { id: "ready", label: "Ready model", value: "ready", description: "Full provider name" },
+      { id: "disabled", label: "Separate runner", value: "disabled", disabled: true },
+    ]} onSelect={(v) => picked.push(v)} onClose={() => { closed = true; }} />, { width: 80, height: 30 });
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("Ready model"), { maxPasses: 20 });
+      expect(frame).toContain("Full provider name");
+      const lines = frame.split("\n");
+      const clickText = async (needle: string) => {
+        const y = lines.findIndex((line) => line.includes(needle));
+        await setup.mockMouse.click(lines[y].indexOf(needle) + 1, y);
+        await setup.renderOnce();
+      };
+      await clickText("Separate runner");
+      expect(picked).toEqual([]);
+      await clickText("Ready model");
+      expect(picked).toEqual(["ready"]);
+      await clickText("esc");
+      expect(closed).toBe(true);
+    } finally { setup.renderer.destroy(); }
   });
 });
