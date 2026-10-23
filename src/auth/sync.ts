@@ -231,3 +231,13 @@ export function syncAuthAtStartup(deps: SyncDeps = {}): SyncedAuth | null {
 
   return { source: cfg.source, fingerprint: fp, providerConfigPath: storedPath, healedMachineSettings };
 }
+
+// Headless verbs sync the fleet auth too (owner 2026-10-23: zcode-tui must
+// be usable from any fleet host on any harness — the TUI-only sync left
+// headless seats stale). Non-blocking by design; failures never stop boot.
+export function syncAuthHeadless(): void {
+  try {
+    const r = syncAuthAtStartup();
+    if (r) console.error(`zcode-tui: auth synced from ${r.source} (fingerprint ${r.fingerprint.slice(0, 8)})`);
+  } catch { /* never block */ }
+}

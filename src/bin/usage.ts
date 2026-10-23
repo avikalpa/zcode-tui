@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
 import { isPeak, minutesToPeak, minutesToPeakEnd, type RouteName } from "../queue/core";
+import { autoclawPiCli, autoclawCredential } from "./autoclaw";
 
 const { values } = parseArgs({
   options: {
@@ -35,13 +36,21 @@ const range = ["all", "7d", "30d"].includes(String(values.range)) ? String(value
 interface UsageSnapshot {
   coding_plan: Record<string, unknown>;
   idle_tasks: Record<string, unknown>;
-  autoclaw: { addressable: false; note: string };
+  autoclaw: { addressable: boolean; note: string; harness?: Record<string, unknown> };
 }
 
 async function main() {
   const snap: UsageSnapshot = {
     coding_plan: {}, idle_tasks: {},
-    autoclaw: { addressable: false, note: "AutoClaw plan is a foreign runtime (0 provider vocabulary in the ZCode bundle, measured 2026-10-23) — read limits from the AutoClaw harness." },
+    autoclaw: {
+      addressable: false,
+      note: "AutoClaw Credits plan rides the AutoClaw harness (separate app, same auth account). ZCode cannot address it; headless runs go through the bundled pi CLI and need an owner-provisioned plan key.",
+      harness: {
+        piCli: autoclawPiCli() ?? "not found on this host",
+        credentialProvisioned: Boolean(autoclawCredential()),
+        balance: "rides the desktop account channel (credits.balance.read inside the AutoClaw app) — not readable headless without the plan credential; daily-claim and ledgers likewise",
+      },
+    },
   };
 
   // 1. entitlements (local cache, desktop-maintained)
@@ -124,6 +133,10 @@ async function main() {
   else console.log("  cooldown: none known");
   console.log("=== AutoClaw Credits plan ===");
   console.log(`  ${snap.autoclaw.note}`);
+  const h = snap.autoclaw.harness as Record<string, unknown> ?? {};
+  console.log(`  harness: ${h.piCli}`);
+  console.log(`  credential: ${h.credentialProvisioned ? "provisioned (headless runs ready)" : "MISSING — provision providers.autoclaw.apiKey in ~/.config/zcode-tui/auth.json"}`);
+  console.log(`  balance: ${h.balance}`);
 }
 
 if (import.meta.main) await main();

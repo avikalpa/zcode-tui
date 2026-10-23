@@ -26,6 +26,8 @@ import {
   classifyFailure, sha256, SCHEMA_SQL,
   type RouteName, type TaskRow,
 } from "../queue/core";
+import { autoclawPiCli, autoclawCredential, UNATTENDED_PREAMBLE } from "./autoclaw";
+import { syncAuthHeadless } from "../auth/sync";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BUN = process.env.BUN_INSTALL ? join(process.env.BUN_INSTALL, "bin", "bun") : join(homedir(), ".bun", "bin", "bun");
@@ -222,7 +224,7 @@ export function buildCommand(
   switch (task.route) {
     case "zai-coding-plan": {
       const cmd = [bun, join(ctx.repo, "src/bin/run.ts"),
-        "--content-file", ctx.promptFile, "--workspace", task.workspace, "--out", ctx.runLog];
+        "--content-file", ctx.promptFile, "--workspace", task.workspace, "--out", ctx.runLog, "--unattended"];
       if (task.model) cmd.push("--model", task.model);
       if (ctx.budgetMin > 0) cmd.push("--max-run-min", String(ctx.budgetMin));
       return { cmd, cwd: ctx.repo };
@@ -254,6 +256,26 @@ export function buildCommand(
         cmd: ["opencode", "run", "--model", model, "-"],
         cwd: task.workspace, stdin: task.prompt,
       };
+    }
+    case "autoclaw": {
+      // AutoClaw harness (pi CLI inside the appimage runtime) — lives on the
+      // desktop host; rides ssh like the idle route. Credential must be
+      // provisioned (see zcode-tui autoclaw doctor).
+      const inner = [
+        `cd ${ctx.repo} && ${bun} run src/bin/autoclaw.ts run`,
+        "--content-file", "-", "--out", ctx.runLog,
+        "--workspace", JSON.stringify(task.workspace),
+      ];
+      if (task.model) inner.push("--model", JSON.stringify(task.model));
+      const cmd = [
+        "ssh",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=4",
+        "-o", "ConnectTimeout=10",
+        "jojo",
+        inner.join(" "),
+      ];
+      return { cmd, cwd: ctx.repo, stdin: `${UNATTENDED_PREAMBLE}\n\n${task.prompt}` };
     }
     case "codex": {
       const cmd = ["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-C", task.workspace];
@@ -498,6 +520,13 @@ export class QueueServer {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  syncAuthHeadless();
+  // The autoclaw route is dispatchable only when the harness AND a
+  // provisioned plan credential exist on this host (measured honestly).
+  if (autoclawPiCli() && autoclawCredential()) {
+    ROUTES.autoclaw.available = true;
+    ROUTES.autoclaw.unavailableReason = undefined;
+  }
   const { values } = parseArgs({
     allowPositionals: true,
     options: {
