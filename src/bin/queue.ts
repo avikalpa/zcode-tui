@@ -566,6 +566,7 @@ async function main() {
       routes: { type: "string", default: "" },
       "state-dir": { type: "string", default: "" },
       "expect-file": { type: "string", default: "" },
+      "eligible-at": { type: "string" },
       "dry-run": { type: "boolean", default: false },
     },
   });
