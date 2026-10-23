@@ -310,6 +310,12 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
       const body = new Uint8Array(await req.arrayBuffer());
       let payload = new TextDecoder().decode(body);
       for (let attempt = 0; attempt < 60; attempt++) {
+        // Belt-and-braces: the gateway 3001s on `thinking` (measured) —
+        // strip it even if a model config re-enables reasoning.
+        try {
+          const doc = JSON.parse(payload) as Record<string, unknown>;
+          if ("thinking" in doc) { delete doc.thinking; payload = JSON.stringify(doc); }
+        } catch { /* non-JSON body — forward as-is */ }
         let res = await offPeakMessages(target.serverTicketId, payload);
         // Gateway 3001 "parameter error": one repair attempt with a normalized
         // body (lowercased model id, no stream field) — the canary falsifier
@@ -347,7 +353,10 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
         baseUrl: `http://127.0.0.1:${proxy.port}`,
         apiKey: "managed-by-zcode-tui",
         api: "anthropic-messages",
-        models: [{ id: model, name: model, reasoning: true, contextWindow: 262_144, maxTokens: 32_768 }],
+        // reasoning:false — pi then omits the `thinking` field, which the
+        // off-peak gateway rejects with 3001 parameter error (measured:
+        // canary/T-037/canary-retry all died on it, 2026-10-23).
+        models: [{ id: model, name: model, reasoning: false, contextWindow: 262_144, maxTokens: 32_768 }],
       } },
     }, null, 2) + "\n");
     setLocalTaskState(row.offPeakTaskId, "running", { startedAt: Date.now() });
