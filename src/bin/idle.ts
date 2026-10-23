@@ -162,7 +162,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       }
     }
     await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true }, 20000);
-    if (values.warmup) {
+    if (v.warmup) {
       // Turn 1: a trivial exchange so the session exists server-side with
       // real history before it asks for an idle-time ticket.
       turnEnded = false;
@@ -247,20 +247,6 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
 
 // ---------------------------------------------------------------------------
 
-const { values } = parseArgs({
-  allowPositionals: true,
-  options: {
-    json: { type: "boolean", default: false },
-    "prompt-file": { type: "string" },
-    workspace: { type: "string" },
-    title: { type: "string" },
-    model: { type: "string" },
-    "permission-mode": { type: "string" },
-    warmup: { type: "boolean", default: false },
-    resume: { type: "string", default: "" },
-    out: { type: "string" },
-  },
-});
 async function cmdQuota(json: boolean) {
   const a = await ticketAvailability();
   const payload: Record<string, unknown> = a.nextTakeAt
@@ -271,8 +257,25 @@ async function cmdQuota(json: boolean) {
   console.log(`idle quota: ${payload.canCreateNow === true ? "CAN CREATE NOW" : `cooldown — resets at ${payload.resetsAt} (in ${payload.resetsInMin}m)`}${a.error ? ` [${a.error}]` : ""}`);
 }
 
-const sub = String(process.argv[2] ?? "");
 if (import.meta.main) {
+  // parseArgs inside the guard: import-time parsing throws on another
+  // verb's argv when this module is imported (production bug class caught
+  // by the 1.0.0 trial run, 2026-10-23).
+  const { values } = parseArgs({
+    allowPositionals: true,
+    options: {
+      json: { type: "boolean", default: false },
+      "prompt-file": { type: "string" },
+      workspace: { type: "string" },
+      title: { type: "string" },
+      model: { type: "string" },
+      "permission-mode": { type: "string" },
+      warmup: { type: "boolean", default: false },
+      resume: { type: "string", default: "" },
+      out: { type: "string" },
+    },
+  });
+  const sub = String(process.argv[2] ?? "");
   if (sub === "list") cmdList(Boolean(values.json));
   else if (sub === "quota") await cmdQuota(Boolean(values.json));
   else if (sub === "create") await cmdCreate(values as Record<string, string | boolean | undefined>);

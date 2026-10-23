@@ -121,18 +121,21 @@ async function runBrief(v: Record<string, string | boolean | undefined>): Promis
   return result.code === 0 ? 0 : 1;
 }
 
-const { values } = parseArgs({
-  allowPositionals: true,
-  options: {
-    "content-file": { type: "string" },
-    workspace: { type: "string" },
-    model: { type: "string" },
-    out: { type: "string" },
-    json: { type: "boolean", default: false },
-  },
-});
-const sub = String(process.argv[2] ?? "");
 if (import.meta.main) {
+  // parseArgs INSIDE the guard: module-level parsing throws on other
+  // verbs' argv when queue.ts imports this module (production bug caught
+  // by the 1.0.0 trial run, 2026-10-23).
+  const { values } = parseArgs({
+    allowPositionals: true,
+    options: {
+      "content-file": { type: "string" },
+      workspace: { type: "string" },
+      model: { type: "string" },
+      out: { type: "string" },
+      json: { type: "boolean", default: false },
+    },
+  });
+  const sub = String(process.argv[2] ?? "");
   if (sub === "doctor") process.exit(doctor(Boolean(values.json)));
   else if (sub === "run") process.exit(await runBrief(values as Record<string, string | boolean | undefined>));
   else {

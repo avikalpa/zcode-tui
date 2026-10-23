@@ -16,6 +16,7 @@ import { AppServer } from "../protocol/client";
 import { syncAuthHeadless } from "../auth/sync";
 
 const { values } = parseArgs({
+  strict: false, // imported as a module by other verbs: foreign argv must not throw
   options: {
     "content-file": { type: "string" },
     workspace: { type: "string", default: process.cwd() },
@@ -37,12 +38,12 @@ const { values } = parseArgs({
   },
 });
 
-if (!values["content-file"]) {
+if (import.meta.main && !values["content-file"]) {
   console.error("zt-run: --content-file is required");
   process.exit(1);
 }
-const rawBrief = readFileSync(String(values["content-file"]), "utf8");
-const content = values.unattended
+const rawBrief = import.meta.main ? readFileSync(String(values["content-file"] ?? ""), "utf8") : "";
+const content = import.meta.main && values.unattended
   ? `You are running UNATTENDED (no human will answer).\n- Do not ask questions, do not request confirmation, do not enter plan mode; choose the sensible default and proceed to implement immediately.\n- Never declare work done that you have not executed: run the checks the task implies and read the real output.\n- Before your final summary, re-read the original task once and check each requirement against what you delivered, then stop.\n\n${rawBrief}`
   : rawBrief;
 const t0 = Date.now();
@@ -112,7 +113,7 @@ const sv = new AppServer({
 
 function writeTranscript(outcome: string) {
   const elapsedSec = Number(((Date.now() - t0) / 1000).toFixed(1));
-  const outPath = String(values.out);
+  const outPath = String(values.out ?? "");
   mkdirSync(dirname(outPath), { recursive: true }); // --out parent may not exist on a fresh host
   writeFileSync(outPath, JSON.stringify({
     sessionId,
@@ -138,9 +139,9 @@ async function main() {
     // 0.7.2: session/create takes an OBJECT ref {modelId, providerId};
     // a string id is mapped with the --provider route (default zai).
     try {
-      createParams.model = JSON.parse(values.model);
+      createParams.model = JSON.parse(String(values.model));
     } catch {
-      createParams.model = { modelId: values.model, providerId: values.provider || "zai" };
+      createParams.model = { modelId: String(values.model ?? ""), providerId: String(values.provider || "zai") };
     }
   }
   const created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
@@ -191,7 +192,7 @@ async function main() {
   }
 }
 
-main().catch(async (e) => {
+if (import.meta.main) main().catch(async (e) => {
   console.error(`FATAL: ${e instanceof Error ? e.message : e}`);
   try { if (sessionId) await sv.request("session/stop", { sessionId }); } catch { /* noop */ }
   await sv.close();
