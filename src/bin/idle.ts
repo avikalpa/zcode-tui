@@ -310,11 +310,16 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
       const body = new Uint8Array(await req.arrayBuffer());
       let payload = new TextDecoder().decode(body);
       for (let attempt = 0; attempt < 60; attempt++) {
-        // Belt-and-braces: the gateway 3001s on `thinking` (measured) —
-        // strip it even if a model config re-enables reasoning.
+        // The desktop's successful off-peak bodies carry metadata +
+        // tool_choice + output_config (mined from its model-io rollouts);
+        // without them the gateway 3001s ("parameter error") even on
+        // otherwise-clean bodies. Shape ours to match.
         try {
           const doc = JSON.parse(payload) as Record<string, unknown>;
-          if ("thinking" in doc) { delete doc.thinking; payload = JSON.stringify(doc); }
+          doc.metadata ??= { user_id: "zcode-tui-worker" };
+          doc.tool_choice ??= { type: "auto" };
+          doc.output_config ??= { effort: "low" };
+          payload = JSON.stringify(doc);
         } catch { /* non-JSON body — forward as-is */ }
         let res = await offPeakMessages(target.serverTicketId, payload);
         // Gateway 3001 "parameter error": one repair attempt with a normalized
