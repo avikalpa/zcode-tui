@@ -135,6 +135,15 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
     console.error(`idle create: session ${sessionId}`);
     if (resumeArg) {
       await sv.request("session/resume", { sessionId }, 30000);
+      // offPeakToolEnabled is create-time; resumed sessions restore the
+      // original config — re-arm the tool explicitly (session/update
+      // schema carries offPeakToolEnabled, mined from the bundle).
+      try {
+        await sv.request("session/update", { sessionId, offPeakToolEnabled: true }, 15000);
+        console.error("idle create: session/update offPeakToolEnabled=true");
+      } catch (e) {
+        console.error(`idle create: session/update rejected (${e instanceof Error ? e.message : e})`);
+      }
     }
     await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true }, 20000);
     if (values.warmup) {
@@ -151,7 +160,9 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
     }
     const brief = [
       "You are being driven programmatically by zcode-tui (fleet worker).",
-      "Call the OffPeakCreate tool NOW with EXACTLY these arguments:",
+      "Call the tool EXACTLY named OffPeakCreate NOW (never CronCreate, never any other create/schedule tool).",
+      "If OffPeakCreate is not in your tool list, reply with exactly OFFPEAK-MISSING and stop.",
+      "Arguments:",
       `- title: ${JSON.stringify(title.slice(0, 120))}`,
       "- prompt: the text between <prompt> markers below, verbatim, unmodified:",
       `<prompt>\n${prompt}\n</prompt>`,
