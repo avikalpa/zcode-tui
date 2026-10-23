@@ -1,0 +1,12 @@
+[Unit]
+Description=zcode-tui idle runner (off-peak ticket poll + execute, unofficial client)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/pi/.bun/bin/bun run /home/pi/gh/zcode-tui/src/bin/idle.ts serve --poll-s 120
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
