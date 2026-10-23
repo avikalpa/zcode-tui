@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
+import { stringWidth } from "./diff/string-width";
 
 export interface DialogOption<T> {
   id: string;
@@ -52,9 +53,19 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function truncate(value: string, width: number): string {
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
-  return `${value.slice(0, width - 1)}…`;
+  if (stringWidth(value) <= width) return value;
+  let out = "";
+  for (const char of value) {
+    if (stringWidth(out + char) > Math.max(0, width - 1)) break;
+    out += char;
+  }
+  return `${out}…`;
+}
+// OpenCode searches across title and provider/category. Tokenized matching
+// also lets a query like `glm flash` find punctuated model names.
+export function matchesDialogFilter(option: Pick<DialogOption<unknown>, "label" | "description" | "meta" | "group">, query: string): boolean {
+  const haystack = `${option.label} ${option.description ?? ""} ${option.meta ?? ""} ${option.group ?? ""}`.toLowerCase();
+  return query.toLowerCase().trim().split(/\s+/).every((word) => haystack.includes(word));
 }
 
 export function ModalBackdrop({
@@ -136,11 +147,7 @@ export function SelectDialog<T>({
   const C = theme ?? THEMES.opencode;
   const cardWidth = tierWidth(size, dims.width);
 
-  const shown = options.filter((o) =>
-    `${o.label} ${o.description ?? ""} ${o.meta ?? ""} ${o.group ?? ""}`
-      .toLowerCase()
-      .includes(filter.toLowerCase()),
-  );
+  const shown = options.filter((o) => matchesDialogFilter(o, filter));
   const sel = clamp(idx, 0, Math.max(0, shown.length - 1));
   // The card must FIT its own maxHeight: pad(2) + title + search + hints row
   // + every group header (with its spacer) is chrome the list cannot eat, or
@@ -165,7 +172,7 @@ export function SelectDialog<T>({
     // route (e.g. read-only AutoClaw rows, not-entitled plans) can be
     // highlighted but never crosses the mutation boundary (sol 2026-10-16
     // falsifier: a disabled route must never reach the mutation boundary).
-    if (option.disabled) { setFilter(""); return; }
+    if (option.disabled) return;
     onSelect(option.value, option.id);
   };
 
@@ -226,7 +233,7 @@ export function SelectDialog<T>({
       >
         <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
           <text content={title} fg={C.fg} attributes={TextAttributes.BOLD} />
-          <text content="esc" fg={C.faint} />
+          <text content="esc" fg={C.faint} onMouseUp={onClose} />
         </box>
         <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
           {filter ? (
@@ -248,7 +255,11 @@ export function SelectDialog<T>({
           const previous = visible[visible.indexOf(o) - 1];
           const group = o.group && o.group !== previous?.group ? o.group : undefined;
           const groupSpacer = visible.indexOf(o) > 0;
-          const labelWidth = Math.max(16, cardWidth - 10);
+          const statusWidth = o.status ? stringWidth(o.status.text) + 1 : 0;
+          const rowWidth = Math.max(4, cardWidth - 8 - statusWidth);
+          const title = `${o.label}${o.meta ? `  ${o.meta}` : ""}`;
+          const labelWidth = o.description ? Math.min(stringWidth(title), Math.max(8, Math.floor(rowWidth * 0.65))) : rowWidth;
+          const descriptionWidth = Math.max(0, rowWidth - Math.min(stringWidth(title), labelWidth) - 2);
           // Reference row shape (dialog-select.tsx): titles align at column 3;
           // the CURRENT row donates its gutter to a ● so its title stays put,
           // and its label wears the accent when not selected.
@@ -258,6 +269,9 @@ export function SelectDialog<T>({
               {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}
               {group ? <text content={` ${group}`} fg={C.accent} attributes={TextAttributes.BOLD} /> : null}
               <box
+                onMouseMove={() => { if (abs !== sel) setIdx(abs); }}
+                onMouseDown={() => setIdx(abs)}
+                onMouseUp={() => { if (!o.disabled) onSelect(o.value, o.id); }}
                 style={{
                   height: 1,
                   flexDirection: "row",
@@ -270,12 +284,12 @@ export function SelectDialog<T>({
                 {current && !o.gutter ? <text content="● " fg={rowFg} /> : null}
                 {o.gutter ? <text content={`${o.gutter} `} fg={selected ? C.accentText : C.accent} /> : null}
                 <text
-                  content={`${truncate(o.label, labelWidth)}${o.meta ? `  ${o.meta}` : ""}`}
+                  content={truncate(title, labelWidth)}
                   fg={rowFg}
                 />
-                {o.description ? (
+                {o.description && descriptionWidth > 1 ? (
                   <text
-                    content={`  ${truncate(o.description, Math.max(8, cardWidth - labelWidth - 8))}`}
+                    content={`  ${truncate(o.description, descriptionWidth)}`}
                     fg={selected ? C.accentText : C.subtle}
                   />
                 ) : null}
@@ -379,7 +393,7 @@ export function TextPromptDialog({
       >
         <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
           <text content={title} fg={C.fg} />
-          <text content="esc" fg={C.faint} />
+          <text content="esc" fg={C.faint} onMouseUp={onClose} />
         </box>
         <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
           <text content={value || placeholder || ""} fg={value ? C.fg : C.faint} />
