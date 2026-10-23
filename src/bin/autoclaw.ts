@@ -239,8 +239,12 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
       models = [{ id: model, contextWindow: 262_144, maxTokens: 32_768, reasoning: true }, ...models];
     }
     const defaultModel = resolveManagedModel(model, models);
-    if (!models.length && !model) {
-      console.error(`autoclaw run: catalog unavailable (live fetch failed, no cache) — falling back to ${defaultModel}`);
+    if (models.length === 0) {
+      // pi registers a provider through its models array: an empty one makes
+      // --provider autoclaw fail with "Unknown provider" even though the
+      // default id is set. Seed the mined ids so the config is self-consistent.
+      models = FALLBACK_MODELS.map((id) => ({ id, contextWindow: 262_144, maxTokens: 32_768, reasoning: true }));
+      console.error(`autoclaw run: catalog unavailable (live fetch failed, no cache) — seeding fallback ids, default ${defaultModel}`);
     }
     const agentDir = writePiProviderConfig(proxy.port, models, defaultModel);
 
@@ -266,7 +270,18 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
       p.stdout.on("data", (d: Buffer) => { if (stdout.length < cap) stdout += d.toString(); });
       p.stderr.on("data", (d: Buffer) => { if (stderr.length < cap) stderr += d.toString(); });
       const timer = setTimeout(() => p.kill("SIGKILL"), 45 * 60_000);
-      p.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+      // Without this, a failed spawn (ENOENT etc.) never fires "close" and
+      // the executor hangs forever on a child that does not exist (trial
+      // zombie, 2026-10-23): fail honestly instead.
+      let done = false;
+      const finish = (code: number | null, note?: string) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr: note ? `${stderr}\n${note}` : stderr });
+      };
+      p.on("error", (e: Error) => finish(null, `spawn error: ${e.message}`));
+      p.on("close", (code) => finish(code));
     });
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify({ cli, agentDir, proxyPort: proxy.port, workspace, model: defaultModel, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
