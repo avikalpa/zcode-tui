@@ -97,3 +97,20 @@ describe("queue enqueue --eligible-at (dispatch-hardening)", () => {
     rmSync(pf);
   });
 });
+
+describe("queue CLI surface (dispatch-hardening)", () => {
+  test("enqueue --eligible-at parses end-to-end through the real CLI", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ztq-cli-"));
+    const pf = join(dir, "brief.md");
+    writeFileSync(pf, "cli surface body\n");
+    const at = Date.now() + 7_200_000;
+    const p = Bun.spawnSync(["bun", "run", "src/bin/queue.ts", "enqueue",
+      "--route", "codex", "--prompt-file", pf, "--workspace", dir,
+      "--title", "cli-elig", "--eligible-at", String(at),
+      "--state-dir", join(dir, "state")], { cwd: import.meta.dir + "/.." });
+    expect(p.exitCode).toBe(0);
+    const out = new TextDecoder().decode(p.stdout);
+    expect(out).toContain("eligible_at=");
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
