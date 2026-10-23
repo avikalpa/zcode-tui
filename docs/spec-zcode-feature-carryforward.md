@@ -251,3 +251,62 @@ result consumption + the existing protocol-composable dream routes
    (fetch failed / socket hang up / ECONNRESET / terminated / …) are
    explicitly steer-class — for planes that drop connections midway
    (AutoClaw-class). The queue's future autoclaw route will pass it.
+
+## 12. THE SEPARATION BOUNDARY — no logins, no app code (owner 2026-10-23, hard law)
+
+zcode-tui is a PUBLIC GitHub repo and project. It ships **NO logins, NO
+ZCode code, and NO AutoClaw code** — no credentials, no app identity
+constants, no vendored harness sources. The idea: on a user's machine the
+user authenticates ZCode and AutoClaw themselves (before or after installing
+zcode-tui); zcode-tui then **picks up the coding plans automatically** and
+works seamlessly across the user's fleet **by config-file replication**.
+This boundary is why zcode-tui steps on no one's toes. It is obeyed in code,
+docs and tests.
+
+How each plane complies:
+
+- **ZCode coding plan**: zcode-tui spawns the RUNTIME THE USER ALREADY HAS
+  (`/opt/ZCode/zcode` or the user's own install) and reads the user's own
+  `~/.zcode/v2/` auth. Nothing of ZCode ships in this repo.
+- **AutoClaw plan (managed plane, landed this lane)**: `zcode-tui autoclaw
+  setup` **mines at runtime** — from the AutoClaw app the user installed and
+  logged into — the app identity block, gateway origins, proxy paths, refresh
+  endpoints, app version and pi version (regex over the user's own bundle),
+  and decrypts the user's own credential via their keyring (public Chromium
+  os_crypt format). All of it lands in the USER's
+  `~/.config/zcode-tui/autoclaw-plan.json` (0600). The repo carries only the
+  mining PROCEDURE; zero AutoClaw values are embedded in source or tests
+  (the mine test fixture is shape-only synthetic text).
+- **Fleet replication**: the plan file rides the auth-sync SSOT channel
+  (auth/sync.ts, newest-wins on `auth.updatedAt`) — every host can serve the
+  plan without the official app installed.
+- **pi harness**: prefer the pi CLI inside the user's own AutoClaw install;
+  absent that, `--vendor` performs an EXPLICIT user-invoked install of the
+  public `@earendil-works/pi-coding-agent` npm package into the user's own
+  data dir, pinned to the version their own app ships (owner approved the
+  public-package path 2026-10-23 — insights that simplify the pipeline are
+  encouraged).
+- **Signing proxy**: zcode-tui hosts the local sign middleware (the same job
+  the official app's main process does) because pi cannot compute per-request
+  signatures from static config. The proxy reads ONLY the user's plan file.
+- **Trademark note**: "ZCode" and "AutoClaw" appear descriptively, to name
+  what the user's own tooling interoperates with. This is an unofficial
+  client; it is not either product.
+
+Measured wire contract (mined + validated live 2026-10-23, AutoClaw 2.0.3
+oversea-official): sign = `md5(appId & unixSec & appKey)` hex in
+`X-Auth-Sign`; access token rides `X-Authorization` with the bundle's own
+Bearer-normalization (the server returns tokens that may already carry the
+prefix — double-prefixing 401s); refresh = POST `/userapi/v1/refresh` body
+`{refresh_token, source_id, device_id}`, envelope `{code:0, data:{access_
+token, refresh_token}}`, fallback `/userapi/v1/agent-refresh` on code
+400002, 400000 hard / 510002 soft; model calls = Anthropic Messages at
+`{gateway}{proxyPath}/v1/messages`; plan-side contention answers 403/810001
+"high demand" and, minutes later on the SAME request shape, a bare 406 —
+both server-side load states (classifier parks 10m).
+
+Falsifier status: mining (real bundle), decrypt (real keyring), refresh
+(code 0, persisted), pi→proxy→gateway round trip (real answers observed)
+all pass; full model completion is currently gated by the plan's own
+capacity answers (810001/406) — a load state, not a protocol failure; the
+queue parks and retries.
