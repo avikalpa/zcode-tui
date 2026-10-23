@@ -396,7 +396,14 @@ ${note}` : stderr });
     const providerError = result.code === 0 && piEventStreamHasError(result.stdout);
     const errMatch = result.stdout.match(/"errorMessage":"([^"]{0,300})"/);
     writeFileSync(out, JSON.stringify({ ticket: row.serverTicketId, task: row.offPeakTaskId, model, workspace, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, providerError, providerErrorMessage: providerError ? errMatch?.[1] : undefined, wire, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
-    const settle = await settleTicket(row.serverTicketId);
+    // Honesty: do NOT settle a provider-errored turn immediately — the
+    // settle releases the slot and the desktop marks it Succeeded (settled
+    // semantics), and it burned a bisect slot mid-experiment. Settle only on
+    // honest success or a dead ticket; provider errors leave the ticket for
+    // the deadline/expire path so the failure stays inspectable.
+    const settle = providerError
+      ? { ok: false, detail: "skipped (provider error — ticket left unsettled)" }
+      : await settleTicket(row.serverTicketId);
     const honestRc = providerError ? 1 : result.code;
     setLocalTaskState(row.offPeakTaskId, honestRc === 0 ? "completed" : "failed", { endedAt: Date.now(), failureReason: honestRc === 0 ? undefined : providerError ? `provider error: ${errMatch?.[1] ?? "unknown"}` : `pi rc=${result.code}` });
     console.log(`idle exec: rc=${honestRc}${providerError ? " (provider error inside pi stream)" : ""} in ${Math.round((Date.now() - t0) / 1000)}s, settle=${settle.ok ? "ok" : settle.detail} -> ${out}`);
