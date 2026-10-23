@@ -68,6 +68,14 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
   const workspace = v.workspace ? String(v.workspace) : process.cwd();
   const out = v.out ? String(v.out) : "/tmp/zt-idle-create-transcript.json";
   const modelArg = v.model ? String(v.model) : "";
+  // Owner directive 2026-10-23: idle dreamers run FULL ACCESS by default
+  // (yolo); every other mode is an explicit opt-down via --permission-mode.
+  const permissionMode = v["permission-mode"] ? String(v["permission-mode"]) : "yolo";
+  const PERMITTED = ["build", "edit", "plan", "yolo", "guarded"];
+  if (!PERMITTED.includes(permissionMode)) {
+    console.error(`idle create: --permission-mode must be one of ${PERMITTED.join(", ")}`);
+    process.exit(2);
+  }
 
   let sawToolResult = "";
   let refusal = "";
@@ -122,6 +130,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       `- title: ${JSON.stringify(title.slice(0, 120))}`,
       "- prompt: the text between <prompt> markers below, verbatim, unmodified:",
       `<prompt>\n${prompt}\n</prompt>`,
+      `- permissionMode: ${JSON.stringify(permissionMode)}`,
       "Do not ask questions. Do not create any other task or automation.",
       "When the tool returns, output its message verbatim and stop.",
     ].join("\n");
@@ -156,9 +165,9 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
         } catch { /* index not present on this host */ }
         if (!ticket) await new Promise((r) => setTimeout(r, 3000));
       }
-      const payload = { ok: true, sessionId, offPeakTaskId, queuePosition, serverTicketId: ticket };
+      const payload = { ok: true, sessionId, offPeakTaskId, queuePosition, serverTicketId: ticket, permissionMode };
       console.log(`ZT-IDLE-CREATE ${JSON.stringify(payload)}`);
-      console.log(`idle create: task ${offPeakTaskId}${queuePosition ? ` (#${queuePosition} in queue)` : ""}${ticket ? ` ticket ${ticket}` : " (ticket not yet visible in local index)"} -> ${out}`);
+      console.log(`idle create: task ${offPeakTaskId}${queuePosition ? ` (#${queuePosition} in queue)` : ""} mode=${permissionMode}${ticket ? ` ticket ${ticket}` : " (ticket not yet visible in local index)"} -> ${out}`);
       if (v.json) console.log(JSON.stringify(payload));
       await sv.close();
       return;
@@ -194,6 +203,7 @@ const { values } = parseArgs({
     workspace: { type: "string" },
     title: { type: "string" },
     model: { type: "string" },
+    "permission-mode": { type: "string" },
     out: { type: "string" },
   },
 });
@@ -204,7 +214,9 @@ if (import.meta.main) {
   else {
     console.error("usage: zcode-tui idle <list|create> [...]");
     console.error("  list [--json]");
-    console.error("  create --prompt-file F [--workspace W] [--title T] [--model M] [--json]");
+    console.error("  create --prompt-file F [--workspace W] [--title T] [--model M]");
+    console.error("         [--permission-mode yolo|build|edit|plan|guarded] [--json]");
+    console.error("         (permission-mode defaults to yolo - full access, owner directive 2026-10-23)");
     process.exit(2);
   }
 }
