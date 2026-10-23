@@ -5,6 +5,10 @@ Unofficial client-side dispatcher for fleet dream/batch work (owner directive
 
 ## Verbs
 
+- `zcode-tui queue rm <task-id> [--json]` — cancel a queued/retry_wait/cooldown_wait
+  task (status becomes terminal `cancelled`); refuses running or already-terminal
+  tasks (exit 1), unknown id exits 2.
+
 ```
 zcode-tui queue enqueue --prompt-file F --workspace W --route R \
     [--title T] [--model M] [--priority N] [--max-attempts N]

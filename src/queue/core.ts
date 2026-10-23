@@ -6,6 +6,7 @@
 // zai-offpeak is the ZCode idle-time privilege: ticket creation costs no
 // plan quota and the SERVER schedules the run — exempt from our gate.
 import { createHash } from "node:crypto";
+import { Database } from "bun:sqlite";
 
 export type RouteName =
   | "zai-coding-plan"
@@ -31,9 +32,10 @@ export type TaskStatus =
   | "retry_wait" // failed, backing off 30/60/120s + jitter
   | "cooldown_wait" // refused with a server cooldown ("...in X hr Y min")
   | "completed" // terminal — never retried
-  | "failed"; // terminal (attempt cap or deterministic error)
-
-export const TERMINAL_STATUSES: TaskStatus[] = ["completed", "failed"];
+  | "failed" // terminal (attempt cap or deterministic error)
+  | "cancelled" // terminal — cancelled via `queue rm` before dispatch
+  | "cancelled" // terminal — cancelled via `queue rm` before dispatch
+export const TERMINAL_STATUSES: TaskStatus[] = ["completed", "failed", "cancelled"];
 export const PENDING_STATUSES: TaskStatus[] = ["queued", "retry_wait", "cooldown_wait"];
 
 export interface TaskRow {
@@ -92,6 +94,21 @@ export function minutesToPeak(now: Date = new Date()): number {
   // Advance past weekends (IST calendar days).
   while ([0, 6].includes(new Date(now.getTime() + IST_OFFSET_MIN * 60_000 + day * 86_400_000).getUTCDay())) day++;
   return day * 24 * 60 + PEAK_START_MIN - minutes;
+}
+
+export type RmOutcome =
+  | { ok: true; id: string; status: TaskStatus }
+  | { ok: false; reason: "unknown" | "running" | "terminal"; id: string; status: TaskStatus | null };
+
+/** `queue rm`: cancel a pending (queued/retry_wait/cooldown_wait) task. */
+export function rmTask(db: Database, id: string, now = Date.now(), note = "cancelled via queue rm"): RmOutcome {
+  const row = db.query("SELECT status FROM tasks WHERE id = ?").get(id) as { status: TaskStatus } | null;
+  if (!row) return { ok: false, reason: "unknown", id, status: null };
+  if (row.status === "running") return { ok: false, reason: "running", id, status: row.status };
+  if ((TERMINAL_STATUSES as string[]).includes(row.status)) return { ok: false, reason: "terminal", id, status: row.status };
+  db.query("UPDATE tasks SET status='cancelled', last_error=?, updated_at=?, finished_at=? WHERE id=?")
+    .run(note, now, now, id);
+  return { ok: true, id, status: "cancelled" };
 }
 
 /** Minutes until the current peak window ends (0 if not in peak). */
