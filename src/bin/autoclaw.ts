@@ -97,35 +97,38 @@ const PI_AGENT_DIR = () => join(process.env.HOME ?? homedir(), ".local", "state"
 const CATALOG_CACHE = () => join(process.env.HOME ?? homedir(), ".local", "state", "zcode-tui", "autoclaw-model-catalog.json");
 
 async function cmdSetup(v: Record<string, string | boolean | undefined>): Promise<number> {
-  try {
-    const plan = minePlan({
-      appDir: v["app-dir"] ? String(v["app-dir"]) : undefined,
-      configDir: v["config-dir"] ? String(v["config-dir"]) : undefined,
-    });
-    writePlan(plan);
-    console.log(`setup: plan written -> ${PLAN_FILE}`);
-    console.log(`  endpoint: ${plan.endpoint.base} (mined from ${plan.minedFrom})`);
+  let plan = readPlan();
+  if (!plan || v["app-dir"] || v["config-dir"]) {
+    try {
+      plan = minePlan({
+        appDir: v["app-dir"] ? String(v["app-dir"]) : undefined,
+        configDir: v["config-dir"] ? String(v["config-dir"]) : undefined,
+      });
+      writePlan(plan);
+    } catch (e) {
+      if (!plan) { console.error(`setup failed: ${(e as Error).message}`); return 1; }
+      console.error(`setup: mining skipped on this host (${(e as Error).message.split(" — ")[0]}) — using the synced plan`);
+    }
+  }
+  console.log(`setup: plan ready -> ${PLAN_FILE}`);
+  console.log(`  endpoint: ${plan.endpoint.base} (mined from ${plan.minedFrom})`);
     console.log(`  credential: updatedAt ${plan.auth.updatedAt}, deviceId ${plan.auth.deviceId.slice(0, 8)}…`);
     const cat = await fetchModelCatalog(plan);
     if (cat.ok) {
       mkdirSync(dirname(CATALOG_CACHE()), { recursive: true });
       writeFileSync(CATALOG_CACHE(), JSON.stringify({ fetchedAt: new Date().toISOString(), models: cat.models }, null, 2) + "\n");
-      console.log(`  catalog: ${cat.models.map((m) => m.id).join(", ")}`);
-    } else {
-      console.log(`  catalog: unavailable (${typeof cat.failure === "string" ? cat.failure : cat.failure.kind}) — cached copy or explicit --model still works`);
-    }
-    if (autoclawPiCli()) {
-      console.log(`  pi harness: ${autoclawPiCli()}`);
-    } else if (v.vendor) {
-      console.log(`  vendor: ${vendorPi(plan).detail}`);
-    } else {
-      console.log(`  pi harness: not found on this host — rerun with --vendor to install the public @earendil-works/pi-coding-agent package (pinned to your app's pi ${plan.pi?.version ?? "latest"})`);
-    }
-    return 0;
-  } catch (e) {
-    console.error(`setup failed: ${(e as Error).message}`);
-    return 1;
+    console.log(`  catalog: ${cat.models.map((m) => m.id).join(", ")}`);
+  } else {
+    console.log(`  catalog: unavailable (${typeof cat.failure === "string" ? cat.failure : cat.failure.kind}) — cached copy or explicit --model still works`);
   }
+  if (autoclawPiCli()) {
+    console.log(`  pi harness: ${autoclawPiCli()}`);
+  } else if (v.vendor) {
+    console.log(`  vendor: ${vendorPi(plan).detail}`);
+  } else {
+    console.log(`  pi harness: not found on this host — rerun with --vendor to install the public @earendil-works/pi-coding-agent package (pinned to your app's pi ${plan.pi?.version ?? "latest"})`);
+  }
+  return 0;
 }
 
 async function cmdProxy(v: Record<string, string | boolean | undefined>): Promise<number> {
