@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
 import { parseCooldownMs } from "../queue/core";
+import { handleOffPeakAsk, ticketAvailability } from "../queue/offpeak-gateway";
 import { syncAuthHeadless } from "../auth/sync";
 
 const TASKS_INDEX = () =>
@@ -109,6 +110,19 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       if (method === "interaction/requestPermission") sv.respond(id, { decision: "allow" });
       else if (method === "interaction/requestUserInput") sv.respond(id, { cancelled: true });
       else if (method === "session/requestRuntimePreferences") sv.respond(id, { nativeSearchEnhancementsEnabled: false });
+      else if (method === "offPeak/list" || method === "offPeak/create") {
+        // We ARE the desktop-main equivalent in app-server mode (measured
+        // 2026-10-23): answer the OffPeak surfaces from the local index +
+        // the cloud ticket gateway, exactly as the desktop does.
+        handleOffPeakAsk(method, (m.params as Record<string, unknown>) ?? {})
+          .then((reply) => sv.respond(id, reply ?? {}))
+          .catch((e) => {
+            console.error(`idle create: offPeak ask ${method} failed: ${e instanceof Error ? e.message : e}`);
+            sv.respond(id, method === "offPeak/create"
+              ? { ok: false, failureStage: "remote", errorCategory: "network", errorCode: "ask_failed", error: String(e) }
+              : {});
+          });
+      }
       else sv.respond(id, {});
     },
   }, { onStderr: (c) => process.stderr.write(c.slice(0, 200)) });
@@ -247,13 +261,25 @@ const { values } = parseArgs({
     out: { type: "string" },
   },
 });
+async function cmdQuota(json: boolean) {
+  const a = await ticketAvailability();
+  const payload: Record<string, unknown> = a.nextTakeAt
+    ? { canCreateNow: false, resetsAt: new Date(a.nextTakeAt).toISOString(), resetsInMin: Math.max(0, Math.round((a.nextTakeAt - Date.now()) / 60000)) }
+    : { canCreateNow: a.canTake };
+  if (a.error) payload.error = a.error;
+  if (json) { console.log(JSON.stringify(payload, null, 1)); return; }
+  console.log(`idle quota: ${payload.canCreateNow === true ? "CAN CREATE NOW" : `cooldown — resets at ${payload.resetsAt} (in ${payload.resetsInMin}m)`}${a.error ? ` [${a.error}]` : ""}`);
+}
+
 const sub = String(process.argv[2] ?? "");
 if (import.meta.main) {
   if (sub === "list") cmdList(Boolean(values.json));
+  else if (sub === "quota") await cmdQuota(Boolean(values.json));
   else if (sub === "create") await cmdCreate(values as Record<string, string | boolean | undefined>);
   else {
-    console.error("usage: zcode-tui idle <list|create> [...]");
+    console.error("usage: zcode-tui idle <list|quota|create> [...]");
     console.error("  list [--json]");
+    console.error("  quota [--json]    # availability + free-tier reset time (gateway)");
     console.error("  create --prompt-file F [--workspace W] [--title T] [--model M]");
     console.error("         [--permission-mode yolo|build|edit|plan|guarded] [--json]");
     console.error("         (permission-mode defaults to yolo - full access, owner directive 2026-10-23)");
