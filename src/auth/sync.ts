@@ -240,4 +240,55 @@ export function syncAuthHeadless(): void {
     const r = syncAuthAtStartup();
     if (r) console.error(`zcode-tui: auth synced from ${r.source} (fingerprint ${r.fingerprint.slice(0, 8)})`);
   } catch { /* never block */ }
+  try {
+    const p = syncAutoclawPlan();
+    if (p) console.error(`zcode-tui: autoclaw plan synced from ${p.source} (${p.action})`);
+  } catch { /* never block */ }
+}
+
+// ---------------------------------------------------------------------------
+// AutoClaw plan replication (owner boundary 2026-10-23: the user's own mined
+// plan file — identity + credential — travels the same SSOT channel as the
+// zcode provider config, so every host can serve the plan without the
+// official app installed. NEWEST WINS on auth.updatedAt: a host that refreshed
+// its credential is never clobbered by a stale SSOT copy; pushing the fresher
+// copy back to the SSOT host stays a manual `zcode-tui autoclaw credential
+// refresh` there (best-effort, never automatic — one writer per credential).
+// ---------------------------------------------------------------------------
+
+export const AUTOCLAW_PLAN_RELPATH = ".config/zcode-tui/autoclaw-plan.json";
+
+export interface PlanSyncResult { source: string; action: "pulled" | "local-newer" | "skipped"; reason?: string }
+
+/** Best-effort: pull the SSOT plan file when it exists and is newer than local. */
+export function syncAutoclawPlan(deps: SyncDeps = {}): PlanSyncResult | null {
+  const home = deps.homeDir ?? process.env.HOME ?? "";
+  if (!home) return null;
+  const cfg = loadAuthConfig(home);
+  if (!cfg.syncAtStartup) return null;
+  const fetch = sourceIsLocal(cfg.source)
+    ? (rel: string) => localFetch(home, rel)
+    : (rel: string) => (deps.fetchRemote ?? sshFetch)(cfg.source, join("$HOME", rel));
+
+  let remote: string;
+  try {
+    remote = fetch(AUTOCLAW_PLAN_RELPATH);
+  } catch {
+    return { source: cfg.source, action: "skipped", reason: "no plan on the SSOT host yet" };
+  }
+  const localPath = join(home, AUTOCLAW_PLAN_RELPATH);
+  const updatedAt = (raw: string): string => {
+    try { return (JSON.parse(raw) as { auth?: { updatedAt?: string } }).auth?.updatedAt ?? ""; } catch { return ""; }
+  };
+  const remoteStamp = updatedAt(remote);
+  if (!remoteStamp) return { source: cfg.source, action: "skipped", reason: "SSOT plan has no auth.updatedAt" };
+  let localStamp = "";
+  try { localStamp = updatedAt(readFileSync(localPath, "utf8")); } catch { /* no local plan yet */ }
+  if (localStamp && localStamp >= remoteStamp) {
+    return { source: cfg.source, action: "local-newer" };
+  }
+  mkdirSync(join(home, ".config", "zcode-tui"), { recursive: true });
+  writeFileSync(localPath, remote);
+  chmodSync(localPath, 0o600);
+  return { source: cfg.source, action: "pulled" };
 }

@@ -27,6 +27,7 @@ import {
   type RouteName, type TaskRow,
 } from "../queue/core";
 import { autoclawPiCli, autoclawCredential, UNATTENDED_PREAMBLE } from "./autoclaw";
+import { planExists } from "../autoclaw/plan";
 import { syncAuthHeadless } from "../auth/sync";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -258,9 +259,21 @@ export function buildCommand(
       };
     }
     case "autoclaw": {
-      // AutoClaw harness (pi CLI inside the appimage runtime) — lives on the
-      // desktop host; rides ssh like the idle route. Credential must be
-      // provisioned (see zcode-tui autoclaw doctor).
+      // Managed plane first: with the user's plan file present (mined by
+      // `autoclaw setup`, replicated by auth sync) the route runs LOCALLY on
+      // any host — signing proxy + pi, no desktop host involved.
+      if (planExists()) {
+        const local = [
+          bun, join(ctx.repo, "src/bin/autoclaw.ts"), "run",
+          "--content-file", "-", "--out", ctx.runLog,
+          "--workspace", JSON.stringify(task.workspace),
+        ];
+        if (task.model) local.push("--model", JSON.stringify(task.model));
+        return { cmd: local, cwd: task.workspace, stdin: `${UNATTENDED_PREAMBLE}\n\n${task.prompt}` };
+      }
+      // Legacy fallback: pi CLI inside the appimage runtime on the desktop
+      // host; rides ssh like the idle route. Credential must be provisioned
+      // (see zcode-tui autoclaw doctor).
       const inner = [
         `cd ${ctx.repo} && ${bun} run src/bin/autoclaw.ts run`,
         "--content-file", "-", "--out", ctx.runLog,
@@ -523,7 +536,7 @@ async function main() {
   syncAuthHeadless();
   // The autoclaw route is dispatchable only when the harness AND a
   // provisioned plan credential exist on this host (measured honestly).
-  if (autoclawPiCli() && autoclawCredential()) {
+  if (planExists() || (autoclawPiCli() && autoclawCredential())) {
     ROUTES.autoclaw.available = true;
     ROUTES.autoclaw.unavailableReason = undefined;
   }

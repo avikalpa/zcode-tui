@@ -27,11 +27,23 @@ requeued (or failed at the attempt cap).
 | `zai-offpeak` | `zcode-tui idle create` over ssh to the desktop host (jojo) — takes a server idle-time ticket; jojo's runtime executes it | exempt (zero plan-quota cost; the server owns the schedule) |
 | `opencode-free` | `opencode run` free tier (`opencode/glm-5.3-flash-free` default) | exempt |
 | `codex` | `codex exec` spillover | exempt |
-| `autoclaw` | config-ready, **not dispatchable**: provider absent from the app-server model registry (measured 2026-10-22; upstream ask open) | would be gated |
+| `autoclaw` | **managed**: local signing proxy (`src/autoclaw/proxy.ts`) + the pi coding agent, using the plan mined from the user's own AutoClaw install (`zcode-tui autoclaw setup`; fleet hosts get the plan via auth sync — spec §12 boundary: the repo ships no logins or app code). Legacy fallback (no plan file): ssh to the desktop host's appimage pi with a provisioned key. Plan-side contention (403/810001, bare 406) parks the route 10 min | gated Mon–Fri 11:30–15:30 IST |
 
 The peak gate mirrors `tools/zai_peak_window.py` (docs.z.ai devpack: peak
 usage burns 1x vs 0.5x off-peak). During peak, serve logs one line per route
 and holds tasks; `run.ts` still carries `--max-run-min` as the in-run guard.
+
+## autoclaw verbs (companion)
+
+- `zcode-tui autoclaw setup [--app-dir D] [--config-dir D] [--vendor]` — mine the plan
+  (identity, endpoints, credential, pi version) from the authenticated AutoClaw app on
+  THIS machine into `~/.config/zcode-tui/autoclaw-plan.json`; `--vendor` explicitly
+  installs the public pi package when no appimage pi exists.
+- `zcode-tui autoclaw proxy [--port N] [--host H]` — serve the local signing gateway.
+- `zcode-tui autoclaw credential <status|refresh>` — plan credential state / rotation.
+- `zcode-tui autoclaw doctor [--json]` — plan + harness state.
+- `zcode-tui autoclaw run --content-file F ...` — one agent turn (managed path when a
+  plan file exists, legacy path otherwise).
 
 ## Fault tolerance
 

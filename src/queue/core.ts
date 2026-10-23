@@ -145,6 +145,13 @@ const STRONG_USAGE_LIMIT = /free usage limit|usage limit reached|rate limit|quot
  *  30/60/120s ladder; minutes-scale retries only burn dispatcher turns. */
 export const SERVICE_TRANSIENT_PARK_MS = 2 * 3_600_000;
 const SERVICE_TRANSIENT = /cannot verify|try again later|service is unreachable|temporarily unavailable/i;
+
+// AutoClaw managed-plane contention (measured live 2026-10-23): the plan's own
+// gate answers 403 + code 810001 "high demand ... try again shortly" and, under
+// heavier load, a bare 406 with no body — same signed request, minutes apart.
+// Server-side load states, not protocol errors: park briefly, retry.
+const MANAGED_BUSY = /high demand|810001|406 status code/i;
+const MANAGED_BUSY_PARK_MS = 10 * 60_000;
 /** Heuristic park for route-level limits that refuse without a timestamp. */
 export const UNTIMED_LIMIT_PARK_MS = 3 * 3_600_000;
 const AUTHISH = /auth|credential|api[ _-]?key|permission|forbidden|unauthorized|invalid model|unsupported model/i;
@@ -180,6 +187,9 @@ export function classifyFailure(
     // opencode "Free usage limit reached" carries no time). Park the route
     // on a heuristic window instead of burning every queued task to cap.
     return { kind: "cooldown", cooldownMs: UNTIMED_LIMIT_PARK_MS, next_eligible_at: nowMs + UNTIMED_LIMIT_PARK_MS, note: "untimed usage limit — heuristic 3h park" };
+  }
+  if (MANAGED_BUSY.test(tail)) {
+    return { kind: "cooldown", cooldownMs: MANAGED_BUSY_PARK_MS, next_eligible_at: nowMs + MANAGED_BUSY_PARK_MS, note: "managed-plane busy (810001/406) — 10m park" };
   }
   if (SERVICE_TRANSIENT.test(tail)) {
     return { kind: "cooldown", cooldownMs: SERVICE_TRANSIENT_PARK_MS, next_eligible_at: nowMs + SERVICE_TRANSIENT_PARK_MS, note: "service-side transient — heuristic 2h park" };
@@ -257,11 +267,11 @@ export const ROUTES: Record<RouteName, RouteDef> = {
   },
   autoclaw: {
     name: "autoclaw",
-    desc: "AutoClaw credits plane (config-ready)",
+    desc: "AutoClaw credits plane (managed: mined plan + local signing proxy + pi)",
     peakGated: true,
     available: false,
     unavailableReason:
-      "provider absent from the app-server model registry (workspace/readState shows zai/* Coding Plan entries only, measured 2026-10-22) — upstream ask open",
+      "no autoclaw-plan.json on this host (run `zcode-tui autoclaw setup` where the official AutoClaw app is authenticated; auth sync replicates it fleet-wide)",
     taskTimeoutMin: 60,
   },
 };
