@@ -133,6 +133,9 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       sessionId = typeof sAny === "string" ? sAny : String((sAny as Record<string, unknown>)?.sessionId ?? "");
     }
     console.error(`idle create: session ${sessionId}`);
+    if (resumeArg) {
+      await sv.request("session/resume", { sessionId }, 30000);
+    }
     await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true }, 20000);
     if (values.warmup) {
       // Turn 1: a trivial exchange so the session exists server-side with
