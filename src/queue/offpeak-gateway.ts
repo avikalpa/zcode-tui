@@ -241,7 +241,15 @@ export async function handleOffPeakAsk(method: string, params: Record<string, un
       workspacePath: process.cwd(),
     });
     if (res.ok) return { ok: true, task: res.task };
-    return { ok: false, failureStage: "remote", errorCategory: res.refusal ? "limit" : "network", errorCode: res.refusal ? "free_tier_limit" : res.error, error: res.error };
+    // The runtime zod-validates the failure shape (measured enums 2026-10-23):
+    //   failureStage: client_validation|ticket_request|local_persist
+    //   errorCategory: client_validation|eligibility_3101|quota_3103|network|invalid_response|local_persist|unknown
+    const category = res.error?.includes("401") ? "network"
+      : res.refusal ? "quota_3103"
+      : res.error?.includes("local row insert") ? "local_persist"
+      : "network";
+    const stage = res.error?.includes("local row insert") ? "local_persist" : "ticket_request";
+    return { ok: false, failureStage: stage, errorCategory: category, errorCode: (res.error ?? res.refusal ?? "unknown").slice(0, 120) };
   }
   return null;
 }
