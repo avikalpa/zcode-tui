@@ -300,15 +300,24 @@ export function adoptOrphanedTickets(): { task: string; ticket: string }[] {
   const db = new Database(TASKS_INDEX());
   const adopted: { task: string; ticket: string }[] = [];
   try {
-    const rows = db.query(`SELECT off_peak_task_id, failure_reason FROM off_peak_tasks
-      WHERE server_ticket_id IS NULL AND failure_reason LIKE '%ticket_id%'`).all() as any[];
+    const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, failure_reason FROM off_peak_tasks
+      WHERE (server_ticket_id IS NULL AND failure_reason LIKE '%ticket_id%')
+         OR (server_ticket_id IS NOT NULL AND status='failed' AND failure_reason LIKE 'off-peak dispatch%')`).all() as any[];
     for (const r of rows) {
-      const m = /"ticket_id":"(\d+)"/.exec(String(r.failure_reason ?? ""));
-      const pos = /"position":(\d+)/.exec(String(r.failure_reason ?? ""));
-      if (!m) continue;
-      db.query(`UPDATE off_peak_tasks SET server_ticket_id=?, status='queued', queue_position=?, failure_reason='adopted from runtime registration', updated_at=? WHERE off_peak_task_id=?`)
-        .run(m[1], pos ? Number(pos[1]) : null, Date.now(), r.off_peak_task_id);
-      adopted.push({ task: r.off_peak_task_id, ticket: m[1] });
+      let ticket = r.server_ticket_id ? String(r.server_ticket_id) : "";
+      let pos: string | null = null;
+      if (!ticket) {
+        const m = /"ticket_id":"(\d+)"/.exec(String(r.failure_reason ?? ""));
+        if (!m) continue;
+        ticket = m[1];
+        pos = /"position":(\d+)/.exec(String(r.failure_reason ?? ""))?.[1] ?? null;
+      }
+      // schedulable=0: OUR serve executes adopted rows — the desktop claim
+      // loop must not touch them (measured: it claims schedulable rows and
+      // fails dispatch with "no usable model" for rows it did not create).
+      db.query(`UPDATE off_peak_tasks SET server_ticket_id=?, status='queued', schedulable=0, queue_position=COALESCE(?, queue_position), failure_reason='adopted by zcode-tui idle runner', updated_at=? WHERE off_peak_task_id=?`)
+        .run(ticket, pos, Date.now(), r.off_peak_task_id);
+      adopted.push({ task: r.off_peak_task_id, ticket });
     }
   } finally { db.close(); }
   return adopted;
