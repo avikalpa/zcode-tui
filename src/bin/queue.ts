@@ -69,7 +69,7 @@ function fmtIn(ms: number): string {
 // enqueue / list / status
 // ---------------------------------------------------------------------------
 
-function cmdEnqueue(db: Database, v: Record<string, string | boolean | undefined>) {
+export function cmdEnqueue(db: Database, v: Record<string, string | boolean | undefined>) {
   const route = String(v.route ?? "") as RouteName;
   if (!ROUTE_NAMES.includes(route)) {
     console.error(`queue: unknown route '${route}' (known: ${ROUTE_NAMES.join(", ")})`);
@@ -81,6 +81,16 @@ function cmdEnqueue(db: Database, v: Record<string, string | boolean | undefined
   if (!prompt.trim()) { console.error("queue: prompt file is empty"); process.exit(2); }
   const workspace = v.workspace ? String(v.workspace) : process.cwd();
   const now = nowMs();
+  let eligibleAt = now;
+  if (v["eligible-at"]) {
+    const raw = String(v["eligible-at"]);
+    const asNum = Number(raw);
+    eligibleAt = raw.trim() !== "" && Number.isFinite(asNum) ? asNum : Date.parse(raw);
+    if (!Number.isFinite(eligibleAt)) {
+      console.error(`queue: --eligible-at '${raw}' is not a timestamp (epoch-ms or ISO-8601)`);
+      process.exit(2);
+    }
+  }
   const t: TaskRow = {
     id: newId(), route,
     title: v.title ? String(v.title) : prompt.trim().split("\n")[0].slice(0, 72),
@@ -88,7 +98,7 @@ function cmdEnqueue(db: Database, v: Record<string, string | boolean | undefined
     workspace, model: v.model ? String(v.model) : "",
     priority: v.priority ? Number(v.priority) : 100,
     status: "queued", attempts: 0, max_attempts: v["max-attempts"] ? Number(v["max-attempts"]) : 3,
-    next_eligible_at: now, created_at: now, updated_at: now,
+    next_eligible_at: eligibleAt, created_at: now, updated_at: now,
     started_at: null, finished_at: null, last_error: "", last_exit: null,
     run_log: "", result_ref: "",
     expect_file: v["expect-file"] ? String(v["expect-file"]) : "",
@@ -104,7 +114,7 @@ function cmdEnqueue(db: Database, v: Record<string, string | boolean | undefined
       t.attempts, t.max_attempts, t.next_eligible_at, t.created_at, t.updated_at, t.started_at, t.finished_at,
       t.last_error, t.last_exit, t.run_log, t.result_ref, t.expect_file);
   const pos = positionOf(db, t.id);
-  console.log(`queued ${t.id} route=${route} position=${pos} attempts_cap=${t.max_attempts}`);
+  console.log(`queued ${t.id} route=${route} position=${pos} attempts_cap=${t.max_attempts}${eligibleAt !== now ? ` eligible_at=${new Date(eligibleAt).toISOString()}` : ""}`);
   if (v.json) console.log(JSON.stringify({ id: t.id, route, position: pos }));
 }
 
@@ -565,7 +575,7 @@ async function main() {
   switch (sub) {
     case "enqueue": {
       if (!values.route || !values["prompt-file"]) {
-        console.error("usage: zcode-tui queue enqueue --prompt-file F --workspace W --route R [--title T --model M --priority N --max-attempts N]");
+        console.error("usage: zcode-tui queue enqueue --prompt-file F --workspace W --route R [--title T --model M --priority N --max-attempts N --eligible-at TS --expect-file F]");
         process.exit(2);
       }
       cmdEnqueue(db, values as Record<string, string | boolean | undefined>);
