@@ -81,6 +81,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
   let refusal = "";
   let lastToolError = "";
   let lastEventAt = Date.now();
+  let turnEnded = false;
   let sessionId = "";
   const events: { ms: number; kind: string; summary: string }[] = [];
 
@@ -99,6 +100,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       // classifier can pattern-match service-transient refusals in the tail.
       const errMsg = (p.error as Record<string, unknown> | undefined)?.message;
       if (typeof errMsg === "string" && errMsg) lastToolError = errMsg.slice(0, 400);
+      if (kind === "result") turnEnded = true;
     },
     onServerRequest: (m) => {
       const method = String(m.method), id = String(m.id);
@@ -124,6 +126,18 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
     sessionId = typeof sAny === "string" ? sAny : String((sAny as Record<string, unknown>)?.sessionId ?? "");
     console.error(`idle create: session ${sessionId}`);
     await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true }, 20000);
+    if (values.warmup) {
+      // Turn 1: a trivial exchange so the session exists server-side with
+      // real history before it asks for an idle-time ticket.
+      turnEnded = false;
+      await sv.request("session/send", { sessionId, content: "Reply with exactly: OK" });
+      const w0 = Date.now();
+      while (Date.now() - w0 < 180_000) {
+        await new Promise((r) => setTimeout(r, 3000));
+        if (turnEnded && Date.now() - lastEventAt > 8_000) break;
+      }
+      console.error(`idle create: warm-up turn settled (${Date.now() - w0}ms, turnEnded=${turnEnded})`);
+    }
     const brief = [
       "You are being driven programmatically by zcode-tui (fleet worker).",
       "Call the OffPeakCreate tool NOW with EXACTLY these arguments:",
@@ -204,6 +218,7 @@ const { values } = parseArgs({
     title: { type: "string" },
     model: { type: "string" },
     "permission-mode": { type: "string" },
+    warmup: { type: "boolean", default: false },
     out: { type: "string" },
   },
 });
