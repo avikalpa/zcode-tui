@@ -344,7 +344,18 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
       p.stdout.on("data", (d: Buffer) => { if (stdout.length < cap) stdout += d.toString(); });
       p.stderr.on("data", (d: Buffer) => { if (stderr.length < cap) stderr += d.toString(); });
       const timer = setTimeout(() => p.kill("SIGKILL"), 120 * 60_000);
-      p.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+      // Fail honestly on a failed spawn instead of hanging on a child that
+      // never started (same zombie class as autoclaw.ts, 2026-10-23).
+      let done = false;
+      const finish = (code: number | null, note?: string) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr: note ? `${stderr}
+${note}` : stderr });
+      };
+      p.on("error", (e: Error) => finish(null, `spawn error: ${e.message}`));
+      p.on("close", (code) => finish(code));
     });
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify({ ticket: row.serverTicketId, task: row.offPeakTaskId, model, workspace, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
