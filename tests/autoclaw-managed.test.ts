@@ -11,7 +11,7 @@ import { mineBundle, decryptSafeStorage } from "../src/autoclaw/mine.ts";
 import { readPlan, writePlan, planFingerprint, bearer, PLAN_FILE } from "../src/autoclaw/plan.ts";
 import { signHeaders, refreshCredential, classifyManagedFailure, fetchModelCatalog } from "../src/autoclaw/gateway.ts";
 import { startManagedProxy } from "../src/autoclaw/proxy.ts";
-import { resolveManagedModel } from "../src/bin/autoclaw.ts";
+import { resolveManagedModel, piEventStreamHasError } from "../src/bin/autoclaw.ts";
 import type { AutoclawPlan } from "../src/autoclaw/plan.ts";
 
 function fixturePlan(overrides: Partial<AutoclawPlan> = {}): AutoclawPlan {
@@ -331,5 +331,16 @@ describe("resolveManagedModel (dispatch-hardening)", () => {
   });
   test("builtin fallback when catalog unavailable and no --model", () => {
     expect(resolveManagedModel("", [])).toBe("zaicoding_glm-5.3");
+  });
+});
+
+describe("piEventStreamHasError (billing honesty)", () => {
+  test("flags a provider-error turn (measured 406 shape)", () => {
+    const evt = JSON.stringify({ role: "assistant", stopReason: "error", errorMessage: "406 status code (no body)", provider: "autoclaw" });
+    expect(piEventStreamHasError(evt)).toBe(true);
+  });
+  test("clean settles pass", () => {
+    expect(piEventStreamHasError(JSON.stringify({ type: "agent_end", stopReason: "stop" }))).toBe(false);
+    expect(piEventStreamHasError("")).toBe(false);
   });
 });

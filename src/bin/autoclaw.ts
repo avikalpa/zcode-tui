@@ -286,10 +286,23 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify({ cli, agentDir, proxyPort: proxy.port, workspace, model: defaultModel, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
     console.log(`autoclaw run: rc=${result.code} in ${Math.round((Date.now() - t0) / 1000)}s -> ${out}`);
+    if (result.code === 0 && piEventStreamHasError(result.stdout)) {
+      // pi --print exits 0 even when the provider errored (measured
+      // 2026-10-23: stopReason "error", "406 status code (no body)", zero
+      // tokens, rc 0) — a zero-work run must never ride home as completed.
+      const m = result.stdout.match(/"errorMessage":"([^"]{0,200})"/);
+      console.error(`autoclaw run: provider error inside pi event stream${m ? `: ${m[1]}` : ""}`);
+      return 1;
+    }
     return result.code === 0 ? 0 : 1;
   } finally {
     proxy.stop();
   }
+}
+
+/** True when the pi --mode json event stream carries a provider error turn. */
+export function piEventStreamHasError(stdout: string): boolean {
+  return /"stopReason"\s*:\s*"error"/.test(stdout);
 }
 
 async function runBrief(v: Record<string, string | boolean | undefined>): Promise<number> {
