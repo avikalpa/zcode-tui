@@ -98,6 +98,15 @@ function readdirStamps(dir: string): string[] {
 const PI_AGENT_DIR = () => join(process.env.HOME ?? homedir(), ".local", "state", "zcode-tui", "pi-agent");
 const CATALOG_CACHE = () => join(process.env.HOME ?? homedir(), ".local", "state", "zcode-tui", "autoclaw-model-catalog.json");
 
+// Mined from the AutoClaw 2.0.3 runtime (docs/spec-zcode-feature-carryforward.md
+// §12; zai_auto is UI-only and 406s on the managed plane, so it is excluded).
+// The live catalog fetch is plan-capacity-gated (810001/406 at peak), so
+// worker runs fall back to these known ids instead of refusing.
+const FALLBACK_MODELS = ["zaicoding_glm-5.3", "zai_glm-5.3-flash", "zai_auto-fast"];
+export function resolveManagedModel(explicit: string, models: { id: string }[]): string {
+  return explicit || models[0]?.id || FALLBACK_MODELS[0];
+}
+
 async function cmdSetup(v: Record<string, string | boolean | undefined>): Promise<number> {
   let plan = readPlan();
   if (!plan || v["app-dir"] || v["config-dir"]) {
@@ -121,7 +130,7 @@ async function cmdSetup(v: Record<string, string | boolean | undefined>): Promis
       writeFileSync(CATALOG_CACHE(), JSON.stringify({ fetchedAt: new Date().toISOString(), models: cat.models }, null, 2) + "\n");
     console.log(`  catalog: ${cat.models.map((m) => m.id).join(", ")}`);
   } else {
-    console.log(`  catalog: unavailable (${typeof cat.failure === "string" ? cat.failure : cat.failure.kind}) — cached copy or explicit --model still works`);
+      console.log(`  catalog: unavailable (${typeof cat.failure === "string" ? cat.failure : cat.failure.kind}) — cached copy, explicit --model, or the builtin fallback ids still work`);
   }
   if (autoclawPiCli()) {
     console.log(`  pi harness: ${autoclawPiCli()}`);
@@ -229,8 +238,10 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
     if (model && !models.some((m) => m.id === model)) {
       models = [{ id: model, contextWindow: 262_144, maxTokens: 32_768, reasoning: true }, ...models];
     }
-    const defaultModel = model || models[0]?.id;
-    if (!defaultModel) { console.error("autoclaw run: no model resolvable (catalog unavailable and no --model)"); return 2; }
+    const defaultModel = resolveManagedModel(model, models);
+    if (!models.length && !model) {
+      console.error(`autoclaw run: catalog unavailable (live fetch failed, no cache) — falling back to ${defaultModel}`);
+    }
     const agentDir = writePiProviderConfig(proxy.port, models, defaultModel);
 
     const cli = autoclawPiCli();

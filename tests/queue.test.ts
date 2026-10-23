@@ -1,6 +1,10 @@
 // queue rm — task cancellation semantics (fleet ledger hygiene).
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { cmdEnqueue } from "../src/bin/queue";
 import { SCHEMA_SQL, rmTask, type TaskRow } from "../src/queue/core";
 
 function freshDb(): Database {
@@ -68,5 +72,28 @@ describe("queue rm", () => {
     const r = rmTask(db, "ztq-nope");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("unknown");
+  });
+});
+
+describe("queue enqueue --eligible-at (dispatch-hardening)", () => {
+  test("future eligibility is stored and reported", () => {
+    const db = freshDb();
+    const pf = join(tmpdir(), `ztq-elig-${Date.now()}.md`);
+    writeFileSync(pf, "eligible-at probe body\n");
+    const at = Date.now() + 3_600_000;
+    cmdEnqueue(db, { route: "codex", "prompt-file": pf, workspace: "/w", title: "elig test", "eligible-at": String(at) });
+    const row = db.query("SELECT next_eligible_at, status FROM tasks WHERE title='elig test'").get() as Record<string, unknown>;
+    expect(row.status).toBe("queued");
+    expect(Number(row.next_eligible_at)).toBe(at);
+    rmSync(pf);
+  });
+  test("ISO-8601 strings parse", () => {
+    const db = freshDb();
+    const pf = join(tmpdir(), `ztq-elig-iso-${Date.now()}.md`);
+    writeFileSync(pf, "iso body\n");
+    cmdEnqueue(db, { route: "codex", "prompt-file": pf, workspace: "/w", title: "elig iso", "eligible-at": "2030-01-01T00:00:00Z" });
+    const row = db.query("SELECT next_eligible_at FROM tasks WHERE title='elig iso'").get() as Record<string, unknown>;
+    expect(Number(row.next_eligible_at)).toBe(Date.parse("2030-01-01T00:00:00Z"));
+    rmSync(pf);
   });
 });

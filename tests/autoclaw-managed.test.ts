@@ -11,6 +11,7 @@ import { mineBundle, decryptSafeStorage } from "../src/autoclaw/mine.ts";
 import { readPlan, writePlan, planFingerprint, bearer, PLAN_FILE } from "../src/autoclaw/plan.ts";
 import { signHeaders, refreshCredential, classifyManagedFailure, fetchModelCatalog } from "../src/autoclaw/gateway.ts";
 import { startManagedProxy } from "../src/autoclaw/proxy.ts";
+import { resolveManagedModel } from "../src/bin/autoclaw.ts";
 import type { AutoclawPlan } from "../src/autoclaw/plan.ts";
 
 function fixturePlan(overrides: Partial<AutoclawPlan> = {}): AutoclawPlan {
@@ -318,5 +319,17 @@ describe("queue classifier: managed-plane busy", () => {
     const busy406 = classifyFailure("406 status code (no body)", 1, 3, t);
     expect(busy406.kind).toBe("cooldown");
     expect((demand.cooldownMs ?? 0)).toBe(600_000);
+  });
+});
+
+describe("resolveManagedModel (dispatch-hardening)", () => {
+  test("explicit model always wins", () => {
+    expect(resolveManagedModel("my-model", [{ id: "cat-first" }])).toBe("my-model");
+  });
+  test("catalog order wins when present", () => {
+    expect(resolveManagedModel("", [{ id: "cat-first" }, { id: "cat-second" }])).toBe("cat-first");
+  });
+  test("builtin fallback when catalog unavailable and no --model", () => {
+    expect(resolveManagedModel("", [])).toBe("zaicoding_glm-5.3");
   });
 });
