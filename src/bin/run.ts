@@ -26,6 +26,10 @@ const { values } = parseArgs({
     "max-events": { type: "string", default: "20000" },
     "max-run-min": { type: "string", default: "0" },
     continues: { type: "string", default: "3" },
+    // --resilient: for planes that drop connections midway (AutoClaw-class,
+    // owner 2026-10-23): 5 steers instead of 3 and transport-drop errors are
+    // explicitly steer-class (they already avoid the STOP list).
+    resilient: { type: "boolean", default: false },
   },
 });
 
@@ -42,7 +46,9 @@ let transportError = "";
 let continuesUsed = 0;
 let sawProgressAfterLastError = false;
 let lastErrorKind = "";
+let lastErrorText = "";
 const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
+const TRANSPORT_DROP = /fetch failed|socket hang up|econnreset|econnrefused|terminated|aborted|connection (closed|error|dropped)|network|timeout/i;
 const deadlineMs = Number(values["max-run-min"]) > 0
   ? Date.now() + Number(values["max-run-min"]) * 60_000
   : 0;
@@ -68,6 +74,7 @@ const sv = new AppServer({
         transportError = summary; // stop-class: report, never steer
       } else {
         lastErrorKind = kind;
+        lastErrorText = summary;
         sawProgressAfterLastError = false;
       }
     } else if (kind === "text_delta" || kind.includes("tool")) {
@@ -157,7 +164,8 @@ async function main() {
     if (transportError) break; // stop-class failure: report honestly
     if (continuesUsed < maxContinues) {
       const wait = backoffMs(continuesUsed);
-      console.log(`zt-run: continue-steer #${continuesUsed + 1} after ${Math.round(wait / 1000)}s (lastError=${lastErrorKind || "silence"})`);
+      const drop = TRANSPORT_DROP.test(`${transportError} ${lastErrorText}`);
+      console.log(`zt-run: ${drop ? "resilient " : ""}continue-steer #${continuesUsed + 1} after ${Math.round(wait / 1000)}s (lastError=${lastErrorKind || "silence"}${drop ? " transport drop" : ""})`);
       await new Promise((r) => setTimeout(r, wait));
       await sv.request("session/send", { sessionId, content: "Continue from where you stopped. Complete the task fully." });
       continuesUsed++;

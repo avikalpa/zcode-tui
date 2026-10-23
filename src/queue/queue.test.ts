@@ -271,7 +271,8 @@ describe("buildCommand", () => {
       { repo: "/repo", stateDir: "/st", promptFile: "/st/p.md", runLog: "/st/r.json", budgetMin: 0 },
     );
     expect(built.cmd[0]).toBe("ssh");
-    expect(built.cmd[1]).toBe("jojo");
+    expect(built.cmd).toContain("jojo"); // host after the keepalive options
+    expect(built.cmd.join(" ")).toContain("ServerAliveInterval=15");
     expect(built.cmd.join(" ")).toContain("idle.ts create");
     expect(built.stdin).toBe("do the thing");
   });
