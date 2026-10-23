@@ -276,9 +276,11 @@ export function buildCommand(
         const local = [
           bun, join(ctx.repo, "src/bin/autoclaw.ts"), "run",
           "--content-file", "-", "--out", ctx.runLog,
-          "--workspace", JSON.stringify(task.workspace),
+          // Local spawn: no shell — raw values (JSON.stringify here baked
+          // literal quotes into argv and ENOENT'd every cwd; G4).
+          "--workspace", task.workspace,
         ];
-        if (task.model) local.push("--model", JSON.stringify(task.model));
+        if (task.model) local.push("--model", task.model);
         return { cmd: local, cwd: task.workspace, stdin: `${UNATTENDED_PREAMBLE}\n\n${task.prompt}` };
       }
       // Legacy fallback: pi CLI inside the appimage runtime on the desktop
