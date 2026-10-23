@@ -71,7 +71,9 @@ export function vendorPi(plan: AutoclawPlan, home = homedir()): { ok: boolean; d
   const pkg = join(dir, "package.json");
   if (!existsSync(pkg)) writeFileSync(pkg, JSON.stringify({ name: "zcode-tui-vendor-pi", private: true }, null, 2) + "\n");
   const version = plan.pi?.version ? `@${plan.pi.version}` : "";
-  const p = Bun.spawnSync(["bun", "add", `@earendil-works/pi-coding-agent${version}`], {
+  // process.execPath IS bun here (all zcode-tui bins run under bun) — dev's
+  // non-interactive PATH has no bare `bun` (measured 2026-10-23).
+  const p = Bun.spawnSync([process.execPath, "add", `@earendil-works/pi-coding-agent${version}`], {
     cwd: dir, stdout: "pipe", stderr: "pipe",
   });
   const cli = vendoredPiCli(home);
