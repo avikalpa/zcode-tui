@@ -24,6 +24,7 @@ const { values } = parseArgs({
     provider: { type: "string", default: "zai" },
     "collect-ms": { type: "string", default: "900000" },
     "quiet-sec": { type: "string", default: "150" },
+    "tool-quiet-sec": { type: "string", default: "600" },
     out: { type: "string", default: "/tmp/zt-run-transcript.json" },
     "max-events": { type: "string", default: "20000" },
     "max-run-min": { type: "string", default: "0" },
@@ -55,6 +56,7 @@ let continuesUsed = 0;
 let sawProgressAfterLastError = false;
 let lastErrorKind = "";
 let lastErrorText = "";
+let toolInFlight = 0;
 const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
 const TRANSPORT_DROP = /fetch failed|socket hang up|econnreset|econnrefused|terminated|aborted|connection (closed|error|dropped)|network|timeout/i;
 const deadlineMs = Number(values["max-run-min"]) > 0
@@ -76,6 +78,15 @@ const sv = new AppServer({
     }
     events.push({ method, kind, ms: Date.now() - t0, summary });
     lastEvent = Date.now();
+    // Tool-in-flight tracking (trial finding #5, T-036): a long tool call
+    // (measured: a 300s `timeout 300 tb mail fetch`) streams nothing and the
+    // quiet window killed a LIVE session, which the queue then billed as
+    // completed. Progress events carry toolCallId while a tool runs.
+    if (method === "session/event" && summary.includes("toolCallId")) {
+      toolInFlight = Date.now();
+    } else if (kind === "agent_end" || kind === "turn_end" || kind === "message_end" || kind === "idle") {
+      toolInFlight = 0;
+    }
     if (kind.includes("error")) {
       const low = summary.toLowerCase();
       if (STOP_KINDS.some((k) => low.includes(k))) {
@@ -157,6 +168,7 @@ async function main() {
 
   const maxMs = Number(values["collect-ms"]);
   const quietMs = Number(values["quiet-sec"]) * 1000;
+  const toolQuietMs = Math.max(quietMs, Number(values["tool-quiet-sec"] ?? "600") * 1000);
   const maxEvents = Number(values["max-events"]);
   const maxContinues = Number(values["continues"]);
   while (Date.now() - t0 < maxMs && events.length < maxEvents) {
@@ -168,7 +180,10 @@ async function main() {
       process.exit(4);
     }
     await new Promise((r) => setTimeout(r, 5000));
-    const silent = events.length > 0 && Date.now() - lastEvent > quietMs;
+    // While a tool call is in flight, silence is EXPECTED (long ssh/build
+    // calls): extend the window instead of cutting a live session.
+    const effectiveQuiet = toolInFlight > 0 ? Math.max(quietMs, toolQuietMs) : quietMs;
+    const silent = events.length > 0 && Date.now() - lastEvent > effectiveQuiet;
     if (!silent) continue;
     if (transportError) break; // stop-class failure: report honestly
     if (continuesUsed < maxContinues) {
@@ -182,6 +197,14 @@ async function main() {
       continue;
     }
     break; // settled (or continue budget exhausted)
+  }
+  if (toolInFlight > 0) {
+    // NEVER kill a live tool call and bill it as done: leave the session
+    // alive (resumable in the TUI / by the next continue), report honestly.
+    writeTranscript("cut-midtool");
+    await sv.close();
+    console.log(`zt-run: cut while tool call in flight (silent >${Math.round(toolQuietMs / 1000)}s) — session ${sessionId} left RUNNING for resume/steer`);
+    process.exit(4);
   }
   writeTranscript("settled");
   try { await sv.request("session/stop", { sessionId }); } catch { /* maybe ended */ }
