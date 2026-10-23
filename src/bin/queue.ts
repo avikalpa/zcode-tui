@@ -23,7 +23,7 @@ import { Database } from "bun:sqlite";
 import {
   ROUTES, ROUTE_NAMES, TERMINAL_STATUSES,
   isPeak, minutesToPeak, minutesToPeakEnd, maxRunMinutes,
-  classifyFailure, sha256, SCHEMA_SQL,
+  classifyFailure, sha256, SCHEMA_SQL, rmTask,
   type RouteName, type TaskRow,
 } from "../queue/core";
 import { autoclawPiCli, autoclawCredential, UNATTENDED_PREAMBLE } from "./autoclaw";
@@ -571,6 +571,17 @@ async function main() {
       cmdEnqueue(db, values as Record<string, string | boolean | undefined>);
       break;
     }
+    case "rm": {
+      const id = String(process.argv[3] ?? "");
+      if (!id) { console.error("usage: zcode-tui queue rm <task-id> [--json]"); process.exit(2); }
+      const r = rmTask(db, id);
+      if (values.json) console.log(JSON.stringify(r.ok ? { id: r.id, status: r.status } : { id: r.id, status: r.status, refused: r.reason }));
+      if (r.ok) { if (!values.json) console.log(`cancelled ${r.id} (status=cancelled)`); break; }
+      console.error(r.reason === "unknown"
+        ? `queue: unknown task id '${r.id}'`
+        : `queue: refuse — task '${r.id}' is ${r.reason} (status=${r.status}); only queued/retry_wait/cooldown_wait tasks can be cancelled`);
+      process.exit(r.reason === "unknown" ? 2 : 1);
+    }
     case "list": cmdList(db, Boolean(values.json)); break;
     case "status": cmdStatus(db, Boolean(values.json), stateDir); break;
     case "serve": {
@@ -589,7 +600,7 @@ async function main() {
       break;
     }
     default:
-      console.error("usage: zcode-tui queue <enqueue|list|status|serve> [...]");
+      console.error("usage: zcode-tui queue <enqueue|list|rm|status|serve> [...]");
       console.error("  enqueue --prompt-file F --workspace W --route R [--title T --model M --priority N]");
       console.error(`  routes: ${ROUTE_NAMES.join(", ")}`);
       process.exit(2);
