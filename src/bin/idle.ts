@@ -112,18 +112,26 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
   }, { onStderr: (c) => process.stderr.write(c.slice(0, 200)) });
 
   try {
-    const createParams: Record<string, unknown> = {
-      workspace: { workspacePath: workspace, workspaceKey: workspace },
-      mode: "build",
-      persistence: "immediate",
-      offPeakToolEnabled: true, // measured in the bundle: opts the OffPeakCreate tool into the session
-    };
-    if (modelArg) {
-      try { createParams.model = JSON.parse(modelArg); } catch { createParams.model = { modelId: modelArg, providerId: "zai" }; }
+    const resumeArg = v.resume ? String(v.resume) : "";
+    if (resumeArg) {
+      // Probe shape (owner 2026-10-23): resume a long-completed session —
+      // its server-side state is stable, so the ticket service's
+      // "verify this session has no pending idle task" lookup can resolve.
+      sessionId = resumeArg;
+    } else {
+      const createParams: Record<string, unknown> = {
+        workspace: { workspacePath: workspace, workspaceKey: workspace },
+        mode: "build",
+        persistence: "immediate",
+        offPeakToolEnabled: true, // measured in the bundle: opts the OffPeakCreate tool into the session
+      };
+      if (modelArg) {
+        try { createParams.model = JSON.parse(modelArg); } catch { createParams.model = { modelId: modelArg, providerId: "zai" }; }
+      }
+      const created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
+      const sAny = (created.session ?? created) as unknown;
+      sessionId = typeof sAny === "string" ? sAny : String((sAny as Record<string, unknown>)?.sessionId ?? "");
     }
-    const created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
-    const sAny = (created.session ?? created) as unknown;
-    sessionId = typeof sAny === "string" ? sAny : String((sAny as Record<string, unknown>)?.sessionId ?? "");
     console.error(`idle create: session ${sessionId}`);
     await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true }, 20000);
     if (values.warmup) {
@@ -219,6 +227,7 @@ const { values } = parseArgs({
     model: { type: "string" },
     "permission-mode": { type: "string" },
     warmup: { type: "boolean", default: false },
+    resume: { type: "string", default: "" },
     out: { type: "string" },
   },
 });
