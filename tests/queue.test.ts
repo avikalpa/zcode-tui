@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdEnqueue } from "../src/bin/queue";
 import { SCHEMA_SQL, rmTask, type TaskRow } from "../src/queue/core";
+import { buildCommand } from "../src/bin/queue";
 
 function freshDb(): Database {
   const db = new Database(":memory:");
@@ -112,5 +113,23 @@ describe("queue CLI surface (dispatch-hardening)", () => {
     const out = new TextDecoder().decode(p.stdout);
     expect(out).toContain("eligible_at=");
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("buildCommand G4 — local spawn argv quoting", () => {
+  test("managed autoclaw spawn passes raw workspace/model (no literal quotes)", () => {
+    const db = freshDb();
+    const id = insertTask(db, "queued");
+    const row = db.query("SELECT * FROM tasks WHERE id=?").get(id) as unknown as TaskRow;
+    row.route = "autoclaw";
+    row.model = "m-1";
+    const { cmd } = buildCommand(row, { repo: "/repo", stateDir: "/s", promptFile: "/p", runLog: "/l", budgetMin: 0 });
+    const wi = cmd.indexOf("--workspace");
+    if (wi >= 0) { // managed local branch (ssh fallback quotes for the remote shell instead)
+      expect(cmd[wi + 1]).toBe(row.workspace);
+      expect(cmd[wi + 1]).not.toContain('"');
+      const mi = cmd.indexOf("--model");
+      expect(cmd[mi + 1]).toBe("m-1");
+    }
   });
 });
