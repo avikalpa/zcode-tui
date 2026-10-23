@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
+import { readCredential } from "../zcode/credentials";
 
 export interface OffPeakTaskSummary {
   offPeakTaskId: string;
@@ -55,14 +56,14 @@ export function codingPlanApiKey(): string {
   } catch { return ""; }
 }
 
-/** The ZCode cloud JWT — read FRESH per call: the desktop rotates
- *  credentials.json on activity, so a stale 401 self-heals when the owner
- *  next uses the desktop (measured rotation 2026-10-22 15:06 IST). */
+/** The ZCode cloud JWT — read FRESH per call, DECRYPTED: the store holds
+ *  enc:v1 (AES-256-GCM) blobs; sending the ciphertext was the cause of the
+ *  long "stale zcodejwttoken" 401s — the token itself was valid throughout
+ *  (root-caused + live-falsified 2026-10-23, can_take_number:true with the
+ *  decrypted value). 401s after this fix mean real server-side rejection
+ *  (version drift on desktop re-login), not an encryption gap. */
 export function cloudJwt(): string {
-  try {
-    const creds = JSON.parse(readFileSync(join(homedir(), ".zcode", "v2", "credentials.json"), "utf8"));
-    return typeof creds["zcodejwttoken"] === "string" ? creds["zcodejwttoken"] : "";
-  } catch { return ""; }
+  return readCredential("zcodejwttoken") ?? "";
 }
 
 export function gatewayOrigin(): string {
@@ -93,9 +94,13 @@ export async function ticketAvailability(): Promise<{ canTake: boolean; nextTake
     const { status, body } = await gatewayFetch("/api/v1/off-peak/ticket/availability", { method: "GET" });
     if (status === 401) return { canTake: false, error: `gateway 401 (stale zcodejwttoken — use the ZCode desktop once to rotate ~/.zcode/v2/credentials.json, then retry)` };
     if (status !== 200 || !body) return { canTake: false, error: `availability ${status}` };
-    return body.next_take_at
-      ? { canTake: false, nextTakeAt: Number(body.next_take_at) }
-      : { canTake: Boolean(body.can_take_number) };
+    // Production envelopes the payload under `data` (measured 2026-10-23:
+    // {"code":0,"msg":"success","data":{"can_take_number":true}}); the mock
+    // gateway the desktop ships is flat. Accept both.
+    const payload = (body.data ?? body) as { can_take_number?: unknown; next_take_at?: unknown };
+    return payload.next_take_at
+      ? { canTake: false, nextTakeAt: Number(payload.next_take_at) }
+      : { canTake: Boolean(payload.can_take_number) };
   } catch (e) {
     return { canTake: false, error: e instanceof Error ? e.message : String(e) };
   }
