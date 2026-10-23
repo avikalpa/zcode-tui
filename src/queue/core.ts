@@ -129,6 +129,12 @@ export function parseCooldownMs(text: string): number | null {
   // Bare "4 hr 38 min" without the "in" anchor (message body variant).
   const bare = text.match(/(\d+)\s*hr[s]?[\s,]+(\d+)\s*min/i);
   if (bare) return ((Number(bare[1]) * 60 + Number(bare[2])) * 60) * 1000;
+  // Gateway ISO timer ("next take at 2026-10-23T12:00:00.000Z").
+  const iso = text.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
+  if (iso) {
+    const delta = new Date(iso[1]).getTime() - Date.now();
+    if (delta > 0) return delta;
+  }
   return null;
 }
 

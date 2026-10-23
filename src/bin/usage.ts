@@ -24,6 +24,7 @@ import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
 import { isPeak, minutesToPeak, minutesToPeakEnd, type RouteName } from "../queue/core";
 import { autoclawPiCli, autoclawCredential } from "./autoclaw";
+import { ticketAvailability } from "../queue/offpeak-gateway";
 
 const { values } = parseArgs({
   options: {
@@ -40,6 +41,7 @@ interface UsageSnapshot {
 }
 
 async function main() {
+  const idleAvail = await ticketAvailability().catch(() => null);
   const snap: UsageSnapshot = {
     coding_plan: {}, idle_tasks: {},
     autoclaw: {
@@ -98,7 +100,11 @@ async function main() {
       indexStatuses: counts,
       createdLast24h: today,
       observedAllowance: "~3 creates / 24h (from our refusal history — observational, not official)",
-      quotaEndpoint: "none on this build (v4/offPeak/lifecycle Method-not-found; offPeak/list not routed)",
+      gatewayAvailability: idleAvail
+        ? (idleAvail.nextTakeAt
+          ? { canCreateNow: false, resetsAt: new Date(idleAvail.nextTakeAt).toISOString(), resetsInMin: Math.max(0, Math.round((idleAvail.nextTakeAt - Date.now()) / 60000)) }
+          : { canCreateNow: idleAvail.canTake, ...(idleAvail.error ? { note: idleAvail.error } : {}) })
+        : { error: "gateway availability unreachable" },
     };
   } catch { snap.idle_tasks = { indexStatuses: "unavailable (no tasks-index.sqlite)" }; }
   try {
@@ -128,6 +134,8 @@ async function main() {
   const it = snap.idle_tasks as Record<string, any>;
   console.log(`  index: ${JSON.stringify(it.indexStatuses)}  created-24h: ${it.createdLast24h}`);
   console.log(`  allowance: ${it.observedAllowance}`);
+  const ga = it.gatewayAvailability as Record<string, unknown> ?? {};
+  console.log(`  gateway: ${ga.canCreateNow === true ? "CAN CREATE NOW" : ga.resetsAt ? `cooldown — resets ${ga.resetsAt} (in ${ga.resetsInMin}m)` : `unavailable ${ga.error ?? ga.note ?? ""}`}`);
   if (it.knownCooldowns?.length)
     for (const c of it.knownCooldowns) console.log(`  cooldown: ${c.route} until ${c.until} (${c.reason})`);
   else console.log("  cooldown: none known");
