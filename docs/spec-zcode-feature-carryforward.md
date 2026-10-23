@@ -214,3 +214,40 @@ result consumption + the existing protocol-composable dream routes
   session completing end-to-end (owner's two live tasks running), and
   the 40/day pressure actuals (opencode parked → tonight's volume ran on
   codex; zai-offpeak gated by the 3/24h allowance).
+
+## 11. The 5-point sitting (owner 2026-10-23; shipped as 0.7.3, main 1cf62b3)
+
+1. **Directed idle dream**: idle create gained `--permission-mode` with
+   YOLO DEFAULT (owner law: idle dreamers always run full access). T-037
+   armed via the queue — the ticket service was still refusing at
+   09:00 IST ("Cannot verify … try again later", zero pending tasks ⇒
+   service-side); the queue parks 2h and creates autonomously on
+   recovery.
+2. **Plan addressability (measured)**: Z.AI Coding Plan — YES from any
+   fleet machine (the queue dispatched T-036, the mail BIG dream, live
+   with a 150-min peak budget). AutoClaw Credits — NO from zcode-tui,
+   BY DESIGN: the ZCode bundle carries zero AutoClaw provider vocabulary
+   (plan enum = account:zai-{individual,team}-coding-plan / zai-start /
+   bigmodel-*). AutoClaw dreamers stay on the AutoClaw harness
+   (governor/provisioner crons, 2/day per dream-classes.json).
+3. **`zcode-tui usage`**: plan entitlements (coding-plan-cache.json) +
+   live usage/stats telemetry (tokens, cache-hit, per-day per-model) +
+   idle-task index state + known cooldowns. Honest gap: the server
+   exposes NO remaining-quota endpoint on this build; idle allowance
+   ~3/24h is observational.
+4. **Execution architecture (app.asar-mined)**: off-peak runs are
+   dispatched by each machine's desktop-main claim loop over its local
+   tasks-index (`queued AND schedulable=1 AND claim_running=0`, 10-min
+   stale reclaim) → dispatchOffPeakRun presents {executionId, ticketId,
+   requestAuth} with the runtime's deviceMid. Registration is
+   auth-portable (any machine with runtime+auth); EXECUTION is
+   per-machine today. Full independence roadmap: zcode-tui implements
+   the same claim loop + v4 conversation admission
+   (v4/conversation/offPeakControl is routed on this build). Next
+   falsifier: dev-local canary create once the service recovers →
+   observe whose index receives the row (device-scoped vs
+   account-scoped).
+5. **`run.ts --resilient`**: 5 steers (vs 3) and transport-drop errors
+   (fetch failed / socket hang up / ECONNRESET / terminated / …) are
+   explicitly steer-class — for planes that drop connections midway
+   (AutoClaw-class). The queue's future autoclaw route will pass it.
