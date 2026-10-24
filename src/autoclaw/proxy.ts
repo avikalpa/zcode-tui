@@ -21,6 +21,13 @@ export interface ManagedProxy { port: number; hostname: string; stop: () => void
 
 const ALLOWED_SUFFIXES = ["/v1/messages", "/v1/messages/count_tokens"];
 
+// the desktop's own credits read paths (gateway-absolute, not behind the
+// autoclaw-proxy prefix) — mined 2026-10-24 from the AutoClaw 2.0.3 bundle
+const CREDITS_PATHS: Record<string, string> = {
+  "/credits": "/agent-assetmgr/api/v2/wallets?biz_app_id=autoclaw",
+  "/credits/instances": "/agent-assetmgr/api/v1/wallet-instances",
+};
+
 let inflightRefresh: Promise<boolean> | null = null;
 
 export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): Promise<ManagedProxy> {
@@ -58,6 +65,27 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
           credentialUpdatedAt: plan.auth.updatedAt,
         });
       }
+      // signed GET passthrough for the wallet plane: the gateway answers
+      // unauthenticated reads with HTTP 200 + envelope 410000 (not 401), so
+      // this branch buffers the small JSON and runs its own refresh-retry
+      const creditsPath = CREDITS_PATHS[url.pathname];
+      if (creditsPath) {
+        const sendCredits = () => fetchImpl(plan.endpoint.base + creditsPath, {
+          method: "GET",
+          headers: { ...signHeaders(plan), "X-Authorization": bearer(plan.auth.accessToken) },
+          redirect: "error",
+        }).then((up) => up.text());
+        let text = await sendCredits();
+        requestsServed++;
+        let envelope: { code?: unknown } = {};
+        try { envelope = JSON.parse(text) as typeof envelope; } catch { /* non-envelope passthrough */ }
+        if (envelope.code === 410000) {
+          const refreshed = await ensureFreshCredential();
+          if (refreshed) text = await sendCredits();
+        }
+        return new Response(text, { status: 200, headers: { "content-type": "application/json" } });
+      }
+
       let target: string;
       if (url.pathname === "/model-config") target = plan.endpoint.base + plan.endpoint.modelConfigPath;
       else if (ALLOWED_SUFFIXES.some((s) => url.pathname === s)) target = plan.endpoint.base + plan.endpoint.proxyPath + url.pathname;

@@ -150,3 +150,58 @@ export async function fetchModelCatalog(plan: AutoclawPlan, fetchImpl: typeof fe
     return { ok: false, failure: "invalid_response" };
   }
 }
+
+export interface CreditsBalance { totalPoints: number; wallets: Array<{ scope: string; balance: number }> }
+
+/**
+ * GET the credits balance the desktop's wallet UI reads:
+ * /agent-assetmgr/api/v2/wallets?biz_app_id=autoclaw → data.total_balance
+ * (+ display wallets), legacy /agent-assetmgr/api/v1/wallet-instances as
+ * fallback. Envelope {code:0, data:…}; code 410000 = unauthenticated — the
+ * proxy's refresh-retry owns that case, callers just see the failure.
+ */
+export async function fetchCreditsBalance(plan: AutoclawPlan, fetchImpl: typeof fetch = fetch): Promise<
+  { ok: true; credits: CreditsBalance } | { ok: false; failure: GatewayFailure | string }
+> {
+  const sources = [
+    { path: "/agent-assetmgr/api/v2/wallets", query: "biz_app_id=autoclaw" },
+    { path: "/agent-assetmgr/api/v1/wallet-instances", query: "" },
+  ];
+  for (const src of sources) {
+    let res: Response;
+    try {
+      res = await fetchImpl(plan.endpoint.base + src.path + (src.query ? `?${src.query}` : ""), {
+        headers: signHeaders(plan),
+      });
+    } catch (e) {
+      return { ok: false, failure: `network: ${(e as Error).message}` };
+    }
+    const text = await res.text();
+    if (res.status !== 200) {
+      return { ok: false, failure: readFailureEnvelope(res.status, text) ?? `http ${res.status}` };
+    }
+    let doc: { code?: unknown; data?: Record<string, unknown> };
+    try { doc = JSON.parse(text) as typeof doc; } catch { return { ok: false, failure: "invalid_response" }; }
+    if (doc.code === 410000) {
+      return { ok: false, failure: { kind: "access_credential_rejected", serviceCode: "410000" } };
+    }
+    if (doc.code !== 0 || typeof doc.data !== "object" || doc.data === null) continue;
+    const data = doc.data;
+    const wallets: Array<{ scope: string; balance: number }> = [];
+    if (Array.isArray(data.wallets)) {
+      for (const w of data.wallets as Array<Record<string, unknown>>) {
+        if (w && w.display === true && typeof w.balance === "number") {
+          wallets.push({
+            scope: String(w.wallet_scope ?? w.scope ?? "").replace("wallet_scope_", ""),
+            balance: w.balance,
+          });
+        }
+      }
+    }
+    const total = typeof data.total_balance === "number"
+      ? data.total_balance
+      : wallets.reduce((n, w) => n + w.balance, 0);
+    return { ok: true, credits: { totalPoints: total, wallets } };
+  }
+  return { ok: false, failure: "no_credits_source" };
+}
