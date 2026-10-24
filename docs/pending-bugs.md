@@ -22,3 +22,18 @@ Executors injected output_config effort:"low" (bisect-era) and run.ts sessions n
 set reasoningLevel. Landed: effort:"max" + reasoning:true in idle/autoclaw executors,
 session/create options reasoningLevel:"enabled" in run.ts (owner law: MAX thinking on
 all zai/start/autoclaw plans). VERIFY: next natural sessions show max-effort thinking.
+
+## BUG-004 — provider turn-kill class `project_token_request_failed` (reason=unknown, retryable=false) — OPEN (2026-10-24)
+Observed LIVE on the ZCode desktop (owner report 11:09 AM, GLM-5.3-Flash Max
+session): mid-turn the provider killed the turn with
+`Turn execution failed provider=account:zai-individual-coding-plan
+model=GLM-5.3-Flash reason=unknown retryable=false` and the desktop stalled —
+the owner had to steer it back by hand.
+**zcode-tui contract:** this class is STEER-class, never STOP-class —
+`run.ts` STOP_KINDS (auth/quota/permission/insufficient/cancelled/forbidden)
+must never match it (verified: "project_token_request_failed" matches none;
+the quiet-window continue-steer picks it up). Executed dream routes (idle.ts,
+autoclaw.ts) surface it as providerError → rc=1 → the queue retry ladder
+requeues honestly. VERIFY on the next live occurrence: the transcript must
+show a steer, not a stop. Desktop-side tolerance is a ZCode-desktop defect,
+not fixable here — noted for the campaign report.

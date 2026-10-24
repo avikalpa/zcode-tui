@@ -14,6 +14,39 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { AppServer } from "../protocol/client";
 import { syncAuthHeadless } from "../auth/sync";
+import { startHeartbeat } from "../queue/heartbeat";
+
+export const DEFAULT_PROVIDER = "zai-api"; // the ONLY providerId the registry resolves (measured 2026-10-24)
+const QUOTA_REFUSAL = /quota|3103|coding_plan|entitle|insufficient|plan_required|exceeded/i;
+
+export interface ModelRef { modelId: string; providerId: string; options?: { reasoningLevel?: string } }
+
+/** Build the session/create model ref. Owner law (2026-10-24): MAX thinking
+ *  on every plan — options.reasoningLevel is MANDATORY for zai-api models
+ *  ("Reasoning level is required for zai-api/GLM-5.3-Flash", measured). */
+export function buildModelRef(model: string, provider: string): ModelRef {
+  let ref: ModelRef;
+  try {
+    ref = JSON.parse(model) as ModelRef;
+    if (!ref || typeof ref !== "object" || !ref.modelId || !ref.providerId) throw new Error("bad ref");
+  } catch {
+    ref = { modelId: model, providerId: provider || DEFAULT_PROVIDER };
+  }
+  ref.options ??= {};
+  ref.options.reasoningLevel ??= "max";
+  return ref;
+}
+
+/** GLM-5.3 full is a start-plan-only model (owner law 2026-10-24): when the
+ *  plan bucket refuses (quota/entitlement), fall over to GLM-5.3-Flash max —
+ *  never run full on the regular coding plan. */
+export function fallbackOnQuotaRefusal(ref: ModelRef, errText: string): ModelRef | null {
+  if (!QUOTA_REFUSAL.test(errText)) return null;
+  if (ref.modelId.toLowerCase() === "glm-5.3") {
+    return { modelId: "GLM-5.3-Flash", providerId: ref.providerId, options: { reasoningLevel: "max" } };
+  }
+  return null;
+}
 
 const { values } = parseArgs({
   strict: false, // imported as a module by other verbs: foreign argv must not throw
@@ -21,7 +54,7 @@ const { values } = parseArgs({
     "content-file": { type: "string" },
     workspace: { type: "string", default: process.cwd() },
     model: { type: "string", default: "" },
-    provider: { type: "string", default: "zai" },
+    provider: { type: "string", default: DEFAULT_PROVIDER },
     "collect-ms": { type: "string", default: "900000" },
     "quiet-sec": { type: "string", default: "150" },
     "tool-quiet-sec": { type: "string", default: "600" },
@@ -57,6 +90,8 @@ let sawProgressAfterLastError = false;
 let lastErrorKind = "";
 let lastErrorText = "";
 let toolInFlight = 0;
+let stopHb: (() => void) | null = null;
+let ref: ModelRef | null = null;
 const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
 const TRANSPORT_DROP = /fetch failed|socket hang up|econnreset|econnrefused|terminated|aborted|connection (closed|error|dropped)|network|timeout/i;
 const deadlineMs = Number(values["max-run-min"]) > 0
@@ -123,12 +158,14 @@ const sv = new AppServer({
 });
 
 function writeTranscript(outcome: string) {
+  stopHb?.();
+  stopHb = null;
   const elapsedSec = Number(((Date.now() - t0) / 1000).toFixed(1));
   const outPath = String(values.out ?? "");
   mkdirSync(dirname(outPath), { recursive: true }); // --out parent may not exist on a fresh host
   writeFileSync(outPath, JSON.stringify({
     sessionId,
-    model: values.model || "(config default)",
+    model: ref ? `${ref.providerId}/${ref.modelId}@${ref.options?.reasoningLevel}` : "(config default)",
     outcome,
     continuesUsed,
     lastErrorKind,
@@ -141,31 +178,42 @@ function writeTranscript(outcome: string) {
 
 async function main() {
   syncAuthHeadless();
+  // Owner law: MAX thinking on every zcode-tui session. The model ref is
+  // {providerId, modelId, options:{reasoningLevel}} — reasoningLevel is
+  // REQUIRED by the registry for zai-api models. NOTE: no top-level
+  // `options` key on session/create — the schema is strict and rejects it
+  // ("Unrecognized key: options" killed every 82a1b43 dispatch instantly).
+  ref = values.model ? buildModelRef(String(values.model), String(values.provider)) : null;
   const createParams: Record<string, unknown> = {
     workspace: { workspacePath: values.workspace, workspaceKey: values.workspace },
     mode: "build",
     persistence: "immediate",
   };
-  // Owner law: MAX thinking effort on every zcode-tui session (zai plans,
-  // start plan, autoclaw alike). The runtime defaults low otherwise.
-  createParams.options = { ...((createParams.options as Record<string, unknown>) ?? {}), reasoningLevel: "enabled" };
-  if (values.model) {
-    // 0.7.2: session/create takes an OBJECT ref {modelId, providerId};
-    // a string id is mapped with the --provider route (default zai).
-    try {
-      createParams.model = JSON.parse(String(values.model));
-    } catch {
-      createParams.model = { modelId: String(values.model ?? ""), providerId: String(values.provider || "zai") };
-    }
+  let created: Record<string, unknown>;
+  try {
+    if (ref) createParams.model = ref;
+    created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
+  } catch (e) {
+    const errText = String(e instanceof Error ? e.message : e);
+    // GLM-5.3 full is start-plan-only: a plan-bucket refusal falls over to
+    // Flash max (owner law 2026-10-24) on a FRESH session — the original
+    // create never opened a billable turn.
+    const alt = ref ? fallbackOnQuotaRefusal(ref, errText) : null;
+    if (!alt) throw e;
+    console.log(`zt-run: plan refusal on ${ref!.modelId} — auto-switching to ${alt.modelId} (max): ${errText.slice(0, 120)}`);
+    ref = alt;
+    createParams.model = alt;
+    created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
   }
-  const created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
   const sAny = (created.session ?? created) as unknown;
   sessionId = typeof sAny === "string"
     ? sAny
     : String((sAny as Record<string, unknown>)?.sessionId
       ?? Object.values(sAny ?? {}).find((v) => typeof v === "string" && String(v).startsWith("sess_"))
       ?? "");
-  console.log(`zt-run: session ${sessionId} model=${values.model || "(config default)"}`);
+  console.log(`zt-run: session ${sessionId} model=${ref ? `${ref.providerId}/${ref.modelId}@${ref.options?.reasoningLevel}` : "(config default)"}`);
+  // Liveness for the queue's stall sweeper (BUG-001): touch <out>.hb every 60s.
+  stopHb = startHeartbeat(`${String(values.out ?? "")}.hb`);
   await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true });
   await sv.request("session/send", { sessionId, content });
 
@@ -220,6 +268,8 @@ async function main() {
 
 if (import.meta.main) main().catch(async (e) => {
   console.error(`FATAL: ${e instanceof Error ? e.message : e}`);
+  stopHb?.();
+  stopHb = null;
   try { if (sessionId) await sv.request("session/stop", { sessionId }); } catch { /* noop */ }
   await sv.close();
   process.exit(1);

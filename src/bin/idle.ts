@@ -19,6 +19,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
+import { startHeartbeat } from "../queue/heartbeat";
 import { parseCooldownMs } from "../queue/core";
 import { handleOffPeakAsk, ticketAvailability,
   localExecutableTasks,
@@ -93,6 +94,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
   let lastEventAt = Date.now();
   let turnEnded = false;
   let sessionId = "";
+  let stopHb: (() => void) | null = null;
   const events: { ms: number; kind: string; summary: string }[] = [];
 
   const sv = new AppServer({
@@ -169,6 +171,8 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       }
     }
     await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true }, 20000);
+    // Liveness for the queue's stall sweeper (BUG-001).
+    stopHb = startHeartbeat(`${out}.hb`);
     if (v.warmup) {
       // Turn 1: a trivial exchange so the session exists server-side with
       // real history before it asks for an idle-time ticket.
@@ -205,6 +209,8 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
     }
     try { await sv.request("session/stop", { sessionId }); } catch { /* already ended */ }
 
+    stopHb?.();
+    stopHb = null;
     mkdirSync(dirname(out), { recursive: true }); // --out parent may not exist on a fresh host
     writeFileSync(out, JSON.stringify({ sessionId, title, sawToolResult, refusal, events }, null, 1));
 
