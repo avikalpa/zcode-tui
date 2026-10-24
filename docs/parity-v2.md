@@ -174,6 +174,31 @@ Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`
   257/257 and typecheck pass; no-TTY boot renders home before the
   intentional timeout.
 
+- Unit 3: exploration grouping — consecutive read/glob/grep tool rows
+  collapse into one `→ Explored — N reads, M searches` header (spinner +
+  `Exploring — …` while any part runs), ctrl+o expands the individual rows
+  back beneath the header (`routes/session/index.tsx` SessionGroupView,
+  `grouping/{session,tree}.ts`). Adjacent-only merge: any non-tool row
+  breaks the run; failed parts settle the group like completed ones
+  (the reference reads part.time.completed, set for errors too). Colour is
+  text.subdued in both states — the reference brightens on hover only, and
+  this no-mouse binding keeps subdued. Two production defects fixed during
+  the port: the group JSX compared a row index against the message count,
+  so isTail (the streaming tell) never landed on the row after a
+  multi-tool group (red-green pinned by a reasoning_delta test — `▪
+  Thinking` vs `+ Thought`); and the running label first used text.default
+  against the reference's subdued. The thinking-integration burst test now
+  asserts ordering against the `Explored` header, which is the reference
+  grammar for a lone settled read. Deviations recorded: expansion is
+  keyboard-driven (ctrl+o; the reference toggles by mouse), and the
+  config.session?.grouping === "none" opt-out is not wired (the binding
+  has no session config surface yet; the reference default is grouping on).
+  13 exploration tests (6 App interaction + 7 unit) — the isTail and
+  running-colour defects failed before and pass after; full suite 270/270
+  across 30 files (twice; one cross-file dialog-focus flake passed in
+  isolation and on re-run), typecheck exit 0, no-TTY boot renders home
+  before the intentional timeout.
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2
