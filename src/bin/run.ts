@@ -64,6 +64,24 @@ export function modelRefShapes(ref: ModelRef): Record<string, unknown>[] {
   ];
 }
 
+/** Parse the runtime's own "Unsupported model: X. Available models: a, b, c"
+ *  listing and resolve the wanted modelId (case-insensitive, exact case
+ *  preferred) to a concrete {providerId, modelId}. The fleet's runtimes
+ *  disagree on provider ids too (jojo: zai-api, dev: zai — measured), so the
+ *  error text is the portable source of truth. */
+export function matchAvailableModel(errText: string, modelId: string): ModelRef | null {
+  const m = errText.match(/Available models:\s*([^\n]+)/);
+  if (!m) return null;
+  const entries = m[1].split(",").map((s) => s.trim().replace(/[.,;]+$/, "")).filter((s) => s.includes("/"));
+  const want = modelId.toLowerCase();
+  const exact = entries.find((e) => e.split("/")[1] === modelId);
+  const ci = entries.find((e) => e.split("/")[1]?.toLowerCase() === want);
+  const hit = exact ?? ci;
+  if (!hit) return null;
+  const [providerId, resolved] = hit.split("/");
+  return { modelId: resolved, providerId, options: { reasoningLevel: "max" } };
+}
+
 /** Create the session trying every model-ref shape the fleet's runtimes
  *  speak (see modelRefShapes). With no ref, one bare attempt. */
 async function createSession(
@@ -72,22 +90,33 @@ async function createSession(
   ref: ModelRef | null,
 ): Promise<Record<string, unknown>> {
   if (!ref) return (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
-  let lastErr: unknown = null;
-  for (const shape of modelRefShapes(ref)) {
-    try {
-      const created = (await sv.request("session/create", { ...createParams, model: shape }, 30000)) as Record<string, unknown>;
-      if (shape !== modelRefShapes(ref)[0]) {
-        console.log(`zt-run: model ref shape fallback used (${Object.keys(shape).join(",")})`);
+  let wanted = ref;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let lastErr: unknown = null;
+    let handled = false;
+    for (const shape of modelRefShapes(wanted)) {
+      try {
+        return (await sv.request("session/create", { ...createParams, model: shape }, 30000)) as Record<string, unknown>;
+      } catch (e) {
+        lastErr = e;
+        const msg = String(e instanceof Error ? e.message : e);
+        if (/Unsupported model/i.test(msg)) {
+          const alt = matchAvailableModel(msg, wanted.modelId);
+          if (alt) {
+            console.log(`zt-run: model ref re-pointed by registry: ${wanted.providerId}/${wanted.modelId} -> ${alt.providerId}/${alt.modelId}`);
+            wanted = alt;
+            handled = true;
+            break; // retry shapes against the re-pointed ref
+          }
+          throw e; // wanted model genuinely absent from this runtime
+        }
+        if (!/Unrecognized key|Invalid params|Reasoning level/i.test(msg)) throw e; // real failure: stop
+        // shape rejected pre-turn — try the next shape
       }
-      return created;
-    } catch (e) {
-      lastErr = e;
-      const msg = String(e instanceof Error ? e.message : e);
-      if (!/Unrecognized key|Invalid params|Reasoning level/i.test(msg)) throw e; // real failure: stop
-      // shape rejected pre-turn — try the next shape
     }
+    if (!handled) throw lastErr;
   }
-  throw lastErr;
+  throw new Error("createSession: model-ref negotiation did not converge");
 }
 
 const { values } = parseArgs({

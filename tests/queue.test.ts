@@ -1,5 +1,6 @@
 // queue rm — task cancellation semantics (fleet ledger hygiene).
 import { describe, test, expect } from "bun:test";
+import { matchAvailableModel } from "../src/bin/run";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,5 +133,19 @@ describe("buildCommand G4 — local spawn argv quoting", () => {
       const mi = cmd.indexOf("--model");
       expect(cmd[mi + 1]).toBe("m-1");
     }
+  });
+});
+
+describe("model-ref negotiation across runtime versions", () => {
+  test("matchAvailableModel resolves from the registry's own listing", () => {
+    const devErr = 'Unsupported model: zai-api/GLM-5.3-Flash. Available models: main, zai/GLM-5.3-Flash, lite, zai/glm-4.7, , zai/glm-5.3-flash, , zai/glm-5.3, , zai/GLM-5.3.';
+    const r = matchAvailableModel(devErr, "GLM-5.3-Flash");
+    expect(r?.providerId).toBe("zai");
+    expect(r?.modelId).toBe("GLM-5.3-Flash");
+    expect(r?.options?.reasoningLevel).toBe("max");
+    const full = matchAvailableModel(devErr, "GLM-5.3");
+    expect(full?.modelId).toBe("GLM-5.3");
+    expect(matchAvailableModel("no listing here", "GLM-5.3")).toBeNull();
+    expect(matchAvailableModel("Available models: main, lite", "GLM-5.3")).toBeNull();
   });
 });
