@@ -126,7 +126,11 @@ export function rerouteTask(db: Database, id: string, toRoute: string, now = Dat
   const row = db.query("SELECT status FROM tasks WHERE id = ?").get(id) as { status: TaskStatus } | null;
   if (!row) return { ok: false, reason: "unknown", id, status: null };
   if (row.status === "running") return { ok: false, reason: "running", id, status: row.status };
-  db.query("UPDATE tasks SET route=?, status='queued', next_eligible_at=?, updated_at=?, started_at=NULL, finished_at=NULL, attempts=0 WHERE id=?")
+  // A model ref is plane-specific (autoclaw's zaicoding_glm-5.3 is invalid on
+  // zai and vice versa) — a reroute falls back to the TARGET route's default
+  // model law instead of carrying the source plane's ref (measured 2026-10-24:
+  // the llmproxy-hygiene reroute would have failed on an unsupported model).
+  db.query("UPDATE tasks SET route=?, model='', status='queued', next_eligible_at=?, updated_at=?, started_at=NULL, finished_at=NULL, attempts=0 WHERE id=?")
     .run(toRoute, now, now, id);
   return { ok: true, id, status: "queued" };
 }
