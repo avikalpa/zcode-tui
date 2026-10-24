@@ -1,7 +1,8 @@
 // SelectDialog rendering tests (reference-parity, 2026-09-17 themes wave).
-// Rendering + mount-time onHighlight only: mock-keys never reach useKeyboard
-// (fleet SKILL law) — key-driven behavior is the pty-proof's to prove.
+// Production rendering and stdin-driven keyboard/mouse interactions.
+// mockInput reaches useKeyboard; these checks do not establish live pixels.
 import { describe, expect, test } from "bun:test";
+import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { SelectDialog, matchesDialogFilter, type DialogOption } from "./select-dialog";
 
@@ -72,6 +73,44 @@ describe("SelectDialog reference parity", () => {
 
 
 describe("picker interaction parity", () => {
+  test("Enter on an empty search result preserves the query and dialog", async () => {
+    let closed = false;
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Sessions" options={OPTIONS}
+      onSelect={(v) => picked.push(v)} onClose={() => { closed = true; }} />, { width: 80, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("gamma"));
+      await act(async () => { await setup.mockInput.pressKeys([..."unmatched", "\r"]); });
+      const frame = await setup.waitForFrame((f) => f.includes("No matching items"));
+      expect(frame).toContain("unmatched");
+      expect(picked).toEqual([]);
+      expect(closed).toBe(false);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("search and Enter in a single burst select the matching row", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Sessions" options={OPTIONS}
+      onSelect={(value) => picked.push(value)} onClose={() => {}} />, { width: 80, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("gamma"));
+      await act(async () => { await setup.mockInput.pressKeys([..."gamma", "\r"]); });
+      expect(picked).toEqual(["gamma"]);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("filter + navigation + action uses the same immediate selected row", async () => {
+    const acted: string[] = [];
+    const setup = await testRender(<SelectDialog title="Select model" options={[
+      { id: "first", label: "Coding One", group: "Coding Plan", value: "first" },
+      { id: "second", label: "Coding Two", group: "Coding Plan", value: "second" },
+      { id: "third", label: "Fixture Other", value: "third" },
+    ]} onAction={(_action, option) => acted.push(option?.id ?? "missing")}
+      onSelect={() => {}} onClose={() => {}} />, { width: 80, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Coding Two"));
+      await act(async () => { await setup.mockInput.pressKeys([..."coding", "\x1b[B", "\x06"]); });
+      expect(acted).toEqual(["second"]);
+    } finally { setup.renderer.destroy(); }
+  });
   test("search accepts words across the model name and provider", () => {
     const row = { label: "GLM-5.3-Flash", group: "AutoClaw", description: "cached model" };
     expect(matchesDialogFilter(row, "glm flash")).toBe(true);

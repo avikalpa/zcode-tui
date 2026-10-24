@@ -55,6 +55,50 @@ full live-pixel parity and the rest of the reported gap remain open.
 The deterministic component checks do not close those items. No release or
 main merge is part of this lane.
 
+## 2026-10-24 UX parity sitting 3 (lane; never merged here)
+
+Reference remains the owner-selected OpenCode `v2ref`
+`b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`; this does not re-pin the vendor tree.
+
+- Unit 1: restored the production-session `/thinking` keystroke regression.
+  Resume already restores typing, so the test no longer types an extra `i`.
+  The test then exposed conflicting `/variants` aliases in autocomplete:
+  `/thinking` opened effort despite canonical command parsing being correct.
+  Removed the conflicting aliases. The real composer now toggles persisted
+  show/hide twice without `session/send`, `setModel` or `setThoughtLevel`.
+  Deterministic render/input proof only; no live pixel-parity claim.
+
+- Unit 2: composer history follows the pinned reference's visual-row and
+  start/end boundary rules, refuses replacement of edited drafts, positions
+  recalled cursors correctly, and keeps 50 entries with adjacent-only
+  deduplication. Raw Ctrl+J (`linefeed`) inserts a newline. Paste flushes
+  prior typing, normalizes newlines, undoes atomically, and cannot reach
+  the hidden composer under a dialog/permission/diff. Six production-App
+  input/send tests failed before and pass after the change. Long-paste
+  folding and asynchronous attachment-path races remain open.
+
+- Unit 3: shared session/model pickers dispatch search + navigation +
+  Enter/actions from immediate state, fixing stale-row selection in fast
+  bursts. Empty-result Enter retains the query/dialog. Actual ModelDialog
+  tests preserve disabled separate-runner refusal, and App's session search
+  asserts the resumed session ID. Search ranking and grouped-list geometry
+  remain open comparisons.
+
+- Unit 4: Status copies the reference's colored MCP bullet, bold name and
+  subdued wrapped status/error detail. Failed `mcp/list` is unavailable in
+  Status and the MCP picker, distinct from a successful empty list.
+  Component/App fixtures prove that distinction; short-terminal keyboard
+  scrolling reaches wrapped details without losing title/esc chrome.
+  MIT attribution is retained in third-party notices.
+
+Validation: 218 tests passed, 0 failed; TypeScript clean; no-TTY launcher
+and real-backend home smoke exit 0. A real 100×30 PTY renders the home
+composer before the deliberate 10-second timeout (124). No model prompt
+was sent in boot smoke. Four bounded lane commits; no merge/release/deploy
+performed by this sitting. Broader day-1/2 and live-pixel parity remain open.
+
+See [sitting 3 decisions](../design/02-ux-parity.md) for references and gaps.
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2

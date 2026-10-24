@@ -14,7 +14,7 @@
 // InputRenderable: OpenTUI can retain focus on a component that has already
 // been reconciled away, so keeping filter state here makes every modal
 // deterministic under fast PTY typing.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
@@ -135,6 +135,7 @@ export function SelectDialog<T>({
   theme?: ThemeTokens;
 }) {
   const [filter, setFilter] = useState("");
+  const filterRef = useRef("");
   // The reference opens with the selection ON the current row (DialogSelect
   // moves to props.current on mount) — otherwise the ● origin marker can sit
   // outside the initial window for long lists like the 35 themes.
@@ -143,6 +144,7 @@ export function SelectDialog<T>({
     return at >= 0 ? at : 0;
   };
   const [idx, setIdx] = useState(currentStartIndex);
+  const idxRef = useRef(idx);
   const dims = useTerminalDimensions();
   const C = theme ?? THEMES.opencode;
   const cardWidth = tierWidth(size, dims.width);
@@ -165,9 +167,28 @@ export function SelectDialog<T>({
   );
   const visible = shown.slice(winStart, winStart + visibleCount);
 
+  // Solid's reference store updates within a key burst. React state lands
+  // later, so keyboard truth must be immediate for filter -> arrows -> Enter
+  // and actions such as session delete/model favorite.
+  const filteredNow = () => options.filter((o) => matchesDialogFilter(o, filterRef.current));
+  const selectionNow = () => {
+    const rows = filteredNow();
+    return rows[clamp(idxRef.current, 0, Math.max(0, rows.length - 1))];
+  };
+  const moveSelection = (next: number) => {
+    const rows = filteredNow();
+    idxRef.current = clamp(next, 0, Math.max(0, rows.length - 1));
+    setIdx(idxRef.current);
+    onHighlight?.(rows[idxRef.current]);
+  };
+  const changeFilter = (next: string) => {
+    filterRef.current = next;
+    setFilter(next);
+    moveSelection(next ? 0 : currentStartIndex());
+  };
   const select = () => {
-    const option = shown[sel];
-    if (!option) { onClose(); return; }
+    const option = selectionNow();
+    if (!option) return;
     // The disabled gate is the plans guardrail: an informational/disabled
     // route (e.g. read-only AutoClaw rows, not-entitled plans) can be
     // highlighted but never crosses the mutation boundary (sol 2026-10-16
@@ -185,34 +206,32 @@ export function SelectDialog<T>({
 
   useKeyboard((key) => {
     if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
-    if (key.ctrl && key.name === "f") { onAction?.("pin", shown[sel]); return; }
-    if (key.ctrl && key.name === "d") { onAction?.("delete", shown[sel]); return; }
-    if (key.ctrl && key.name === "r") { onAction?.("rename", shown[sel]); return; }
-    if (key.ctrl && key.name === "a") { onAction?.("all", shown[sel]); return; }
+    if (key.ctrl && key.name === "f") { onAction?.("pin", selectionNow()); return; }
+    if (key.ctrl && key.name === "d") { onAction?.("delete", selectionNow()); return; }
+    if (key.ctrl && key.name === "r") { onAction?.("rename", selectionNow()); return; }
+    if (key.ctrl && key.name === "a") { onAction?.("all", selectionNow()); return; }
     if (key.name === "return") { select(); return; }
-    if (key.name === "up") { setIdx((i) => Math.max(0, i - 1)); return; }
+    if (key.name === "up") { moveSelection(idxRef.current - 1); return; }
     if (key.name === "down") {
-      setIdx((i) => Math.min(Math.max(0, shown.length - 1), i + 1));
+      moveSelection(idxRef.current + 1);
       return;
     }
-    if (key.name === "pageup") { setIdx((i) => Math.max(0, i - 10)); return; }
-    if (key.name === "pagedown") { setIdx((i) => Math.min(Math.max(0, shown.length - 1), i + 10)); return; }
-    if (key.name === "home") { setIdx(0); return; }
-    if (key.name === "end") { setIdx(Math.max(0, shown.length - 1)); return; }
+    if (key.name === "pageup") { moveSelection(idxRef.current - 10); return; }
+    if (key.name === "pagedown") { moveSelection(idxRef.current + 10); return; }
+    if (key.name === "home") { moveSelection(0); return; }
+    if (key.name === "end") { moveSelection(filteredNow().length - 1); return; }
     if (onHorizontal && (key.name === "left" || key.name === "right") && !key.ctrl && !key.meta) {
-      onHorizontal(key.name === "left" ? -1 : 1, shown[sel]);
+      onHorizontal(key.name === "left" ? -1 : 1, selectionNow());
       return;
     }
     if (key.name === "backspace") {
-      setFilter((f) => f.slice(0, -1));
       // Emptying the query restores the selection to the current row
       // (reference onFilter: query.length === 0 → back to where you started).
-      setIdx(filter.length <= 1 ? currentStartIndex() : 0);
+      changeFilter(filterRef.current.slice(0, -1));
       return;
     }
     if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
-      setFilter((f) => f + key.sequence);
-      setIdx(0);
+      changeFilter(filterRef.current + key.sequence);
     }
   });
 
@@ -269,8 +288,8 @@ export function SelectDialog<T>({
               {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}
               {group ? <text content={` ${group}`} fg={C.accent} attributes={TextAttributes.BOLD} /> : null}
               <box
-                onMouseMove={() => { if (abs !== sel) setIdx(abs); }}
-                onMouseDown={() => setIdx(abs)}
+                onMouseMove={() => { if (abs !== sel) moveSelection(abs); }}
+                onMouseDown={() => moveSelection(abs)}
                 onMouseUp={() => { if (!o.disabled) onSelect(o.value, o.id); }}
                 style={{
                   height: 1,

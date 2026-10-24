@@ -72,14 +72,7 @@ describe("thinking in the production session", () => {
     } finally { setup.cleanup(); }
   });
 
-  // SITTING-3 TODO (orchestrator 2026-10-24, codex hourly cap killed sitting 2
-  // mid-unit): the feature is fully wired (submit -> parseSlashCommand ->
-  // toggleThinking -> preferences, verified by reading app.tsx 1992/2352) and
-  // covered by 12 green unit/integration tests; what is missing is a working
-  // SESSION-VIEW composer driver — pressKeys('i', '/thinking', Enter) leaves
-  // the preference unflipped (PREF-NO-FLIP) even with the composer hint
-  // visible, so the keystroke path in testRender needs debugging.
-  test.skip("/thinking toggles persisted presentation without changing backend generation or effort", async () => {
+  test("/thinking toggles persisted presentation without changing backend generation or effort", async () => {
     const setup = await fixture();
     try {
       act(() => {
@@ -87,16 +80,14 @@ describe("thinking in the production session", () => {
         setup.emit({ content: "Fixture done.", stopReason: "end_turn" });
       });
       await textFrame(setup, "+ Thought: Inspection");
-      // Session resume enters navigation mode. i activates the real composer.
-      await setup.mockInput.pressKeys(["i"]);
-      await setup.renderOnce(); // let the composer-open state land before the command chars
-      await setup.mockInput.pressKeys([..."/thinking", "\r"]);
-      for (let i = 0; i < 50; i++) { await setup.renderOnce(); await Bun.sleep(20); if (setup.preferences.load().thinking === "show") break; }
-      if (setup.preferences.load().thinking !== "show") throw new Error("PREF-NO-FLIP: " + JSON.stringify(setup.captureCharFrame()));
+      // open() restores the composer after resume. An extra "i" would type
+      // "i/thinking" and send a backend prompt instead of a local command.
+      // Keep command + Enter in one burst to exercise the immediate draft.
+      await act(async () => { await setup.mockInput.pressKeys([..."/thinking", "\r"]); });
       const expanded = await textFrame(setup, "Visible fixture reasoning.");
       expect(expanded).toContain("Thought");
       expect(setup.preferences.load().thinking).toBe("show");
-      await setup.mockInput.pressKeys([..."/thinking", "\r"]);
+      await act(async () => { await setup.mockInput.pressKeys([..."/thinking", "\r"]); });
       const collapsed = await textFrame(setup, "+ Thought: Inspection");
       expect(collapsed).not.toContain("Visible fixture reasoning.");
       expect(setup.preferences.load().thinking).toBe("hide");
