@@ -110,7 +110,7 @@ export function glm53FullVerdict(plans: PlanRow[], nowSec: number): { allowed: b
   return best ? { allowed: true, units: best.units, endsAt: best.endsAt } : { allowed: false };
 }
 
-async function main() {
+export async function main() {
   if (values.offline) {
     // local cache only — plan availability statuses from the last desktop sync
     try {

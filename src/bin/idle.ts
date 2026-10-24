@@ -455,10 +455,11 @@ async function cmdQuota(json: boolean) {
   console.log(`idle quota: ${payload.canCreateNow === true ? "CAN CREATE NOW" : `cooldown — resets at ${payload.resetsAt} (in ${payload.resetsInMin}m)`}${a.error ? ` [${a.error}]` : ""}`);
 }
 
-if (import.meta.main) {
-  // parseArgs inside the guard: import-time parsing throws on another
-  // verb's argv when this module is imported (production bug class caught
-  // by the 1.0.0 trial run, 2026-10-23).
+export async function main(): Promise<void> {
+  // parseArgs at entry time, never module level: import-time parsing throws
+  // on another verb's argv when this module is imported (production bug
+  // class caught by the 1.0.0 trial run, 2026-10-23; the compiled binary's
+  // verb router imports it the same way).
   const { values } = parseArgs({
     allowPositionals: true,
     options: {
@@ -496,4 +497,8 @@ if (import.meta.main) {
     console.error("  serve [--poll-s N] # poll + execute loop (the desktop claim loop, on this host)");
     process.exit(2);
   }
+}
+
+if (import.meta.main) {
+  void main();
 }

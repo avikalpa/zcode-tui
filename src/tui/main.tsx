@@ -27,6 +27,35 @@ async function main() {
     else if (argv[i] === "--model") modelId = argv[++i] ?? null;
   }
   probe("boot", `pid=${process.pid} argv=${JSON.stringify(argv)}`);
+  // Headless verb routing. The compiled dist binary is what fleet seats
+  // actually execute (ynpm dev installs take the ELF directly — no npm shim
+  // in front of it), so the headless subcommands must route here too, not
+  // only in bin/zcode-tui. Routed bins are import-safe (parseArgs at entry
+  // time; plans parses strict:false) — run.ts is the exception: its module
+  // state is import.meta.main-coupled, so it stays on the shim path until
+  // that is refactored.
+  const verb = argv[0];
+  if (verb && !verb.startsWith("-")) {
+    const bins: Record<string, () => Promise<unknown>> = {
+      autoclaw: () => import("../bin/autoclaw").then((m) => m.main()),
+      queue: () => import("../bin/queue").then((m) => m.main()),
+      idle: () => import("../bin/idle").then((m) => m.main()),
+      plans: () => import("../bin/plans").then((m) => m.main()),
+    };
+    const entry = bins[verb];
+    if (entry) {
+      try {
+        // bins parse process.argv themselves and expect the verb stripped —
+        // the npm shim hands them args.slice(1) the same way.
+        process.argv.splice(2, 1);
+        await entry();
+      } catch (e) {
+        console.error(`zcode-tui ${verb}: ${(e as Error).message ?? e}`);
+        process.exit(1);
+      }
+      process.exit(0);
+    }
+  }
   // Auth IS the zcode machine settings: sync the SSOT (fleet default jojo —
   // local read here, `ssh jojo` elsewhere) into the TUI config, heal the
   // local machine settings from it, and hand the stored copy to the backend.

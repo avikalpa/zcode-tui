@@ -359,10 +359,11 @@ const result = await new Promise<{ code: number | null; stdout: string; stderr: 
   return result.code === 0 ? 0 : 1;
 }
 
-if (import.meta.main) {
-  // parseArgs INSIDE the guard: module-level parsing throws on other
-  // verbs' argv when queue.ts imports this module (production bug caught
-  // by the 1.0.0 trial run, 2026-10-23).
+export async function main(): Promise<void> {
+  // parseArgs at entry time, never module level: module-level parsing throws
+  // on other verbs' argv when this module is imported (queue.ts did that;
+  // production bug caught by the 1.0.0 trial run, 2026-10-23) and the
+  // compiled binary's verb router imports it the same way.
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
@@ -394,4 +395,8 @@ if (import.meta.main) {
     console.error("  run --content-file F [--workspace W] [--model M] [--out O]");
     process.exit(2);
   }
+}
+
+if (import.meta.main) {
+  void main();
 }
