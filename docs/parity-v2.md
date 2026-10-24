@@ -99,6 +99,51 @@ performed by this sitting. Broader day-1/2 and live-pixel parity remain open.
 
 See [sitting 3 decisions](../design/02-ux-parity.md) for references and gaps.
 
+## 2026-10-24 UX parity sitting 4 (lane; never merged here)
+
+Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`.
+
+- Unit 1: ported the shared picker's bounded category scrollbox, spacing,
+  narrow stacked footer and wrap navigation from `ui/dialog-select.tsx`
+  and `ui/select-controller.ts`. A short terminal can reach the last group
+  with its footer visible; all options remain wheel-scrollable. Two new
+  regression checks fail before and pass after; 221 tests and typecheck
+  pass. Ranking and full live-pixel comparison remain open.
+
+- Unit 2: shared picker search now uses the reference's pinned fuzzysort
+  engine and weighted name/category/supplemental ranking, followed by stable
+  grouping. Favorite/pin changes preserve the highlighted identity across
+  section moves. Real ModelDialog favorite/unfavorite and fuzzy burst
+  selection tests pass; full suite 225/225 and typecheck pass. Specialized
+  upstream model sorting and server-backed session search remain adaptations.
+
+- Unit 3: prompt status uses the reference's location truncation and
+  usage/shortcut width budget. Home MCP status no longer allocates a nested
+  full-width row that clips shortcuts. Running label is `esc interrupt`.
+  Production App regression fails before/pass after; three component render
+  fixtures also pass. Typecheck and full suite pass (229 tests).
+
+- Unit 4: toast interaction ports the pinned reference's hover pause,
+  pending queue, click affordance, split border, sizing and five-second
+  default; timer cleanup follows unmount. Actual App click-dismissal
+  regression fails before/pass after. Lifecycle and rendered mouse tests
+  pass; full suite 234/234 and typecheck pass.
+
+- Unit 5: text prompts port the reference native textarea, current-buffer
+  submit, selection/edit/paste behavior, focus cleanup and title/editor
+  spacing. Three input regressions fail before/pass after; production App
+  proves the composer works after closing the dialog. Host rename remains
+  unavailable and is explicitly reported, without fake persistence.
+
+Final sitting 4 validation: 238 passed, zero failed; TypeScript clean;
+no-TTY and real-backend home smoke exit 0. A 100×30 xterm PTY boots the lane
+source and renders home without runtime error before the intentional
+10-second timeout (124). No prompts sent by live smoke. Five unit commits
+are pushed; no merge/release/deploy. Remaining: long-paste folding, async
+attachment paste, rich history, specialized model sorting/server session
+search, broader message/code/diff/streaming and live terminal pixels.
+See [sittings 3–4 decisions](../design/02-ux-parity.md).
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2

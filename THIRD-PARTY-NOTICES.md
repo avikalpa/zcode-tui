@@ -2,9 +2,9 @@
 
 zcode-tui depends on the following third-party packages (npm, direct and
 transitive as of v0.5.0). Each is used unmodified under its own licence;
-all are compatible with this project's GPL-3.0-or-later. Generated from the
-resolved dependency tree — regenerate with the audit command in
-CONTRIBUTING.md.
+all are compatible with this project's GPL-3.0-or-later. The table records
+package versions from the checked-in lockfile; it is not an inventory of
+the live managed installation.
 
 | package | version | licence |
 |---|---|---|
@@ -16,6 +16,7 @@ CONTRIBUTING.md.
 | typescript (devDependency) | 5.x | Apache-2.0 |
 | @types/react (devDependency) | — | MIT |
 | @types/bun (devDependency) | — | MIT |
+| fuzzysort | 3.1.0 | MIT |
 | diff (transitive) | — | BSD-3-Clause |
 
 The Bun runtime (MIT, Oven) compiles and hosts the program; the release
@@ -34,6 +35,30 @@ adapt the MIT-licensed OpenCode TUI. Reference for the 2026-10-24 pass:
 MIT License
 
 Copyright (c) 2025 opencode
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## fuzzysort
+
+MIT License
+
+Copyright (c) 2018 Stephen Kamenar
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

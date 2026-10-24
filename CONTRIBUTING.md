@@ -15,7 +15,7 @@ those re-derives days of reverse engineering.
 
 ```sh
 bun run typecheck        # tsc --noEmit, must be clean
-bun test                 # client suite, 4 pass
+bun test                 # full client and TUI suite
 bun run probe:battery    # protocol acceptance, GREEN (needs /opt/ZCode)
 ```
 
