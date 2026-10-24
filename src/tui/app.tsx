@@ -46,7 +46,8 @@ import {
 } from "./design";
 import { DiffViewer, diffSourceLabel, filetypeOf, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
 import { PatchDiff } from "./diff/patch-diff";
-import { SplitBorder, ToolPart } from "./session/tool-parts";
+import { ExplorationGroup, SplitBorder, ToolPart } from "./session/tool-parts";
+import { groupExplorationRows } from "./session/exploration";
 import { ThinkingBlock, appendThinking, completeThinking, thinkingDuration, nextThinkingMode, type ThinkingPart, type ThinkingMode } from "./session/thinking";
 import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
@@ -667,6 +668,7 @@ export const MessageView = memo(function MessageView({
   width,
   toolsExpanded,
   spinnerChar,
+  padTop = 1,
 }: {
   m: TurnMessage;
   running: boolean;
@@ -677,12 +679,15 @@ export const MessageView = memo(function MessageView({
   width: number;
   toolsExpanded: boolean;
   spinnerChar: string;
+  // The reference builds one row per part (SessionRowView marginTop 1);
+  // exploration-group children render as bare ToolParts with no row gap.
+  padTop?: number;
 }) {
   if (m.role === "tool") {
     // The v2 tool row (deviation queue 1 re-port): per-tool icon + title
     // grammar, block shells/edits, collapsible output, expandable detail.
     return (
-      <box style={{ flexDirection: "column", paddingLeft: 0, paddingTop: 1, flexShrink: 0 }}>
+      <box style={{ flexDirection: "column", paddingLeft: 0, paddingTop: padTop, flexShrink: 0 }}>
         <ToolPart
           C={C}
           syntaxStyle={mdStyle}
@@ -4217,20 +4222,51 @@ footerHints={[
             {visibleEnd < msgs.length ? (
               <text content={`… ${msgs.length - visibleEnd} older messages — scroll up to load`} fg={C.faint} />
             ) : null}
-            {visibleMsgs.map((m, index) => (
-              <MessageView
-                key={`${m.messageId ?? index}-${m.role}`}
-                m={m}
-                running={running}
-                thinkingMode={thinkingMode}
-                C={C}
-                mdStyle={mdStyle}
-                isTail={index === visibleMsgs.length - 1}
-                width={dims.width}
-                toolsExpanded={toolsExpanded}
-                spinnerChar={spinner}
-              />
-            ))}
+            {groupExplorationRows(visibleMsgs).map((row, index, rows) =>
+              row.kind === "message" ? (
+                <MessageView
+                  key={`${row.m.messageId ?? index}-${row.m.role}`}
+                  m={row.m}
+                  running={running}
+                  thinkingMode={thinkingMode}
+                  C={C}
+                  mdStyle={mdStyle}
+                  isTail={index === rows.length - 1}
+                  width={dims.width}
+                  toolsExpanded={toolsExpanded}
+                  spinnerChar={spinner}
+                />
+              ) : (
+                <box
+                  key={`expl-${row.tools[0]?.toolCallId ?? index}`}
+                  style={{ flexDirection: "column", paddingTop: 1, flexShrink: 0 }}
+                >
+                  <ExplorationGroup
+                    C={C}
+                    label={row.label}
+                    completed={row.completed}
+                    expanded={toolsExpanded}
+                    spinnerChar={spinner}
+                  >
+                    {row.tools.map((tool, toolIndex) => (
+                      <MessageView
+                        key={`${tool.messageId ?? toolIndex}-${tool.toolCallId}`}
+                        m={tool}
+                        running={running}
+                        thinkingMode={thinkingMode}
+                        C={C}
+                        mdStyle={mdStyle}
+                        isTail={false}
+                        width={dims.width}
+                        toolsExpanded={toolsExpanded}
+                        spinnerChar={spinner}
+                        padTop={0}
+                      />
+                    ))}
+                  </ExplorationGroup>
+                </box>
+              ),
+            )}
           </scrollbox>
         )}
         {sidebarOpen && view === "session" && activeId ? (

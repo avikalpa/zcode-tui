@@ -11,6 +11,7 @@
 // is no background-shell output client (output renders from the part);
 // zcode tool input carries file_path rather than path.
 
+import type { ReactNode } from "react";
 import { TextAttributes } from "@opentui/core";
 import type { ThemeTokens } from "../design";
 import { stringWidth } from "../diff/string-width";
@@ -178,6 +179,37 @@ export function toolDisplay(tool: string): string {
   ]);
   const normalized = canonicalToolName(tool);
   return known.has(normalized) ? normalized : "generic";
+}
+
+// ---- SessionGroupView (index.tsx) ----
+// The exploration group header: one InlineToolRow-shaped line for a run of
+// read/glob/grep calls. Reference colour is text.subdued in both states —
+// settled `→ label`, running spinner + label — brightening to text.default
+// only on mouse hover; this no-mouse binding keeps subdued throughout.
+export function ExplorationGroup(props: {
+  C: ThemeTokens;
+  label: string;
+  completed: boolean;
+  expanded: boolean;
+  spinnerChar: string;
+  children?: ReactNode;
+}) {
+  const C = props.C;
+  return (
+    <box style={{ flexDirection: "column", flexShrink: 0 }}>
+      {props.completed ? (
+        <box style={{ paddingLeft: 3, flexDirection: "row", flexShrink: 0 }}>
+          <text content="→" width={INLINE_TOOL_ICON_WIDTH} fg={C.subtle} />
+          <text content={props.label} fg={C.subtle} wrapMode="none" />
+        </box>
+      ) : (
+        <box style={{ paddingLeft: 3, flexDirection: "row", flexShrink: 0 }}>
+          <text content={`${props.spinnerChar} ${props.label}`} fg={C.subtle} wrapMode="none" />
+        </box>
+      )}
+      {props.expanded ? props.children : null}
+    </box>
+  );
 }
 
 const INLINE_TOOL_ICON_WIDTH = 2;

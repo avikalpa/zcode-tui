@@ -64,8 +64,11 @@ describe("thinking in the production session", () => {
       expect(frame).toContain("+ Thought: First pass");
       expect(frame).toContain("+ Thought: Second pass");
       const lines = frame.split("\n");
-      expect(lines.findIndex((l) => l.includes("First pass"))).toBeLessThan(lines.findIndex((l) => l.includes("Read")));
-      expect(lines.findIndex((l) => l.includes("Read"))).toBeLessThan(lines.findIndex((l) => l.includes("Second pass")));
+      // Since the exploration-group port, a lone settled Read renders as the
+      // collapsed `→ Explored — 1 read` header (the reference
+      // SessionGroupView grammar), not a per-tool row.
+      expect(lines.findIndex((l) => l.includes("First pass"))).toBeLessThan(lines.findIndex((l) => l.includes("Explored")));
+      expect(lines.findIndex((l) => l.includes("Explored"))).toBeLessThan(lines.findIndex((l) => l.includes("Second pass")));
       const y = lines.findIndex((l) => l.includes("Second pass"));
       await setup.mockMouse.click(8, y);
       expect(await textFrame(setup, "The second reasoning body.")).toContain("Fixture answer.");
