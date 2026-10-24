@@ -41,6 +41,11 @@ export function defaultStateDir(): string {
 export function openDb(stateDir: string): Database {
   mkdirSync(stateDir, { recursive: true });
   const db = new Database(join(stateDir, "queue.sqlite3"));
+  // Measured fault 2026-10-25: the serve's meta heartbeat threw SQLITE_BUSY
+  // (uncaught) while an orchestrator CLI writer held the write lock — the
+  // serve died and left dispatches unsupervised. WAL still serializes
+  // writers; every connection must WAIT politely instead of dying.
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec(SCHEMA_SQL);
   // Forward migrations for DBs created before a column existed.
   const cols = new Set((db.query(`PRAGMA table_info(tasks)`).all() as { name: string }[]).map((c) => c.name));
@@ -397,11 +402,19 @@ export class QueueServer {
   }
 
   private heartbeat() {
-    const n = this.now();
-    this.db.query(`INSERT INTO meta (k,v) VALUES ('serve_beat',?)
-      ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(String(n));
-    this.db.query(`INSERT INTO meta (k,v) VALUES ('serve_pid',?)
-      ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(String(process.pid));
+    // A liveness beat must never kill the server: contention resolves in
+    // milliseconds and a skipped beat is invisible (the lock/pid rows still
+    // identify this serve), whereas an uncaught SQLITE_BUSY took the whole
+    // dispatch loop down (measured 2026-10-25).
+    try {
+      const n = this.now();
+      this.db.query(`INSERT INTO meta (k,v) VALUES ('serve_beat',?)
+        ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(String(n));
+      this.db.query(`INSERT INTO meta (k,v) VALUES ('serve_pid',?)
+        ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(String(process.pid));
+    } catch (e) {
+      this.log(`heartbeat skipped (db busy): ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   /** BUG-001 sweeper — runs IN the serve loop (the old reclaimStale fired
