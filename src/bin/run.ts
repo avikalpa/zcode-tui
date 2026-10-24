@@ -48,6 +48,48 @@ export function fallbackOnQuotaRefusal(ref: ModelRef, errText: string): ModelRef
   return null;
 }
 
+/** The reasoning level rides DIFFERENT keys per runtime version (measured
+ *  2026-10-24): jojo 3.16.x takes model.options.reasoningLevel, dev's older
+ *  runtime takes model.variant — both reject the other shape with a strict
+ *  "Unrecognized key". Try each shape; every failure here is pre-turn and
+ *  free. Bare (no level) is the last resort, then session/setThoughtLevel
+ *  fixes the effort post-create. */
+export function modelRefShapes(ref: ModelRef): Record<string, unknown>[] {
+  const level = ref.options?.reasoningLevel ?? "max";
+  const base = { providerId: ref.providerId, modelId: ref.modelId };
+  return [
+    { ...base, options: { reasoningLevel: level } },
+    { ...base, variant: level },
+    base,
+  ];
+}
+
+/** Create the session trying every model-ref shape the fleet's runtimes
+ *  speak (see modelRefShapes). With no ref, one bare attempt. */
+async function createSession(
+  sv: AppServer,
+  createParams: Record<string, unknown>,
+  ref: ModelRef | null,
+): Promise<Record<string, unknown>> {
+  if (!ref) return (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
+  let lastErr: unknown = null;
+  for (const shape of modelRefShapes(ref)) {
+    try {
+      const created = (await sv.request("session/create", { ...createParams, model: shape }, 30000)) as Record<string, unknown>;
+      if (shape !== modelRefShapes(ref)[0]) {
+        console.log(`zt-run: model ref shape fallback used (${Object.keys(shape).join(",")})`);
+      }
+      return created;
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e instanceof Error ? e.message : e);
+      if (!/Unrecognized key|Invalid params|Reasoning level/i.test(msg)) throw e; // real failure: stop
+      // shape rejected pre-turn — try the next shape
+    }
+  }
+  throw lastErr;
+}
+
 const { values } = parseArgs({
   strict: false, // imported as a module by other verbs: foreign argv must not throw
   options: {
@@ -191,8 +233,7 @@ async function main() {
   };
   let created: Record<string, unknown>;
   try {
-    if (ref) createParams.model = ref;
-    created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
+    created = await createSession(sv, createParams, ref);
   } catch (e) {
     const errText = String(e instanceof Error ? e.message : e);
     // GLM-5.3 full is start-plan-only: a plan-bucket refusal falls over to
@@ -202,8 +243,7 @@ async function main() {
     if (!alt) throw e;
     console.log(`zt-run: plan refusal on ${ref!.modelId} — auto-switching to ${alt.modelId} (max): ${errText.slice(0, 120)}`);
     ref = alt;
-    createParams.model = alt;
-    created = (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
+    created = await createSession(sv, createParams, alt);
   }
   const sAny = (created.session ?? created) as unknown;
   sessionId = typeof sAny === "string"
