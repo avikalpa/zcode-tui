@@ -28,6 +28,12 @@ const CREDITS_PATHS: Record<string, string> = {
   "/credits/instances": "/agent-assetmgr/api/v1/wallet-instances",
 };
 
+// a dead refresh lineage still answers refresh with code 0 but the issued
+// tokens get rejected server-side (measured 2026-10-24) — stop re-minting
+// after consecutive failures so a stale credential can't hammer the gateway
+const REFRESH_BREAKER_TRIP = 5;
+const REFRESH_BREAKER_COOLDOWN_MS = 30 * 60 * 1000;
+
 let inflightRefresh: Promise<boolean> | null = null;
 
 export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): Promise<ManagedProxy> {
@@ -35,12 +41,21 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
   const hostname = opts.hostname ?? "127.0.0.1";
   let lastRefreshAt = 0;
   let requestsServed = 0;
+  let refreshFailures = 0;
+  let breakerUntil = 0;
 
   const ensureFreshCredential = async (): Promise<boolean> => {
+    if (Date.now() < breakerUntil) return false;
     if (!inflightRefresh) {
       inflightRefresh = refreshCredential(plan, fetchImpl, opts.planPath).then((r) => {
         inflightRefresh = null;
-        if (r.ok) lastRefreshAt = Date.now();
+        if (r.ok) {
+          lastRefreshAt = Date.now();
+          refreshFailures = 0;
+        } else if (++refreshFailures >= REFRESH_BREAKER_TRIP) {
+          breakerUntil = Date.now() + REFRESH_BREAKER_COOLDOWN_MS;
+          refreshFailures = 0;
+        }
         return r.ok;
       }).catch(() => {
         inflightRefresh = null;
@@ -72,7 +87,7 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
       if (creditsPath) {
         const sendCredits = () => fetchImpl(plan.endpoint.base + creditsPath, {
           method: "GET",
-          headers: { ...signHeaders(plan), "X-Authorization": bearer(plan.auth.accessToken) },
+          headers: { ...signHeaders(plan) },
           redirect: "error",
         }).then((up) => up.text());
         let text = await sendCredits();
@@ -100,7 +115,6 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
       const send = (tokenChanged = false): Promise<Response> => {
         const headers: Record<string, string> = {
           ...signHeaders(plan, { model, requestId: randomUUID() }),
-          "X-Authorization": bearer(plan.auth.accessToken),
         };
         if (body) headers["Content-Type"] = req.headers.get("content-type") ?? "application/json";
         for (const h of ["accept", "anthropic-version", "anthropic-beta", "user-agent"]) {
