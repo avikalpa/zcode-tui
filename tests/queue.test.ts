@@ -149,3 +149,52 @@ describe("model-ref negotiation across runtime versions", () => {
     expect(matchAvailableModel("Available models: main, lite", "GLM-5.3")).toBeNull();
   });
 });
+
+// supervisor verbs (owner 2026-10-24): fleet-level care for quota deaths
+import { rerouteTask, holdTask, revokeTask } from "../src/queue/core";
+
+describe("queue supervision verbs", () => {
+  test("reroute moves a failed task to a live plane with attempts reset", () => {
+    const db = freshDb();
+    const id = insertTask(db, "failed");
+    const r = rerouteTask(db, id, "codex");
+    expect(r.ok).toBe(true);
+    const row = db.query("SELECT route, status, attempts, started_at, finished_at FROM tasks WHERE id=?").get(id) as Record<string, unknown>;
+    expect(row.route).toBe("codex");
+    expect(row.status).toBe("queued");
+    expect(row.attempts).toBe(0);
+    expect(row.started_at).toBeNull();
+  });
+
+  test("reroute refuses a running task", () => {
+    const db = freshDb();
+    const id = insertTask(db, "running");
+    expect(rerouteTask(db, id, "codex").ok).toBe(false);
+  });
+
+  test("hold parks a queued task past a reset window", () => {
+    const db = freshDb();
+    const id = insertTask(db, "queued");
+    const until = Date.now() + 3_600_000;
+    expect(holdTask(db, id, until).ok).toBe(true);
+    const row = db.query("SELECT next_eligible_at FROM tasks WHERE id=?").get(id) as { next_eligible_at: number };
+    expect(row.next_eligible_at).toBeGreaterThanOrEqual(until - 1000);
+  });
+
+  test("revoke un-completes a false completion and records the reason", () => {
+    const db = freshDb();
+    const id = insertTask(db, "completed");
+    const r = revokeTask(db, id, "zero-token error turn");
+    expect(r.ok).toBe(true);
+    const row = db.query("SELECT status, attempts, last_error FROM tasks WHERE id=?").get(id) as Record<string, unknown>;
+    expect(row.status).toBe("queued");
+    expect(row.attempts).toBe(0);
+    expect(String(row.last_error)).toContain("revoked: zero-token error turn");
+  });
+
+  test("revoke refuses non-completed rows (rm owns cancellation)", () => {
+    const db = freshDb();
+    const id = insertTask(db, "queued");
+    expect(revokeTask(db, id, "nope").ok).toBe(false);
+  });
+});
