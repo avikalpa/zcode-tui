@@ -70,3 +70,12 @@ session cookie, body signature, or a second token minted at chat time).
 NEEDS: capture one real desktop chat request (owner-approved proxy
 instrumentation) or the missing contract field from the 2.0.3 bundle.
 Proof-task ztq-d46252ed parked; re-enqueue when (4) lands.
+## BUG-006 — TUI focus test fails on main: dialog-close leaves toast overlay, composer not re-focused — OPEN
+`bun test src/tui/app.test.tsx` — "closing a text dialog releases editor focus
+back to the App composer" fails on pristine origin/main (2026-10-24, verified
+in a clean worktree): the rendered frame shows the toast ("rename pending host
+support · Fixture renamed") occupying the viewport and no "Status" dialog.
+Toast/dialog interplay — likely the toast render racing the dialog close in
+the test harness, or a real focus regression from the sitting-4 paste-fold/toast
+units. Pre-dates lane/model-default-resolution (verified). Needs: repro with
+toast disabled, then root-cause in toast.tsx/dialog focus wiring.
