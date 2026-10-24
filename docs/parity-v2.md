@@ -117,6 +117,12 @@ Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`
   selection tests pass; full suite 225/225 and typecheck pass. Specialized
   upstream model sorting and server-backed session search remain adaptations.
 
+- Unit 3: prompt status uses the reference's location truncation and
+  usage/shortcut width budget. Home MCP status no longer allocates a nested
+  full-width row that clips shortcuts. Running label is `esc interrupt`.
+  Production App regression fails before/pass after; three component render
+  fixtures also pass. Typecheck and full suite pass (229 tests).
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2

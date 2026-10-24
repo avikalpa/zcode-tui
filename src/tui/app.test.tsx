@@ -4,7 +4,7 @@ import { testRender } from "@opentui/react/test-utils";
 import type { AppServer } from "../protocol/client";
 import { App } from "./app";
 
-function fakeClient(onResume?: (id: string) => void, mcpUnavailable = false) {
+function fakeClient(onResume?: (id: string) => void, mcpUnavailable = false, withMcp = false) {
   const sessions = [
     { sessionId: "sess_fixture_one", title: "Checking sessions list", status: "idle", mode: "build", updatedAt: Date.parse("2026-09-04T12:00:00Z") },
     { sessionId: "sess_fixture_two", title: "Fixing the composer", status: "idle", mode: "build", updatedAt: Date.parse("2026-09-03T12:00:00Z") },
@@ -12,6 +12,7 @@ function fakeClient(onResume?: (id: string) => void, mcpUnavailable = false) {
   const client = {
     request: async (method: string, params?: { sessionId?: string }) => {
       if (method === "session/list") return { sessions };
+      if (method === "mcp/list" && withMcp) return { statuses: { fixture: { status: "connected" } } };
       if (method === "mcp/list" && mcpUnavailable) throw new Error("Synthetic MCP request failure");
       if (method === "session/resume") {
         onResume?.(params?.sessionId ?? "");
@@ -31,6 +32,15 @@ function fakeClient(onResume?: (id: string) => void, mcpUnavailable = false) {
 const AppModule = await import("./app");
 
 describe("zcode-tui OpenCode-shaped shell", () => {
+  test("home MCP count and shortcuts fit on the same footer row", async () => {
+    const setup = await testRender(<App client={fakeClient(undefined, false, true)} onQuit={() => {}} />, { width: 100, height: 30 });
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("1 MCP"));
+      const status = frame.split("\n").find((line) => line.includes("1 MCP"));
+      expect(status).toContain("ctrl+p commands");
+      expect(status).toContain("shift+tab agents");
+    } finally { setup.renderer.destroy(); }
+  });
   test("status preserves an MCP request failure as unavailable", async () => {
     const setup = await testRender(<App client={fakeClient(undefined, true)} onQuit={() => {}} />, { width: 100, height: 40 });
     try {

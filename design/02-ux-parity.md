@@ -134,3 +134,18 @@ only fuzzysort; existing resolved packages are unchanged. The local Bun
 cannot read the inherited v2 lockfile and attempted a broad dependency
 refresh; that refresh was discarded. Tests retain the inherited renderer
 versions, with the new package held in lane-only dependencies.
+
+## Sitting 4 — prompt status sizing
+
+The prompt footer follows `component/prompt/index.tsx`'s shrinking location
+cell and `feature-plugins/prompt/footer.tsx`'s cell-width budget for usage
+and shortcuts. It reuses the already-ported `ui/file-path.tsx` truncator,
+including Unicode grapheme handling. The home MCP extension now occupies a
+compact cell instead of a second full-width box nested in the footer.
+The inherited shortcut and home version extensions remain; no extra host
+state is invented. Running status uses the reference `esc interrupt` label
+while retaining the adapter's existing single-Escape interrupt semantics.
+
+A production-App MCP/footer test fails on the previous commit and passes
+now. Three rendered fixtures cover one-row home metadata, narrow Unicode
+location plus usage, and running interrupt plus usage. Typecheck passes.
