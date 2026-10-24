@@ -46,7 +46,7 @@ import {
 } from "./design";
 import { DiffViewer, diffSourceLabel, filetypeOf, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
 import { PatchDiff } from "./diff/patch-diff";
-import { ToolPart } from "./session/tool-parts";
+import { SplitBorder, ToolPart } from "./session/tool-parts";
 import { ThinkingBlock, appendThinking, completeThinking, thinkingDuration, nextThinkingMode, type ThinkingPart, type ThinkingMode } from "./session/thinking";
 import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
@@ -682,7 +682,7 @@ export const MessageView = memo(function MessageView({
     // The v2 tool row (deviation queue 1 re-port): per-tool icon + title
     // grammar, block shells/edits, collapsible output, expandable detail.
     return (
-      <box style={{ flexDirection: "column", paddingLeft: 0, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+      <box style={{ flexDirection: "column", paddingLeft: 0, paddingTop: 1, flexShrink: 0 }}>
         <ToolPart
           C={C}
           syntaxStyle={mdStyle}
@@ -704,11 +704,22 @@ export const MessageView = memo(function MessageView({
 
   const isUser = m.role === "user";
   if (isUser) {
+    // The reference UserMessage (routes/session/index.tsx): a left `┃` rule
+    // in the agent color spanning padTop/text/padBottom, text one border +
+    // inner paddingLeft 2 later — inside the session column's pad 2, the
+    // rule sits at column 2 and the text at column 5.
     return (
-      <box style={{ flexDirection: "column", paddingLeft: 2, paddingRight: 2, paddingTop: 1, flexShrink: 0 }}>
-        <box style={{ flexDirection: "row", flexShrink: 0 }}>
-          <box style={{ width: 1, flexShrink: 0, backgroundColor: C.user }} />
-          <box style={{ flexGrow: 1, flexShrink: 0, backgroundColor: C.panel, paddingLeft: 2, paddingRight: 2 }}>
+      <box style={{ flexDirection: "column", paddingTop: 1, flexShrink: 0 }}>
+        <box
+          style={{
+            borderStyle: "single",
+            border: ["left"],
+            customBorderChars: SplitBorder.customBorderChars,
+            borderColor: C.user,
+            flexShrink: 0,
+          }}
+        >
+          <box style={{ paddingTop: 1, paddingBottom: 1, paddingLeft: 2, flexShrink: 0 }}>
             <text content={wrapText(m.text, Math.max(20, width - 8)).join("\n")} fg={C.fg} />
           </box>
         </box>
@@ -721,7 +732,7 @@ export const MessageView = memo(function MessageView({
     ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, m.interrupted)
     : null;
   return (
-    <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
+    <box style={{ flexDirection: "column", paddingLeft: 3, paddingTop: 1, flexShrink: 0 }}>
       <ThinkingBlock
         parts={m.thinkingParts ?? (m.thinking ? [{ text: m.thinking }] : [])}
         mode={thinkingMode}
@@ -2539,6 +2550,7 @@ export function App({
             text: String(input?.command ?? input?.description ?? JSON.stringify(input ?? {}).slice(0, 80)),
             toolName: String(payload.toolName ?? "tool"),
             toolCallId: String(payload.toolCallId ?? ""),
+            toolInput: input ?? {},
           }]);
         } else if (type === "result" && payload.toolCallId) {
           const result = (payload.result ?? {}) as Record<string, unknown>;
@@ -4182,7 +4194,16 @@ footerHints={[
         ) : (
           <scrollbox
             ref={scrollRef as never}
-            style={{ flexGrow: 1, flexDirection: "column", paddingTop: 1 }}
+            style={{
+              flexGrow: 1,
+              flexDirection: "column",
+              paddingTop: 1,
+              // The reference session column (routes/session/index.tsx):
+              // pad 1 on narrow terminals, 2 otherwise — every message row
+              // then speaks from column 3 (pad) + its own inset.
+              paddingLeft: dims.width < 44 ? 1 : 2,
+              paddingRight: dims.width < 44 ? 1 : 2,
+            }}
             scrollbarOptions={{ visible: false }}
             stickyScroll
             stickyStart="bottom"
