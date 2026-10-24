@@ -105,7 +105,8 @@ describe("queue CLI surface (dispatch-hardening)", () => {
     const pf = join(dir, "brief.md");
     writeFileSync(pf, "cli surface body\n");
     const at = Date.now() + 7_200_000;
-    const p = Bun.spawnSync(["bun", "run", "src/bin/queue.ts", "enqueue",
+    const p = // process.execPath: dev's non-interactive PATH lacks a bare "bun"
+    Bun.spawnSync([process.execPath, "run", "src/bin/queue.ts", "enqueue",
       "--route", "codex", "--prompt-file", pf, "--workspace", dir,
       "--title", "cli-elig", "--eligible-at", String(at),
       "--state-dir", join(dir, "state")], { cwd: import.meta.dir + "/.." });
