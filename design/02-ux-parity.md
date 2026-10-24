@@ -29,3 +29,24 @@ and rejects backend send/model/thought-level requests. This extends sitting
 
 Live terminal pixels, paste folding/extmark behavior and remaining message,
 spacing, toast and scroll comparisons remain open until separately proven.
+
+## Composer boundaries and paste
+
+The pinned `component/prompt/index.tsx` gives Up/Down to visual cursor
+movement until offset 0/end, then calls `prompt/history.tsx.move`.
+A nonempty draft differing from the selected history entry refuses history
+replacement. Previous puts the cursor at the start; next at the end.
+The React adapter now follows those rules for hard newlines and soft wraps,
+keeps the 50 newest entries and deduplicates only consecutive submissions.
+Shared-store history loading remains the backend adaptation.
+
+OpenTUI decodes raw Ctrl+J as `linefeed`, not `ctrl+j`; accept both forms.
+Paste flushes earlier typed bytes before insertion, normalizes CRLF/CR,
+adds one undo snapshot, and yields input to dialogs, diff and permission
+surfaces. Six production-App keystroke tests compare actual session/send
+content; all six failed before this unit and pass after it. The Escape
+fixture waits for the terminal parser's ambiguous Alt-prefix timeout.
+
+Still open: folded long-paste placeholders/extmarks, attachment-rich history
+and full persistence equivalence, and cancellation/order for asynchronous
+attachment-path resolution. These require separate bounded units.

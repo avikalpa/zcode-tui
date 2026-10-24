@@ -68,6 +68,15 @@ Reference remains the owner-selected OpenCode `v2ref`
   show/hide twice without `session/send`, `setModel` or `setThoughtLevel`.
   Deterministic render/input proof only; no live pixel-parity claim.
 
+- Unit 2: composer history follows the pinned reference's visual-row and
+  start/end boundary rules, refuses replacement of edited drafts, positions
+  recalled cursors correctly, and keeps 50 entries with adjacent-only
+  deduplication. Raw Ctrl+J (`linefeed`) inserts a newline. Paste flushes
+  prior typing, normalizes newlines, undoes atomically, and cannot reach
+  the hidden composer under a dialog/permission/diff. Six production-App
+  input/send tests failed before and pass after the change. Long-paste
+  folding and asynchronous attachment-path races remain open.
+
 See [sitting 3 decisions](../design/02-ux-parity.md) for references and gaps.
 
 ## Shipped (1:1 unless noted)

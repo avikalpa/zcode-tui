@@ -1947,7 +1947,9 @@ export function App({
     setRunning(true);
     setView("session");
     resetToTail();
-    setHistory((h) => [content, ...h.filter((x) => x !== content)]);
+    // OpenCode prompt/history.tsx: retain order and only collapse adjacent
+    // duplicates, with the same 50-entry bound as the history reader.
+    setHistory((h) => h[0] === content ? h : [content, ...h].slice(0, 50));
     historyIdx.current = -1;
     setMsgs((m) => [...m, { role: "user", text: echoText }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
     let attachments: { ref: string; fileName: string; mime: string; bytes: number }[] | undefined;
@@ -2695,10 +2697,10 @@ export function App({
   // boundary — and the popups never see pasted content, because they are
   // driven only by the typed-key state machine.
   const insertAtCursor = (text: string) => {
+    pushUndo();
     const sel = selectionRange();
     if (sel) {
       // v2 selection semantics: typed text REPLACES the selection.
-      pushUndo();
       const next = draftRef.current.slice(0, sel[0]) + text + draftRef.current.slice(sel[1]);
       draftRef.current = next;
       setDraft(next);
@@ -2747,6 +2749,10 @@ export function App({
     if (chunk) insertAtCursor(chunk);
   };
   usePaste((event) => {
+    // A dialog/diff/permission owns input while it is visible. Pasted bytes
+    // must not leak through its keyboard layer into the hidden composer.
+    if (dialog !== null || askRef.current || ask || view === "diff") return;
+    flushPending();
     const text = decodePasteBytes(event.bytes).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     if (!text) return;
     if (!typing) {
@@ -3091,6 +3097,7 @@ export function App({
       // grammar. Plain enter still submits.
       if ((key.name === "return" && (key as { shift?: boolean }).shift)
         || (key.name === "return" && (key as { meta?: boolean }).meta)
+        || key.name === "linefeed"
         || (key.ctrl && key.name === "j")) {
         clearSelection();
         pushUndo();
@@ -3101,7 +3108,6 @@ export function App({
         setCursorBoth(cur + 1);
         return;
       }
-      const multilineNow = draftRef.current.includes("\n");
       // ---- input.select.* (v2): shift extends the selection from the
       // anchor; the plain motions below collapse it (moveCursor clears).
       const shiftK = (key as { shift?: boolean }).shift;
@@ -3166,30 +3172,28 @@ export function App({
         return;
       }
       if (key.name === "up" || key.name === "down") {
-        // Multiline drafts move the cursor across lines; single-line drafts
-        // walk the prompt history.
-        if (multilineNow) {
-          clearSelection();
-          const cur = cursorRef.current ?? draftRef.current.length;
-          const starts = [0, ...[...draftRef.current].reduce<number[]>((acc, ch, i) => ch === "\n" ? [...acc, i + 1] : acc, [])];
-          const lineIdx = starts.reduce((acc, start, i) => cur >= start ? i : acc, 0);
-          const col = cur - starts[lineIdx];
-          const target = key.name === "up" ? lineIdx - 1 : lineIdx + 1;
-          if (target < 0 || target >= starts.length) return;
-          const lineEnd = target + 1 < starts.length ? starts[target + 1] - 1 : draftRef.current.length;
-          setCursorBoth(Math.min(starts[target] + col, lineEnd));
+        // Port of component/prompt/index.tsx prompt.history.previous/next:
+        // arrows move through visual rows first, including soft wraps. Only
+        // the input boundary can hand the key to prompt history.
+        clearSelection();
+        const previous = key.name === "up";
+        const cur = cursorRef.current ?? draftRef.current.length;
+        const boundary = previous ? 0 : draftRef.current.length;
+        if (cur !== boundary) {
+          setCursorBoth(visualMove(previous ? -1 : 1));
           return;
         }
         if (history.length === 0) return;
-        clearSelection();
-        const next = key.name === "up"
+        // prompt/history.tsx move refuses a nonempty edited/custom draft.
+        if (draftRef.current && draftRef.current !== history[historyIdx.current]) return;
+        const next = previous
           ? Math.min(historyIdx.current + 1, history.length - 1)
           : Math.max(historyIdx.current - 1, -1);
         historyIdx.current = next;
         const restored = next >= 0 ? history[next] : "";
         draftRef.current = restored;
         setDraft(restored);
-        setCursorBoth(null);
+        setCursorBoth(previous ? 0 : restored.length);
         discardPending();
         return;
       }
