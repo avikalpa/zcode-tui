@@ -45,6 +45,7 @@ import {
 import { DiffViewer, diffSourceLabel, filetypeOf, type DiffPreferences, type DiffViewerApi } from "./diff/diff-viewer";
 import { PatchDiff } from "./diff/patch-diff";
 import { ToolPart } from "./session/tool-parts";
+import { ThinkingBlock, appendThinking, completeThinking, thinkingDuration, nextThinkingMode, type ThinkingPart, type ThinkingMode } from "./session/thinking";
 import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
 import {
@@ -235,10 +236,28 @@ export interface TurnMessage {
   // v2.0.8 counts reasoning tokens in the throughput numerator (upstream
   // rows.ts); our payload takes the field when one ever carries it.
   reasoningTokens?: number;
-  // Reasoning is collapsed once the turn completes; the streaming tail shows
-  // it live until then.
+  // Flat text remains the transcript-export voice; parts retain disclosure
+  // boundaries and reasoning-only timestamps for presentation.
   thinking?: string;
   thinkingMs?: number;
+  thinkingParts?: ThinkingPart[];
+}
+
+// A tool can be the last visible row while the assistant is still streaming.
+export function updateActiveAssistant(messages: TurnMessage[], update: (message: TurnMessage) => TurnMessage, continueAfterTool = false): TurnMessage[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") break;
+    if (messages[i].role === "assistant") {
+      if (continueAfterTool && messages.at(-1)?.role === "tool") {
+        const { model, turnStart } = messages[i];
+        return [...messages, update({ role: "assistant", text: "", model, turnStart })];
+      }
+      const result = [...messages];
+      result[i] = update(messages[i]);
+      return result;
+    }
+  }
+  return messages;
 }
 
 // The wordmark — designed by Astra (2026-09-14 consult) in the OpenCode
@@ -673,10 +692,10 @@ function HintBits({ text, C }: { text: string; C: ThemeTokens }) {
 // The message transcript voice, measured off the OpenCode reference: the user
 // block is a filled panel with a bright left edge, the assistant speaks as
 // plain markdown with a metrics footer, tools are single dim lines.
-const MessageView = memo(function MessageView({
+export const MessageView = memo(function MessageView({
   m,
   running,
-  thinking,
+  thinkingMode,
   C,
   mdStyle,
   isTail,
@@ -686,7 +705,7 @@ const MessageView = memo(function MessageView({
 }: {
   m: TurnMessage;
   running: boolean;
-  thinking: string;
+  thinkingMode: ThinkingMode;
   C: ThemeTokens;
   mdStyle: SyntaxStyle;
   isTail: boolean;
@@ -738,12 +757,12 @@ const MessageView = memo(function MessageView({
     : null;
   return (
     <box style={{ flexDirection: "column", paddingLeft: 3, paddingRight: 3, paddingTop: 1, flexShrink: 0 }}>
-      {m.thinking ? (
-        <text content={`+ Thought${m.thinkingMs ? ` · ${(m.thinkingMs / 1000).toFixed(1)}s` : ""}`} fg={C.faint} />
-      ) : null}
-      {streaming && thinking ? (
-        <text content={wrapText(thinking.slice(-160), Math.max(20, width - 6)).join("\n")} fg={C.faint} />
-      ) : null}
+      <ThinkingBlock
+        parts={m.thinkingParts ?? (m.thinking ? [{ text: m.thinking }] : [])}
+        mode={thinkingMode}
+        done={!streaming || Boolean(m.thinkingParts?.at(-1)?.completedAt !== undefined)}
+        C={C} syntaxStyle={mdStyle} spinnerChar={spinnerChar}
+      />
       {!streaming ? (
         m.text.trim() ? (
           <markdown
@@ -756,7 +775,7 @@ const MessageView = memo(function MessageView({
           />
         ) : null
       ) : (
-        <text content={wrapText(m.text || "…", Math.max(20, width - 6)).join("\n")} fg={C.fg} />
+        <text content={wrapText(m.text || (m.thinking ? "" : "…"), Math.max(20, width - 6)).join("\n")} fg={C.fg} />
       )}
       {footer ? (
         <box style={{ flexDirection: "row", paddingTop: 0, flexShrink: 0 }}>
@@ -798,11 +817,18 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
   const parts = Array.isArray(m.parts) ? (m.parts as Record<string, unknown>[]) : [];
   let text = "";
   let thinkingText = "";
+  const thinkingParts: ThinkingPart[] = [];
   const toolRows: TurnMessage[] = [];
   for (const p of parts) {
     const type = String(p.type ?? "");
     if (type === "reasoning" && typeof p.text === "string") {
       thinkingText += (thinkingText ? "\n" : "") + p.text;
+      const time = (p.time ?? {}) as Record<string, unknown>;
+      const timestamp = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+      thinkingParts.push({ text: p.text,
+        startedAt: timestamp(time.created ?? infoTime.created),
+        completedAt: timestamp(time.completed ?? infoTime.completed),
+      });
     } else if (type === "tool") {
       const state = (p.state ?? {}) as Record<string, unknown>;
       const input = (state.input ?? {}) as Record<string, unknown>;
@@ -839,6 +865,8 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
     messageId: String(info.id ?? info.messageId ?? "") || undefined,
     createdAt: Number(infoTime.created ?? info.createdAt ?? info.updatedAt ?? 0) || undefined,
     thinking: thinkingText || undefined,
+    thinkingParts: thinkingParts.length ? thinkingParts : undefined,
+    thinkingMs: thinkingDuration(thinkingParts),
   }];
   out.push(...toolRows);
   return out;
@@ -1094,6 +1122,7 @@ export function App({
   onQuit,
   resumeId,
   modelId,
+  preferences = uiStateRepository,
 }: {
   client: AppServer;
 
@@ -1101,6 +1130,7 @@ export function App({
   onQuit: () => void;
   resumeId?: string | null;
   modelId?: string | null;
+  preferences?: ReturnType<typeof createModelPreferenceRepository>;
 }) {
   const [view, setView] = useState<AppView>("home");
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -1109,11 +1139,6 @@ export function App({
   const [status, setStatus] = useState("connecting…");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [thinking, setThinking] = useState("");
-  const thinkingRef = useRef("");
-  useEffect(() => {
-    thinkingRef.current = thinking;
-  }, [thinking]);
   const [dialog, setDialog] = useState<DialogName>(null);
   // v2 prompt.files — the draft's attachment parts. Labels are virtual
   // text: a part lives while its label survives in the draft (the
@@ -1390,14 +1415,15 @@ export function App({
   // The UX-state store (opencode model.json pattern) — loaded once, saved on
   // every model/effort choice through the v2.0.8 repository (lock-merged
   // writes + live cross-client subscribe).
-  const uiState = useRef<UiState>(uiStateRepository.load());
+  const uiState = useRef<UiState>(preferences.load());
+  const thinkingMode = uiState.current.thinking;
   const [, setUiSyncTick] = useState(0);
   // v2.0.8 client-sync port (upstream #49611): a state.json write from
   // ANOTHER zcode-tui process surfaces here live; our own write re-reads the
   // same content and costs one no-op re-render.
   useEffect(
     () =>
-      uiStateRepository.subscribe((next) => {
+      preferences.subscribe((next) => {
         uiState.current = next;
         setUiSyncTick((t) => t + 1);
       }),
@@ -1442,12 +1468,12 @@ export function App({
   }, [typing, animations]);
 
   const rememberModel = (choice: ModelChoice) => {
-    uiState.current = uiStateRepository.addRecent({ providerId: choice.providerId, modelId: choice.modelId });
+    uiState.current = preferences.addRecent({ providerId: choice.providerId, modelId: choice.modelId });
   };
   const toggleFavoriteModel = (choice: ModelChoice) => {
     const key = modelKey(choice);
     const isFav = uiState.current.favorite.some((f) => modelKey(f) === key);
-    uiState.current = uiStateRepository.setFavorite(choice, !isFav);
+    uiState.current = preferences.setFavorite(choice, !isFav);
     flashStatus(`${isFav ? "unfavorited" : "favorited"} ${modelLabel(choice)}`);
   };
   // opencode model_cycle_recent: f2 / shift+f2 walk the recent list.
@@ -1730,7 +1756,7 @@ export function App({
   // cross-client sync). The legacy ~/.config/zcode-tui/theme flat file is a
   // read-only fallback at boot and is no longer written.
   const persistTheme = (next: ThemeName) => {
-    uiStateRepository.update((current) => ({ theme: { ...current.theme, name: next } }));
+    preferences.update((current) => ({ theme: { ...current.theme, name: next } }));
     setTheme(next);
   };
   // v2 context/theme.tsx setMode/pin/free: setMode guards the active theme's
@@ -1741,11 +1767,11 @@ export function App({
   const pinThemeMode = (next: ThemeMode) => {
     setThemeLock(next);
     setThemeMode(next);
-    uiStateRepository.update((current) => ({ theme: { ...current.theme, mode: next } }));
+    preferences.update((current) => ({ theme: { ...current.theme, mode: next } }));
   };
   const freeThemeMode = () => {
     setThemeLock(null);
-    uiStateRepository.update((current) => ({ theme: { ...current.theme, mode: "system" } }));
+    preferences.update((current) => ({ theme: { ...current.theme, mode: "system" } }));
   };
   const switchThemeMode = (requested: ThemeMode): boolean => {
     if (!themeModes(theme).includes(requested)) return false;
@@ -2046,7 +2072,7 @@ export function App({
     setTyping(false);
   };
   const persistDiffPrefs = (value: DiffPreferences) => {
-    uiState.current = uiStateRepository.update((cur) => ({ diff: { ...cur.diff, ...value } }));
+    uiState.current = preferences.update((cur) => ({ diff: { ...cur.diff, ...value } }));
   };
 
   // opencode app.toggle.animations (0.6.24): the cursor blink is the TUI's
@@ -2054,7 +2080,7 @@ export function App({
   const toggleAnimations = () => {
     const next = !animations;
     setAnimations(next);
-    uiState.current = uiStateRepository.update(() => ({ animations: next }));
+    uiState.current = preferences.update(() => ({ animations: next }));
     flashStatus(next ? "animations enabled" : "animations disabled");
   };
 
@@ -2063,7 +2089,7 @@ export function App({
   const toggleFileContext = () => {
     const next = !fileContext;
     setFileContext(next);
-    uiState.current = uiStateRepository.update(() => ({ fileContext: next }));
+    uiState.current = preferences.update(() => ({ fileContext: next }));
     flashStatus(next ? "file context enabled" : "file context disabled");
   };
 
@@ -2160,16 +2186,11 @@ export function App({
       setRunning(false);
       // v2 marks the stopped turn on the assistant footer (`· interrupted`,
       // duration included) instead of dropping the metrics (0.6.30 port).
-      setMsgs((current) => {
-        if (current.length === 0) return current;
-        const last = current[current.length - 1];
-        if (last.role !== "assistant") return current;
-        return [...current.slice(0, -1), {
-          ...last,
-          interrupted: true,
-          durationMs: last.durationMs ?? (last.turnStart ? Date.now() - last.turnStart : undefined),
-        }];
-      });
+      setMsgs((current) => updateActiveAssistant(current, (last) => ({
+        ...last, thinkingParts: completeThinking(last.thinkingParts),
+        interrupted: true,
+        durationMs: last.durationMs ?? (last.turnStart ? Date.now() - last.turnStart : undefined),
+      })));
       flashStatus(dropped > 0 ? `turn interrupted · ${dropped} queued dropped` : "turn interrupted", "warning");
       probe("turn-stop", id.slice(0, 18));
     } catch (e) {
@@ -2297,7 +2318,7 @@ export function App({
   // 2026-09-16) and the backend persists it as workspace last-used.
   const applyEffort = (e: (typeof EFFORTS)[number]) => {
     setEffort(e);
-    uiState.current = uiStateRepository.update((cur) => ({ variant: { ...cur.variant, [modelKey(activeModel)]: e } }));
+    uiState.current = preferences.update((cur) => ({ variant: { ...cur.variant, [modelKey(activeModel)]: e } }));
     if (!activeId) { flashStatus(`effort → ${e}`); return; }
     void client.request("session/setModel", { sessionId: activeId, model: { providerId: activeModel.providerId, modelId: activeModel.modelId, variant: e } })
       .then(() => flashStatus(`effort → ${e}`))
@@ -2328,19 +2349,9 @@ export function App({
   };
 
   const toggleThinking = async () => {
-    const next = thoughtLevel === "disabled" ? "enabled" : "disabled";
-    if (!activeId) {
-      setThoughtLevel(next);
-      flashStatus(`thinking → ${next}`);
-      return;
-    }
-    try {
-      await client.request("session/setThoughtLevel", { sessionId: activeId, thoughtLevel: next });
-      setThoughtLevel(next);
-      flashStatus(`thinking → ${next}`);
-    } catch (e) {
-      flashStatus(`setThoughtLevel failed: ${e instanceof Error ? e.message : e}`);
-    }
+    uiState.current = preferences.update((current) => ({ thinking: nextThinkingMode(current.thinking) }));
+    setUiSyncTick((tick) => tick + 1);
+    flashStatus(`thinking → ${uiState.current.thinking}`);
   };
 
   // The timeline (opencode session_timeline + fork-from-timeline): the
@@ -2518,15 +2529,16 @@ export function App({
       if (method === "session/event") {
         const payload = (params?.payload ?? {}) as Record<string, unknown>;
         const type = String(payload.type ?? payload.kind ?? "");
-        const appendTail = (delta: string) => setMsgs((current) => {
-          if (current.length === 0) return current;
-          const last = current[current.length - 1];
-          if (last.role !== "assistant") return current;
-          return [...current.slice(0, -1), { ...last, text: last.text + delta }];
-        });
+        const eventAt = Date.now();
+        const appendTail = (delta: string) => setMsgs((current) => updateActiveAssistant(current, (last) => ({
+          ...last, text: last.text + delta, thinkingParts: completeThinking(last.thinkingParts, eventAt),
+        }), true));
+
         if (type === "tool_call") {
           const input = payload.input as Record<string, unknown> | undefined;
-          setMsgs((current) => [...current, {
+          setMsgs((current) => [...updateActiveAssistant(current, (last) => ({
+            ...last, thinkingParts: completeThinking(last.thinkingParts, eventAt),
+          })), {
             role: "tool",
             text: String(input?.command ?? input?.description ?? JSON.stringify(input ?? {}).slice(0, 80)),
             toolName: String(payload.toolName ?? "tool"),
@@ -2545,7 +2557,10 @@ export function App({
           if (delta) appendTail(delta);
         } else if (type === "reasoning_delta") {
           const delta = (payload.delta ?? payload.text ?? payload.content) as string | undefined;
-          if (delta) setThinking((current) => current + delta);
+          if (delta) setMsgs((current) => updateActiveAssistant(current, (last) => {
+            const parts = appendThinking(last.thinkingParts, delta, eventAt);
+            return { ...last, thinking: parts.map((part) => part.text).join("\n\n"), thinkingParts: parts };
+          }, true));
         } else if (typeof payload.content === "string" && payload.stopReason) {
           const usage = payload.usage as Record<string, unknown> | undefined;
           if (typeof payload.contextWindow === "number" && typeof usage?.inputTokens === "number") {
@@ -2553,21 +2568,17 @@ export function App({
           }
           const outputTokens = Number(usage?.outputTokens ?? usage?.totalTokens ?? 0) || undefined;
           const reasoningTokens = Number(usage?.reasoningTokens ?? 0) || undefined;
-          setMsgs((current) => {
-            if (current.length === 0) return current;
-            const last = current[current.length - 1];
-            if (last.role !== "assistant") return current;
-            return [...current.slice(0, -1), {
+          setMsgs((current) => updateActiveAssistant(current, (last) => {
+            const parts = completeThinking(last.thinkingParts, eventAt);
+            return {
               ...last,
               text: payload.content as string,
               durationMs: last.turnStart ? Date.now() - last.turnStart : undefined,
-              outputTokens,
-              reasoningTokens,
-              thinking: thinkingRef.current || undefined,
-              thinkingMs: thinkingRef.current && last.turnStart ? Date.now() - last.turnStart : undefined,
-            }];
-          });
-          setThinking("");
+              outputTokens, reasoningTokens,
+              thinkingParts: parts,
+              thinkingMs: thinkingDuration(parts),
+            };
+          }, true));
           setRunning(false);
           if (usage && typeof usage.totalTokens === "number") {
             probe("turn-end", `tokens=${usage.totalTokens}`);
@@ -2614,8 +2625,12 @@ export function App({
         }
         if (isEffort(currentModel?.variant)) setEffort(currentModel.variant);
         if (patch.status === "running") setRunning(true);
-        if (patch.status === "idle" || patch.status === "completed") setRunning(false);
+        if (patch.status === "idle" || patch.status === "completed") {
+          setMsgs((current) => updateActiveAssistant(current, (last) => ({ ...last, thinkingParts: completeThinking(last.thinkingParts) })));
+          setRunning(false);
+        }
       } else if (method === "v4/telemetry/event" && params?.kind === "turn.terminal") {
+        setMsgs((current) => updateActiveAssistant(current, (last) => ({ ...last, thinkingParts: completeThinking(last.thinkingParts) })));
         setRunning(false);
         void refresh();
       }
@@ -3758,7 +3773,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
           flashStatus(next === "char" ? "diff wrapping enabled" : "diff wrapping disabled");
         },
       },
-      { id: "thinking", title: "Thinking", group: "Session", hint: "reasoning visibility", value: thoughtLevel === "disabled" ? "hide" : "show", change: () => void toggleThinking() },
+      { id: "thinking", title: "Thinking", group: "Session", hint: "reasoning visibility", value: thinkingMode, change: () => void toggleThinking() },
       { id: "sidebar", title: "Sidebar", group: "Session", hint: "the session side panel", value: sidebarOpen ? "shown" : "hidden", change: () => setSidebarOpen((v) => !v) },
       { id: "mode", title: "Mode", group: "Session", hint: "agent mode", value: mode, change: (dir) => void cycleMode(dir) },
       { id: "effort", title: "Effort", group: "Session", hint: "reasoning effort", value: effort, change: (dir) => cycleEffort(dir) },
@@ -4008,7 +4023,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "model", label: "switch model…", description: "choose from the safe model allowlist", value: () => setDialog("model") },
       { id: "effort", label: "reasoning effort…", description: "low · high · max", value: () => setDialog("effort") },
       { id: "mode", label: "switch mode…", description: "plan · build · edit · yolo · auto", value: () => setDialog("mode") },
-      { id: "thinking", label: "toggle thinking", value: () => void toggleThinking() },
+      { id: "thinking", label: thinkingMode === "hide" ? "expand thinking" : "collapse thinking", value: () => void toggleThinking() },
       { id: "fork", label: "fork session", description: "latest checkpoint", value: () => void forkActive() },
       { id: "fork-message", label: "fork at message…", value: openForkDialog },
       { id: "compact", label: "compact session", value: () => void compactActive() },
@@ -4154,7 +4169,7 @@ footerHints={[
                 key={`${m.messageId ?? index}-${m.role}`}
                 m={m}
                 running={running}
-                thinking={thinking}
+                thinkingMode={thinkingMode}
                 C={C}
                 mdStyle={mdStyle}
                 isTail={index === visibleMsgs.length - 1}
