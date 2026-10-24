@@ -1,16 +1,21 @@
 import { describe, expect, test } from "bun:test";
+import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import type { AppServer } from "../protocol/client";
 import { App } from "./app";
 
-function fakeClient() {
+function fakeClient(onResume?: (id: string) => void) {
   const sessions = [
     { sessionId: "sess_fixture_one", title: "Checking sessions list", status: "idle", mode: "build", updatedAt: Date.parse("2026-09-04T12:00:00Z") },
     { sessionId: "sess_fixture_two", title: "Fixing the composer", status: "idle", mode: "build", updatedAt: Date.parse("2026-09-03T12:00:00Z") },
   ];
   const client = {
-    request: async (method: string) => {
+    request: async (method: string, params?: { sessionId?: string }) => {
       if (method === "session/list") return { sessions };
+      if (method === "session/resume") {
+        onResume?.(params?.sessionId ?? "");
+        return { session: { status: "idle" }, messages: [] };
+      }
       if (method === "workspace/readState") return { modelCatalog: { available: [] } };
       return {};
     },
@@ -25,6 +30,18 @@ function fakeClient() {
 const AppModule = await import("./app");
 
 describe("zcode-tui OpenCode-shaped shell", () => {
+  test("session search plus Enter resumes the filtered row in one burst", async () => {
+    const resumed: string[] = [];
+    const setup = await testRender(<App client={fakeClient((id) => resumed.push(id))} onQuit={() => {}} />, { width: 100, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Ask anything"));
+      await act(async () => { await setup.mockInput.pressKeys([..."/sessions", "\r"]); });
+      await setup.waitForFrame((f) => f.includes("Checking sessions list"));
+      await act(async () => { await setup.mockInput.pressKeys([..."Fixing", "\r"]); });
+      expect(resumed).toEqual(["sess_fixture_two"]);
+      await setup.waitForFrame((f) => f.includes("Ask anything") && !f.includes("Search"));
+    } finally { setup.renderer.destroy(); }
+  });
   test("opens the sessions picker from the front-page slash command", async () => {
     const setup = await testRender(
       <App client={fakeClient()} onQuit={() => {}} />,

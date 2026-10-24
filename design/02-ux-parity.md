@@ -50,3 +50,19 @@ fixture waits for the terminal parser's ambiguous Alt-prefix timeout.
 Still open: folded long-paste placeholders/extmarks, attachment-rich history
 and full persistence equivalence, and cancellation/order for asynchronous
 attachment-path resolution. These require separate bounded units.
+
+## Session and model picker input
+
+The pinned `ui/dialog-select.tsx` uses a synchronous Solid store for filter,
+selection and action dispatch. The React adapter previously let a single
+`gamma` + Enter burst select alpha. Filter + Down + favorite similarly
+acted on the original row. Immediate refs now drive keyboard selection,
+filtering, paging and actions, while React state renders the result.
+Mouse movement updates the same selection and notifies preview/disarm hooks.
+Enter with no matches leaves the query/dialog intact, as the reference's
+absent selection does. Disabled separate-runner models remain inert.
+
+Tests cover the shared picker, actual ModelDialog provider/model selection
+and refusal, and App's filtered session/resume target. These are stdin,
+render and request proofs; not live visual equivalence. Search ranking and
+short-terminal grouped-list geometry remain separate comparison items.

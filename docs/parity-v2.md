@@ -77,6 +77,13 @@ Reference remains the owner-selected OpenCode `v2ref`
   input/send tests failed before and pass after the change. Long-paste
   folding and asynchronous attachment-path races remain open.
 
+- Unit 3: shared session/model pickers dispatch search + navigation +
+  Enter/actions from immediate state, fixing stale-row selection in fast
+  bursts. Empty-result Enter retains the query/dialog. Actual ModelDialog
+  tests preserve disabled separate-runner refusal, and App's session search
+  asserts the resumed session ID. Search ranking and grouped-list geometry
+  remain open comparisons.
+
 See [sitting 3 decisions](../design/02-ux-parity.md) for references and gaps.
 
 ## Shipped (1:1 unless noted)
