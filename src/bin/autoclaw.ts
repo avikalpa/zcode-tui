@@ -29,6 +29,9 @@ import { readPlan, writePlan, planFingerprint, PLAN_FILE, type AutoclawPlan } fr
 import { minePlan } from "../autoclaw/mine";
 import { refreshCredential, fetchModelCatalog } from "../autoclaw/gateway";
 import { startManagedProxy } from "../autoclaw/proxy";
+import { startHeartbeat } from "../queue/heartbeat";
+
+let stopHb: (() => void) | null = null;
 
 export const UNATTENDED_PREAMBLE = `You are running UNATTENDED (no human will answer).
 - Do not ask questions, do not request confirmation, do not enter plan mode; choose the sensible default and proceed to implement immediately.
@@ -259,7 +262,8 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
     ];
     const { spawn } = await import("node:child_process");
     const t0 = Date.now();
-    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+    stopHb = startHeartbeat(`${out}.hb`);
+const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
       const p = spawn(process.execPath, args, {
         cwd: workspace,
         env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
@@ -283,6 +287,8 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
       p.on("error", (e: Error) => finish(null, `spawn error: ${e.message}`));
       p.on("close", (code) => finish(code));
     });
+  stopHb?.();
+  stopHb = null;
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify({ cli, agentDir, proxyPort: proxy.port, workspace, model: defaultModel, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
     console.log(`autoclaw run: rc=${result.code} in ${Math.round((Date.now() - t0) / 1000)}s -> ${out}`);
@@ -331,7 +337,8 @@ async function runBrief(v: Record<string, string | boolean | undefined>): Promis
   if (model) args.push("--model", model);
   args.push(brief);
   const t0 = Date.now();
-  const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+  stopHb = startHeartbeat(`${out}.hb`);
+const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
     const p = spawn(process.execPath, args, {
       cwd: workspace,
       env: { ...process.env, AUTOCLAW_API_KEY: key },
@@ -344,6 +351,8 @@ async function runBrief(v: Record<string, string | boolean | undefined>): Promis
     const timer = setTimeout(() => p.kill("SIGKILL"), 45 * 60_000);
     p.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
   });
+  stopHb?.();
+  stopHb = null;
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify({ cli, workspace, model, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
   console.log(`autoclaw run: rc=${result.code} in ${Math.round((Date.now() - t0) / 1000)}s -> ${out}`);

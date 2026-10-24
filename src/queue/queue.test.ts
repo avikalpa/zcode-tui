@@ -291,3 +291,82 @@ describe("buildCommand", () => {
 });
 
 afterEach(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ } });
+
+// ---------------------------------------------------------------------------
+// BUG-001: stall handling + GLM-5.3 routing law (owner 2026-10-24)
+// ---------------------------------------------------------------------------
+
+import { buildModelRef, fallbackOnQuotaRefusal, DEFAULT_PROVIDER } from "../bin/run";
+import { glm53FullVerdict, type PlanRow } from "../bin/plans";
+
+describe("BUG-001 stalled dispatch is requeued, never billed as failed", () => {
+  test("timed-out spawn (SIGKILL backstop) requeues below the attempt cap", async () => {
+    const { db, srv } = makeServer(async () => ({ code: null, signal: "SIGKILL", stdout: "", stderr: "", timedOut: true }), () => 1_700_000_000_000);
+    insertTask(db, { id: "ztq-stall1", route: "zai-coding-plan", attempts: 0, max_attempts: 3 });
+    await srv.tick();
+    const row = db.query(`SELECT status, last_error FROM tasks`).get() as { status: string; last_error: string };
+    expect(row.status).toBe("retry_wait");
+    expect(row.last_error).toContain("stalled");
+  });
+
+  test("stall at the attempt cap is an honest terminal failure", async () => {
+    const { db, srv } = makeServer(async () => ({ code: null, signal: "SIGTERM", stdout: "", stderr: "", timedOut: true }), () => 1_700_000_000_000);
+    insertTask(db, { id: "ztq-stall2", route: "zai-coding-plan", attempts: 2, max_attempts: 3 });
+    await srv.tick();
+    const row = db.query(`SELECT status, last_error FROM tasks`).get() as { status: string; last_error: string };
+    expect(row.status).toBe("failed");
+    expect(row.last_error).toContain("stalled");
+  });
+
+  test("clean SIGTERM without timeout (shutdown kill) also requeues", async () => {
+    const { db, srv } = makeServer(async () => ({ code: null, signal: "SIGTERM", stdout: "", stderr: "", timedOut: false }), () => 1_700_000_000_000);
+    insertTask(db, { id: "ztq-stall3", route: "zai-coding-plan", attempts: 0, max_attempts: 3 });
+    await srv.tick();
+    const row = db.query(`SELECT status FROM tasks`).get() as { status: string };
+    expect(row.status).toBe("retry_wait");
+  });
+});
+
+describe("GLM-5.3 routing law (owner 2026-10-24)", () => {
+  test("model ref builder injects max reasoning and the resolved provider", () => {
+    expect(buildModelRef("", "zai")).toEqual({ modelId: "", providerId: "zai", options: { reasoningLevel: "max" } });
+    const ref = buildModelRef('{"modelId":"GLM-5.3","providerId":"zai-api"}', "x");
+    expect(ref.options?.reasoningLevel).toBe("max");
+    expect(DEFAULT_PROVIDER).toBe("zai-api");
+  });
+
+  test("full model falls over to Flash max on plan refusal, never otherwise", () => {
+    const ref = buildModelRef('{"modelId":"GLM-5.3","providerId":"zai-api"}', "x");
+    expect(fallbackOnQuotaRefusal(ref, "quota_exceeded for glm-5.3")?.modelId).toBe("GLM-5.3-Flash");
+    expect(fallbackOnQuotaRefusal(ref, "network dropped")).toBeNull();
+    const flash = buildModelRef('{"modelId":"GLM-5.3-Flash","providerId":"zai-api"}', "x");
+    expect(fallbackOnQuotaRefusal(flash, "quota exceeded")).toBeNull(); // flash has no fallback
+  });
+
+  test("regular coding-plan dreams default to Flash max (full is start-plan-only)", () => {
+    const { buildCommand } = require("../bin/queue") as typeof import("../bin/queue");
+    const cmd = buildCommand({
+      id: "ztq-m", route: "zai-coding-plan", title: "t", prompt: "p", prompt_file: "/tmp/p", prompt_sha256: "x",
+      workspace: "/tmp", model: "", priority: 100, status: "queued", attempts: 0, max_attempts: 3,
+      next_eligible_at: 0, created_at: 0, updated_at: 0, started_at: null, finished_at: null,
+      last_error: "", last_exit: null, run_log: "", result_ref: "", expect_file: "",
+    } as never, { repo: "/repo", stateDir: "/s", promptFile: "/tmp/p", runLog: "/tmp/o", budgetMin: 0 });
+    const i = cmd.cmd.indexOf("--model");
+    const ref = JSON.parse(cmd.cmd[i + 1]) as { modelId: string; options: { reasoningLevel: string } };
+    expect(ref.modelId).toBe("GLM-5.3-Flash");
+    expect(ref.options.reasoningLevel).toBe("max");
+  });
+
+  test("glm53FullVerdict: active start-plan grant allows, expired/coding-plan does not", () => {
+    const now = 1800_000_000;
+    const active: PlanRow[] = [{
+      plan_id: "zcode-v3-start-plan-1024", name: "ZCode 1024 Dev Day", status: "active",
+      starts_at: now - 1000, ends_at: now + 100_000, priority: 101,
+      entitlements: [{ show_name: "GLM-5.3", capabilities: ["model:glm-5.3"], grant_units: 2e8, period: "one_time", effective_at: now - 1000, priority: 100 }],
+    }];
+    expect(glm53FullVerdict(active, now).allowed).toBe(true);
+    expect(glm53FullVerdict([{ ...active[0], ends_at: now - 10 }], now).allowed).toBe(false);
+    const codingOnly: PlanRow[] = [{ ...active[0], plan_id: "zcode-v3-individual", name: "Coding Plan" }];
+    expect(glm53FullVerdict(codingOnly, now).allowed).toBe(false);
+  });
+});

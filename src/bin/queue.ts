@@ -14,7 +14,7 @@
 // Route policy (peak window Mon-Fri 11:30-15:30 IST blocks zai-coding-plan
 // and autoclaw) mirrors tools/zai_peak_window.py — see src/queue/core.ts.
 import { parseArgs } from "node:util";
-import { mkdirSync, appendFileSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, appendFileSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
@@ -192,31 +192,50 @@ function cmdStatus(db: Database, json: boolean, stateDir: string) {
 // ---------------------------------------------------------------------------
 
 export interface SpawnFn {
-  (cmd: string[], opts: { cwd: string; stdin?: string; timeoutMs: number; logFile: string }):
+  (cmd: string[], opts: { cwd: string; stdin?: string; timeoutMs: number; logFile: string; onSpawn?: (kill: () => void) => void }):
     Promise<{ code: number | null; signal: string | null; stdout: string; stderr: string; timedOut: boolean }>;
 }
 
-export const realSpawn: SpawnFn = (cmd, { cwd, stdin, timeoutMs, logFile }) =>
+export const realSpawn: SpawnFn = (cmd, { cwd, stdin, timeoutMs, logFile, onSpawn }) =>
   new Promise((resolve) => {
-    const p = spawn(cmd[0], cmd.slice(1), { cwd, env: { ...process.env, PATH: `${join(homedir(), ".bun", "bin")}:${join(homedir(), ".yggterm", "ynpm", "bin")}:${process.env.PATH ?? ""}` } });
-    let out = "", err = "", killed = false;
+    // detached: kills go to the whole process group — a killed bun/codex
+    // leaves the spawned runtime (electron app-server) alive otherwise, and
+    // the session keeps burning quota with nobody watching it.
+    const p = spawn(cmd[0], cmd.slice(1), { cwd, detached: true, env: { ...process.env, PATH: `${join(homedir(), ".bun", "bin")}:${join(homedir(), ".yggterm", "ynpm", "bin")}:${process.env.PATH ?? ""}` } });
+    let out = "", err = "", killed = false, settled = false;
+    let hardTimer: NodeJS.Timeout | undefined;
     const cap = 262_144;
     p.stdout.on("data", (d: Buffer) => { if (out.length < cap) out += d.toString(); });
     p.stderr.on("data", (d: Buffer) => { if (err.length < cap) err += d.toString(); });
-    const timer = setTimeout(() => { killed = true; p.kill("SIGKILL"); }, timeoutMs);
-    if (stdin !== undefined) p.stdin.end(stdin); else p.stdin.end();
-    p.on("close", (code, signal) => {
+    const killGroup = (sig: NodeJS.Signals) => {
+      try { process.kill(-p.pid!, sig); } catch { try { p.kill(sig); } catch { /* already gone */ } }
+    };
+    onSpawn?.(() => killGroup("SIGTERM"));
+    const finish = (code: number | null, signal: string | null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      if (hardTimer) clearTimeout(hardTimer);
       const full = `--- stdout ---\n${out}\n--- stderr ---\n${err}\n`;
       try { writeFileSync(logFile, full); } catch { /* log best-effort */ }
       resolve({ code, signal, stdout: out, stderr: err, timedOut: killed });
-    });
+    };
+    const timer = setTimeout(() => {
+      killed = true;
+      killGroup("SIGTERM");
+      // 15s grace for a clean stop, then the group dies hard.
+      hardTimer = setTimeout(() => killGroup("SIGKILL"), 15_000);
+    }, timeoutMs);
+    if (stdin !== undefined) p.stdin.end(stdin); else p.stdin.end();
+    p.on("close", (code, signal) => finish(code, signal));
     p.on("error", (e) => {
-      clearTimeout(timer);
-      const full = `--- spawn error ---\n${String(e)}\n`;
-      try { writeFileSync(logFile, full); } catch { /* log best-effort */ }
-      resolve({ code: null, signal: null, stdout: "", stderr: String(e), timedOut: false });
+      err += `\n--- spawn error ---\n${String(e)}`;
+      finish(null, null);
     });
+    // BUG-001 (measured: the mackvm stall): grandchildren that outlive the
+    // direct child keep the stdio pipes open, 'close' never fires, and the
+    // dispatch promise hangs forever. This backstop guarantees resolution.
+    setTimeout(() => finish(killed ? null : p.exitCode, killed ? "SIGKILL" : null), timeoutMs + 45_000);
   });
 
 function writePromptFile(stateDir: string, task: TaskRow): string {
@@ -236,7 +255,12 @@ export function buildCommand(
     case "zai-coding-plan": {
       const cmd = [bun, join(ctx.repo, "src/bin/run.ts"),
         "--content-file", ctx.promptFile, "--workspace", task.workspace, "--out", ctx.runLog, "--unattended"];
-      if (task.model) cmd.push("--model", task.model);
+      // Owner law 2026-10-24: GLM-5.3 FULL is start-plan-only — regular
+      // coding-plan dreams run GLM-5.3-Flash at max reasoning. Big dreams
+      // that earn the full model pass an explicit --model ref.
+      const model = task.model
+        || JSON.stringify({ modelId: "GLM-5.3-Flash", providerId: "zai-api", options: { reasoningLevel: "max" } });
+      cmd.push("--model", model);
       if (ctx.budgetMin > 0) cmd.push("--max-run-min", String(ctx.budgetMin));
       return { cmd, cwd: ctx.repo };
     }
@@ -331,6 +355,8 @@ export class QueueServer {
   private now: () => number;
   private log: (line: string) => void;
   private active = new Set<string>(); // route names with an in-memory dispatch
+  private spawnKills = new Map<string, Map<string, () => void>>(); // taskId -> (attemptId -> kill)
+  private lastSweep = 0;
   private peakLogged = new Map<string, boolean>(); // throttle peak-block logs
   private stopping = false;
 
@@ -369,6 +395,46 @@ export class QueueServer {
       ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(String(n));
     this.db.query(`INSERT INTO meta (k,v) VALUES ('serve_pid',?)
       ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(String(process.pid));
+  }
+
+  /** BUG-001 sweeper — runs IN the serve loop (the old reclaimStale fired
+   *  only at boot, so a serve that ran for days never reaped anything):
+   *  1. crash leftovers: 'running' rows with no live dispatch after 15min
+   *  2. stalled live dispatches: zt workers touch <out>.hb every 60s;
+   *     30min of heartbeat silence = a hung session — SIGTERM the group and
+   *     let the stalled-classifier requeue it honestly. */
+  sweep() {
+    if (this.now() - this.lastSweep < 60_000) return;
+    this.lastSweep = this.now();
+    const rows = this.db.query(`SELECT * FROM tasks WHERE status='running'`).all() as unknown as TaskRow[];
+    for (const t of rows) {
+      if (this.spawnKills.has(t.id)) continue; // live dispatch, watched below
+      if (this.now() - t.updated_at < 15 * 60_000) continue;
+      const attempts = t.attempts;
+      const final = attempts >= t.max_attempts;
+      this.db.query(`UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`)
+        .run(final ? "failed" : "queued",
+          `reclaimed: 'running' row with no live dispatch (serve crash or lost spawn)`, this.now(), t.id);
+      this.log(`reclaim ${t.id}: ${final ? "failed (cap)" : "requeued"} — orphaned running row`);
+    }
+    for (const [taskId, killFns] of this.spawnKills) {
+      const row = this.db.query(`SELECT status, route FROM tasks WHERE id=?`).get(taskId) as { status: string; route: string } | null;
+      if (!row || row.status !== "running") continue;
+      if (row.route !== "zai-coding-plan" && row.route !== "zai-offpeak" && row.route !== "autoclaw") continue; // no hb convention
+      // hb files are <task>-a<N>.json.log.hb (run.ts --out = the runLog)
+      let newest = 0;
+      try {
+        const files = readdirSync(join(this.opts.stateDir, "runs")).filter((f) => f.startsWith(taskId) && f.endsWith(".hb"));
+        for (const f of files) {
+          const st = statSync(join(this.opts.stateDir, "runs", f));
+          if (st.mtimeMs > newest) newest = st.mtimeMs;
+        }
+      } catch { /* runs dir missing */ }
+      if (newest && this.now() - newest > 30 * 60_000) {
+        this.log(`stall ${taskId}: no worker heartbeat for 30m — SIGTERM (sweeper)`);
+        for (const kill of killFns.values()) { try { kill(); } catch { /* noop */ } }
+      }
+    }
   }
 
   private snapshotMetric() {
@@ -438,10 +504,13 @@ export class QueueServer {
     const runLog = join(this.opts.stateDir, "runs", `${task.id}-a${attempts}.json.log`);
     mkdirSync(dirname(runLog), { recursive: true });
     const promptFile = writePromptFile(this.opts.stateDir, { ...task, attempts: attempts - 1 });
+    const killFns = new Map<string, () => void>();
+    this.spawnKills.set(task.id, killFns);
     let cmd: string[], cwd: string, stdin: string | undefined;
     try {
       ({ cmd, cwd, stdin } = buildCommand(task, { repo: REPO, stateDir: this.opts.stateDir, promptFile, runLog, budgetMin }));
     } catch (e) {
+      this.spawnKills.delete(task.id);
       this.finish(task.id, attempts, "failed", null, String(e), "", runLog);
       return;
     }
@@ -449,12 +518,34 @@ export class QueueServer {
     const timeoutMs = def.taskTimeoutMin * 60_000 + 120_000;
     let res: Awaited<ReturnType<SpawnFn>>;
     try {
-      res = await this.spawnFn(cmd, { cwd, stdin, timeoutMs, logFile: join(this.opts.stateDir, "runs", `${task.id}-a${attempts}.out`) });
+      res = await this.spawnFn(cmd, {
+        cwd, stdin, timeoutMs, logFile: join(this.opts.stateDir, "runs", `${task.id}-a${attempts}.out`),
+        onSpawn: (kill) => killFns.set(task.id, kill),
+      });
     } catch (e) {
       res = { code: null, signal: null, stdout: "", stderr: String(e), timedOut: false };
     }
+    this.spawnKills.delete(task.id);
     const durMs = this.now() - n0;
     const tail = `${res.stdout}\n${res.stderr}`.slice(-8192);
+
+    // BUG-001 (nuclear class, owner 2026-10-24): a killed/timed-out dispatch
+    // is a STALL, not a terminal verdict — requeue it honestly so the work
+    // resumes instead of dying mid-flight or being billed as failed.
+    if (res.timedOut || res.signal === "SIGTERM" || res.signal === "SIGKILL") {
+      const final = attempts >= task.max_attempts;
+      if (final) {
+        this.finish(task.id, attempts, "failed", res.code, `stalled: killed after timeout (attempt ${attempts}/${task.max_attempts})`, "", runLog);
+        this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "failed-stalled", dur_ms: durMs });
+        this.log(`fail ${task.id}: stalled past timeout at attempt cap`);
+      } else {
+        this.db.query(`UPDATE tasks SET status='retry_wait', next_eligible_at=?, last_error='stalled: killed after timeout (will resume)', last_exit=?, updated_at=? WHERE id=?`)
+          .run(this.now() + 60_000, res.code, this.now(), task.id);
+        this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "stalled-requeue", dur_ms: durMs });
+        this.log(`stall ${task.id}: killed after timeout — requeued (attempt ${attempts}/${task.max_attempts})`);
+      }
+      return;
+    }
 
     // Honest success check: exit 0 AND (for idle-create) the marker line.
     let resultRef = "";
@@ -526,6 +617,7 @@ export class QueueServer {
     let lastMetric = 0;
     while (!this.stopping) {
       this.heartbeat();
+      this.sweep();
       if (this.now() - lastMetric >= this.opts.metricsMs) {
         this.snapshotMetric();
         lastMetric = this.now();
@@ -536,6 +628,19 @@ export class QueueServer {
         this.log(`tick error (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
       }
       await new Promise((r) => setTimeout(r, this.opts.pollMs));
+    }
+  }
+
+  /** SIGTERM path: kill live worker groups, then DEFER their rows back to
+   *  queued (attempts not consumed) so a restart resumes the work instead of
+   *  leaving 'running' zombies for the 15-minute reaper. */
+  shutdown() {
+    this.stopping = true;
+    for (const [taskId, killFns] of this.spawnKills) {
+      for (const kill of killFns.values()) { try { kill(); } catch { /* noop */ } }
+      this.db.query(`UPDATE tasks SET status='queued', attempts=MAX(attempts-1,0), updated_at=? WHERE id=? AND status='running'`)
+        .run(this.now(), taskId);
+      this.log(`shutdown: ${taskId} killed + deferred back to queued`);
     }
   }
 
@@ -598,6 +703,27 @@ async function main() {
     case "list": cmdList(db, Boolean(values.json)); break;
     case "status": cmdStatus(db, Boolean(values.json), stateDir); break;
     case "serve": {
+      // BUG-001 (measured: the transcript truncation + double dispatch): two
+      // serve loops on one state dir dispatch the same task twice and race
+      // on the same run logs. The lockfile makes the second instance refuse.
+      const lockPath = join(stateDir, "serve.lock");
+      try {
+        const fd = openSync(lockPath, "wx");
+        writeSync(fd, String(process.pid));
+        closeSync(fd);
+      } catch {
+        let holder = 0;
+        try { holder = parseInt(readFileSync(lockPath, "utf8").trim(), 10) || 0; } catch { /* stale empty lock */ }
+        let alive = false;
+        if (holder) { try { process.kill(holder, 0); alive = true; } catch { alive = false; } }
+        if (alive) {
+          console.error(`queue serve: another serve (pid ${holder}) holds ${lockPath} — refusing double dispatch`);
+          process.exit(3);
+        }
+        console.warn(`queue serve: stealing stale lock (holder pid ${holder || "?"} is gone)`);
+        writeFileSync(lockPath, String(process.pid));
+      }
+
       const routes = (values.routes ? String(values.routes).split(",") : ROUTE_NAMES as unknown as string[])
         .map((r) => String(r).trim()).filter((r) => ROUTE_NAMES.includes(r as RouteName)) as RouteName[];
       const srv = new QueueServer(db, {
@@ -606,9 +732,13 @@ async function main() {
         routes: routes.length ? routes : ROUTE_NAMES,
         stateDir, dryRun: Boolean(values["dry-run"]),
       });
-      const shutdown = () => { srv.stop(); };
+      const shutdown = () => {
+        srv.shutdown();
+        try { unlinkSync(lockPath); } catch { /* noop */ }
+      };
       process.on("SIGTERM", shutdown);
       process.on("SIGINT", shutdown);
+      process.on("exit", () => { try { unlinkSync(lockPath); } catch { /* noop */ } });
       await srv.serve();
       break;
     }

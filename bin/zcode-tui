@@ -21,7 +21,7 @@ if (args.includes("--version") || args.includes("-V") || !process.stdin.isTTY) {
 // Headless worker verbs: no TTY needed — run (one session, owner directive
 // 2026-10-21), queue (fleet worker queue, 2026-10-22), idle (ZCode idle-time
 // tasks client). All execute under bun straight from the repo tree.
-const headlessVerbs = { run: "run.ts", queue: "queue.ts", idle: "idle.ts" };
+const headlessVerbs = { run: "run.ts", queue: "queue.ts", idle: "idle.ts", plans: "plans.ts" };
 if (headlessVerbs[args[0]]) {
   const bunCandidates = [
     process.env.BUN_INSTALL && join(process.env.BUN_INSTALL, "bin", "bun"),
