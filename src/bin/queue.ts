@@ -25,6 +25,7 @@ import {
   isPeak, minutesToPeak, minutesToPeakEnd, maxRunMinutes,
   classifyFailure, sha256, SCHEMA_SQL, rmTask,
   type RouteName, type TaskRow,
+  holdTask, rerouteTask, revokeTask,
 } from "../queue/core";
 import { autoclawPiCli, autoclawCredential, UNATTENDED_PREAMBLE } from "./autoclaw";
 import { planExists } from "../autoclaw/plan";
@@ -675,6 +676,9 @@ async function main() {
       "expect-file": { type: "string", default: "" },
       "eligible-at": { type: "string" },
       "dry-run": { type: "boolean", default: false },
+      to: { type: "string" },
+      "until-min": { type: "string" },
+      reason: { type: "string" },
     },
   });
   const sub = String(process.argv[2] ?? "");
@@ -699,6 +703,36 @@ async function main() {
         ? `queue: unknown task id '${r.id}'`
         : `queue: refuse — task '${r.id}' is ${r.reason} (status=${r.status}); only queued/retry_wait/cooldown_wait tasks can be cancelled`);
       process.exit(r.reason === "unknown" ? 2 : 1);
+    }
+    case "reroute": {
+      const id = String(process.argv[3] ?? "");
+      const to = String(values.to ?? "");
+      if (!id || !to) { console.error("usage: zcode-tui queue reroute <task-id> --to <route> [--json]"); process.exit(2); }
+      const r = rerouteTask(db, id, to);
+      if (values.json) console.log(JSON.stringify(r.ok ? { id: r.id, status: r.status, route: to } : { id: r.id, refused: r.reason }));
+      else console.log(r.ok ? `rerouted ${r.id} -> ${to} (queued, attempts reset)` : `refuse: ${r.reason}`);
+      if (!r.ok) process.exit(1);
+      break;
+    }
+    case "hold": {
+      const id = String(process.argv[3] ?? "");
+      const mins = Number(values["until-min"] ?? "60");
+      if (!id || !Number.isFinite(mins) || mins <= 0) { console.error("usage: zcode-tui queue hold <task-id> --until-min N [--json]"); process.exit(2); }
+      const r = holdTask(db, id, Date.now() + mins * 60_000);
+      if (values.json) console.log(JSON.stringify(r.ok ? { id: r.id, held_until_min: mins } : { id: r.id, refused: r.reason }));
+      else console.log(r.ok ? `held ${r.id} for ${mins}m` : `refuse: ${r.reason}`);
+      if (!r.ok) process.exit(1);
+      break;
+    }
+    case "revoke": {
+      const id = String(process.argv[3] ?? "");
+      const why = String(values.reason ?? "false completion");
+      if (!id) { console.error("usage: zcode-tui queue revoke <task-id> --reason R [--json]"); process.exit(2); }
+      const r = revokeTask(db, id, why);
+      if (values.json) console.log(JSON.stringify(r.ok ? { id: r.id, status: r.status } : { id: r.id, refused: r.reason }));
+      else console.log(r.ok ? `revoked ${r.id}: ${why} — requeued with attempts reset` : `refuse: ${r.reason}`);
+      if (!r.ok) process.exit(1);
+      break;
     }
     case "list": cmdList(db, Boolean(values.json)); break;
     case "status": cmdStatus(db, Boolean(values.json), stateDir); break;

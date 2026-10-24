@@ -111,6 +111,45 @@ export function rmTask(db: Database, id: string, now = Date.now(), note = "cance
   return { ok: true, id, status: "cancelled" };
 }
 
+/** Orchestrator supervision verbs (owner 2026-10-24: dreams that die at API
+ *  drops / quota walls get fleet-level care, not silent failure).
+ *
+ *  reroute — move a non-running task to another plane with quota (the
+ *            supervisor picks the plane from its quota calendars).
+ *  hold    — park a non-running task until a reset window opens.
+ *  revoke  — un-complete a false completion (zero-token error turn riding
+ *            rc=0): the row goes back to queued with attempts reset and the
+ *            revocation reason on record; the run log stays on disk. */
+export type OrchOutcome = { ok: boolean; id: string; status: TaskStatus | null; reason?: string };
+
+export function rerouteTask(db: Database, id: string, toRoute: string, now = Date.now()): OrchOutcome {
+  const row = db.query("SELECT status FROM tasks WHERE id = ?").get(id) as { status: TaskStatus } | null;
+  if (!row) return { ok: false, reason: "unknown", id, status: null };
+  if (row.status === "running") return { ok: false, reason: "running", id, status: row.status };
+  db.query("UPDATE tasks SET route=?, status='queued', next_eligible_at=?, updated_at=?, started_at=NULL, finished_at=NULL, attempts=0 WHERE id=?")
+    .run(toRoute, now, now, id);
+  return { ok: true, id, status: "queued" };
+}
+
+export function holdTask(db: Database, id: string, untilMs: number, now = Date.now()): OrchOutcome {
+  const row = db.query("SELECT status FROM tasks WHERE id = ?").get(id) as { status: TaskStatus } | null;
+  if (!row) return { ok: false, reason: "unknown", id, status: null };
+  if (row.status === "running") return { ok: false, reason: "running", id, status: row.status };
+  if ((TERMINAL_STATUSES as string[]).includes(row.status)) return { ok: false, reason: "terminal", id, status: row.status };
+  db.query("UPDATE tasks SET next_eligible_at=MAX(next_eligible_at, ?), updated_at=? WHERE id=?")
+    .run(untilMs, now, id);
+  return { ok: true, id, status: row.status };
+}
+
+export function revokeTask(db: Database, id: string, reason: string, now = Date.now()): OrchOutcome {
+  const row = db.query("SELECT status FROM tasks WHERE id = ?").get(id) as { status: TaskStatus } | null;
+  if (!row) return { ok: false, reason: "unknown", id, status: null };
+  if (row.status !== "completed") return { ok: false, reason: `not completed (status=${row.status})`, id, status: row.status };
+  db.query("UPDATE tasks SET status='queued', attempts=0, finished_at=NULL, started_at=NULL, next_eligible_at=?, updated_at=?, last_error=? WHERE id=?")
+    .run(now, now, `revoked: ${reason}`, id);
+  return { ok: true, id, status: "queued" };
+}
+
 /** Minutes until the current peak window ends (0 if not in peak). */
 export function minutesToPeakEnd(now: Date = new Date()): number {
   if (!isPeak("zai-coding-plan", now)) return 0;
