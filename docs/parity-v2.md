@@ -110,6 +110,13 @@ Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`
   regression checks fail before and pass after; 221 tests and typecheck
   pass. Ranking and full live-pixel comparison remain open.
 
+- Unit 2: shared picker search now uses the reference's pinned fuzzysort
+  engine and weighted name/category/supplemental ranking, followed by stable
+  grouping. Favorite/pin changes preserve the highlighted identity across
+  section moves. Real ModelDialog favorite/unfavorite and fuzzy burst
+  selection tests pass; full suite 225/225 and typecheck pass. Specialized
+  upstream model sorting and server-backed session search remain adaptations.
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2

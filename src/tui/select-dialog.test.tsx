@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import { SelectDialog, matchesDialogFilter, type DialogOption } from "./select-dialog";
+import { SelectDialog, matchesDialogFilter, filterDialogOptions, type DialogOption } from "./select-dialog";
 
 const OPTIONS: DialogOption<string>[] = [
   { id: "alpha", label: "alpha", value: "alpha" },
@@ -100,15 +100,15 @@ describe("picker interaction parity", () => {
   test("filter + navigation + action uses the same immediate selected row", async () => {
     const acted: string[] = [];
     const setup = await testRender(<SelectDialog title="Select model" options={[
+      { id: "third", label: "Fixture Other", value: "third" },
       { id: "first", label: "Coding One", group: "Coding Plan", value: "first" },
       { id: "second", label: "Coding Two", group: "Coding Plan", value: "second" },
-      { id: "third", label: "Fixture Other", value: "third" },
     ]} onAction={(_action, option) => acted.push(option?.id ?? "missing")}
       onSelect={() => {}} onClose={() => {}} />, { width: 80, height: 30 });
     try {
       await setup.waitForFrame((f) => f.includes("Coding Two"));
       await act(async () => { await setup.mockInput.pressKeys([..."coding", "\x1b[B", "\x06"]); });
-      expect(acted).toEqual(["second"]);
+      expect(acted).toEqual(["first"]);
     } finally { setup.renderer.destroy(); }
   });
   test("search accepts words across the model name and provider", () => {
@@ -188,6 +188,39 @@ describe("grouped picker viewport", () => {
       await setup.waitForFrame((f) => f.includes("alpha"));
       await act(async () => { await setup.mockInput.pressKeys(["\x1b[A", "\r", "\x1b[B", "\r", "\x1b[6~", "\r"]); });
       expect(picked).toEqual(["gamma", "alpha", "alpha"]);
+    } finally { setup.renderer.destroy(); }
+  });
+});
+
+
+describe("ranked picker search", () => {
+  test("abbreviations match and title matches outrank provider-only matches", () => {
+    const options = [
+      { id: "provider", label: "Other model", group: "Flash", value: "provider" },
+      { id: "title", label: "Flash", group: "Fixture", value: "title" },
+      { id: "abbr", label: "Code Review Engine", group: "Fixture", value: "abbr" },
+    ];
+    expect(filterDialogOptions(options, "flash").map((o) => o.id)).toEqual(["title", "provider"]);
+    expect(filterDialogOptions(options, "cdrev").map((o) => o.id)).toEqual(["abbr"]);
+  });
+  test("provider groups stay contiguous without changing first-seen group order", () => {
+    const options = [
+      { id: "a", label: "First", group: "One", value: "a" },
+      { id: "b", label: "Second", group: "Two", value: "b" },
+      { id: "c", label: "Third", group: "One", value: "c" },
+    ];
+    expect(filterDialogOptions(options, "").map((o) => o.id)).toEqual(["a", "c", "b"]);
+  });
+  test("fuzzy query plus Enter dispatches the ranked model within one burst", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Models" options={[
+      { id: "provider", label: "Other model", group: "Flash", value: "provider" },
+      { id: "title", label: "Flash", group: "Fixture", value: "title" },
+    ]} onSelect={(v) => picked.push(v)} onClose={() => {}} />, { width: 80, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Models"));
+      await act(async () => { await setup.mockInput.pressKeys([..."flsh", "\r"]); });
+      expect(picked).toEqual(["title"]);
     } finally { setup.renderer.destroy(); }
   });
 });

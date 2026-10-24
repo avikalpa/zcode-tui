@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions, useRenderer } from "@opentui/react";
 import { CliRenderEvents, ScrollBoxRenderable, TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
+import * as fuzzysort from "fuzzysort";
 import { stringWidth } from "./diff/string-width";
 
 export interface DialogOption<T> {
@@ -61,11 +62,26 @@ function truncate(value: string, width: number): string {
   }
   return `${out}…`;
 }
-// OpenCode searches across title and provider/category. Tokenized matching
-// also lets a query like `glm flash` find punctuated model names.
+// Ported from OpenCode b084acc packages/tui/src/ui/dialog-select.tsx:
+// weighted fuzzy title/category/searchText matching, then stable grouping.
+export function filterDialogOptions<T>(options: DialogOption<T>[], query: string): DialogOption<T>[] {
+  const needle = query.toLowerCase().trim();
+  const filtered = !needle ? options : fuzzysort.go(needle,
+    options.map((option) => ({ option, label: option.label, group: option.group,
+      searchText: `${option.description ?? ""} ${option.meta ?? ""}` })), {
+      keys: ["label", "group", "searchText"],
+      scoreFn: (r) => r[0].score * 2 + r[1].score + r[2].score,
+    }).map((result) => result.obj.option);
+  const groups = new Map<string, DialogOption<T>[]>();
+  for (const option of filtered) {
+    const group = option.group ?? "";
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group)!.push(option);
+  }
+  return [...groups.values()].flat();
+}
 export function matchesDialogFilter(option: Pick<DialogOption<unknown>, "label" | "description" | "meta" | "group">, query: string): boolean {
-  const haystack = `${option.label} ${option.description ?? ""} ${option.meta ?? ""} ${option.group ?? ""}`.toLowerCase();
-  return query.toLowerCase().trim().split(/\s+/).every((word) => haystack.includes(word));
+  return filterDialogOptions([{ ...option, id: "match", value: undefined }], query).length > 0;
 }
 
 export function ModalBackdrop({
@@ -140,17 +156,23 @@ export function SelectDialog<T>({
   // moves to props.current on mount) — otherwise the ● origin marker can sit
   // outside the initial window for long lists like the 35 themes.
   const currentStartIndex = () => {
-    const at = currentId ? options.findIndex((o) => o.id === currentId) : -1;
+    const at = currentId ? filterDialogOptions(options, "").findIndex((o) => o.id === currentId) : -1;
     return at >= 0 ? at : 0;
   };
   const [idx, setIdx] = useState(currentStartIndex);
   const idxRef = useRef(idx);
+  const selectedId = useRef(filterDialogOptions(options, "")[idx]?.id);
   const dims = useTerminalDimensions();
   const C = theme ?? THEMES.opencode;
   const cardWidth = tierWidth(size, dims.width);
 
-  const shown = options.filter((o) => matchesDialogFilter(o, filter));
-  const sel = clamp(idx, 0, Math.max(0, shown.length - 1));
+  const shown = filterDialogOptions(options, filter);
+  // A favorite/pin can move a row between sections. Preserve its identity,
+  // as the reference selection reconciler does, rather than its old index.
+  const preserved = shown.findIndex((o) => o.id === selectedId.current);
+  const sel = preserved >= 0 ? preserved : clamp(idx, 0, Math.max(0, shown.length - 1));
+  idxRef.current = sel;
+  selectedId.current = shown[sel]?.id;
   // Ported from OpenCode b084acc packages/tui/src/ui/dialog-select.tsx:
   // category headers belong inside the bounded scrollbox, not the chrome.
   const scroll = useRef<ScrollBoxRenderable | null>(null);
@@ -181,7 +203,7 @@ export function SelectDialog<T>({
   // Solid's reference store updates within a key burst. React state lands
   // later, so keyboard truth must be immediate for filter -> arrows -> Enter
   // and actions such as session delete/model favorite.
-  const filteredNow = () => options.filter((o) => matchesDialogFilter(o, filterRef.current));
+  const filteredNow = () => filterDialogOptions(options, filterRef.current);
   const selectionNow = () => {
     const rows = filteredNow();
     return rows[clamp(idxRef.current, 0, Math.max(0, rows.length - 1))];
@@ -189,6 +211,7 @@ export function SelectDialog<T>({
   const moveSelection = (next: number) => {
     const rows = filteredNow();
     idxRef.current = clamp(next, 0, Math.max(0, rows.length - 1));
+    selectedId.current = rows[idxRef.current]?.id;
     setIdx(idxRef.current);
     onHighlight?.(rows[idxRef.current]);
   };

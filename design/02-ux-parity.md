@@ -116,3 +116,21 @@ fixture reaches the last model and returns to the first without losing
 chrome. New boundary navigation checks fail before and pass after.
 Validation: 221 tests pass; TypeScript passes. These are rendered character
 and input proofs, with live terminal pixel comparison still open.
+
+## Sitting 4 — ranked search and stable selection
+
+The shared picker uses the reference's fuzzysort 3.1.0, title weight 2,
+category and supplemental search weight 1, then first-seen category grouping.
+Abbreviations match; title matches precede provider-only matches. Rendering,
+keyboard selection and actions use that same order within a key burst.
+When favorite/pin actions move a row between sections, selection follows
+its provider-qualified identity rather than its previous numerical index.
+Tests exercise abbreviations plus Enter and actual ModelDialog favorite /
+unfavorite transitions. Disabled separate-runner rows remain informational
+and inert, an intentional existing plan-catalog adaptation.
+
+Validation: 225 tests and typecheck pass. The dependency/lock change adds
+only fuzzysort; existing resolved packages are unchanged. The local Bun
+cannot read the inherited v2 lockfile and attempted a broad dependency
+refresh; that refresh was discarded. Tests retain the inherited renderer
+versions, with the new package held in lane-only dependencies.
