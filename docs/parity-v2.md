@@ -55,6 +55,21 @@ full live-pixel parity and the rest of the reported gap remain open.
 The deterministic component checks do not close those items. No release or
 main merge is part of this lane.
 
+## 2026-10-24 UX parity sitting 3 (lane; never merged here)
+
+Reference remains the owner-selected OpenCode `v2ref`
+`b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`; this does not re-pin the vendor tree.
+
+- Unit 1: restored the production-session `/thinking` keystroke regression.
+  Resume already restores typing, so the test no longer types an extra `i`.
+  The test then exposed conflicting `/variants` aliases in autocomplete:
+  `/thinking` opened effort despite canonical command parsing being correct.
+  Removed the conflicting aliases. The real composer now toggles persisted
+  show/hide twice without `session/send`, `setModel` or `setThoughtLevel`.
+  Deterministic render/input proof only; no live pixel-parity claim.
+
+See [sitting 3 decisions](../design/02-ux-parity.md) for references and gaps.
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2

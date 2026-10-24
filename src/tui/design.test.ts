@@ -112,6 +112,8 @@ describe("OpenCode-shaped zcode-tui design model", () => {
     expect(matchSlashCommands("").length).toBe(SLASH_COMMANDS.length);
     expect(matchSlashCommands("ses").map((c) => c.name)).toContain("sessions");
     expect(matchSlashCommands("zzz")).toHaveLength(0);
+    expect(matchSlashCommands("thinking").map((c) => c.name)).toEqual(["thinking"]);
+    expect(matchSlashCommands("effort").map((c) => c.name)).toEqual(["effort"]);
   });
 
   test("formats session groups and home paths deterministically", () => {
