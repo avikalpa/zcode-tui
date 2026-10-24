@@ -386,14 +386,60 @@ export class QueueServer {
     appendFileSync(this.metricsPath(), JSON.stringify({ t: this.now(), ...entry }) + "\n");
   }
 
+
+  /** Fresh worker heartbeat (< 5min) means a DETACHED collector survived the
+   *  serve crash and is actively working — measured double-dispatch fault
+   *  2026-10-25: reclaim requeued a live parity dreamer (fresh hb) and the
+   *  respawn wrote the same workspace concurrently with the survivor. */
+  private hbFresh(taskId: string): boolean {
+    try {
+      const files = readdirSync(join(this.opts.stateDir, "runs")).filter((f) => f.startsWith(taskId) && f.endsWith(".hb"));
+      let newest = 0;
+      for (const f of files) {
+        const st = statSync(join(this.opts.stateDir, "runs", f));
+        if (st.mtimeMs > newest) newest = st.mtimeMs;
+      }
+      return newest > 0 && this.now() - newest < 5 * 60_000;
+    } catch { return false; }
+  }
+
+  /** Adopt a finished orphan: read the newest transcript's terminal outcome
+   *  and map it to row status. Null when still running/unknown. */
+  private adoptOrphanOutcome(taskId: string): string | null {
+    try {
+      const files = readdirSync(join(this.opts.stateDir, "runs")).filter((f) => f.startsWith(taskId) && f.endsWith(".json.log"));
+      let newestPath = "", newestMs = 0;
+      for (const f of files) {
+        const st = statSync(join(this.opts.stateDir, "runs", f));
+        if (st.mtimeMs > newestMs) { newestMs = st.mtimeMs; newestPath = join(this.opts.stateDir, "runs", f); }
+      }
+      if (!newestPath) return null;
+      const txt = readFileSync(newestPath, "utf8").slice(-4000);
+      const m = /"outcome":"(settled|budget|cut-midtool|failed)"/.exec(txt);
+      if (!m) return null;
+      return m[1];
+    } catch { return null; }
+  }
+
   /** Boot recovery: a serve crash leaves status='running' rows behind. */
   reclaimStale() {
     const staleAfter = 15 * 60_000;
     const rows = this.db.query(`SELECT * FROM tasks WHERE status='running'`).all() as unknown as TaskRow[];
     for (const t of rows) {
       if (this.now() - t.updated_at < staleAfter) continue;
+      if (this.hbFresh(t.id)) {
+        this.log(`reclaim ${t.id}: skipped — detached collector still heartbeating`);
+        continue;
+      }
       const attempts = t.attempts;
       const final = attempts >= t.max_attempts;
+      const outcome = this.adoptOrphanOutcome(t.id);
+      if (outcome === "settled" || outcome === "budget") {
+        this.db.query(`UPDATE tasks SET status='completed', last_error=?, updated_at=? WHERE id=?`)
+          .run(`adopted orphan collector outcome=${outcome}`, this.now(), t.id);
+        this.log(`reclaim ${t.id}: adopted ${outcome} from survivor transcript`);
+        continue;
+      }
       this.db.query(`UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`)
         .run(final ? "failed" : "queued",
           `reclaimed after serve crash (attempt ${attempts} had started)`, this.now(), t.id);
@@ -430,8 +476,16 @@ export class QueueServer {
     for (const t of rows) {
       if (this.spawnKills.has(t.id)) continue; // live dispatch, watched below
       if (this.now() - t.updated_at < 15 * 60_000) continue;
+      if (this.hbFresh(t.id)) continue; // detached survivor — hb-stale rule governs it later
       const attempts = t.attempts;
       const final = attempts >= t.max_attempts;
+      const outcome = this.adoptOrphanOutcome(t.id);
+      if (outcome === "settled" || outcome === "budget") {
+        this.db.query(`UPDATE tasks SET status='completed', last_error=?, updated_at=? WHERE id=?`)
+          .run(`adopted orphan collector outcome=${outcome}`, this.now(), t.id);
+        this.log(`reclaim ${t.id}: adopted ${outcome} from survivor transcript`);
+        continue;
+      }
       this.db.query(`UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`)
         .run(final ? "failed" : "queued",
           `reclaimed: 'running' row with no live dispatch (serve crash or lost spawn)`, this.now(), t.id);
