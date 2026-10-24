@@ -254,8 +254,12 @@ export function buildCommand(
   const bun = BUN;
   switch (task.route) {
     case "zai-coding-plan": {
+      // 15-min default collect window cut every real working session
+      // mid-edit (measured: the parity dreamer never survived past 15min).
+      // 90 min of collection; --max-run-min still bounds consumption.
       const cmd = [bun, join(ctx.repo, "src/bin/run.ts"),
-        "--content-file", ctx.promptFile, "--workspace", task.workspace, "--out", ctx.runLog, "--unattended"];
+        "--content-file", ctx.promptFile, "--workspace", task.workspace, "--out", ctx.runLog, "--unattended",
+        "--collect-ms", "5400000"];
       // Owner law 2026-10-24: GLM-5.3 FULL is start-plan-only — regular
       // coding-plan dreams run GLM-5.3-Flash at max reasoning. Big dreams
       // that earn the full model pass an explicit --model ref.
