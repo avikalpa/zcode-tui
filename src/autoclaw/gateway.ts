@@ -3,7 +3,7 @@
 // validated LIVE (sign accepted; refresh returned code 0; the plan's own
 // 403/810001 rate gate observed). The sign is the bundle's own scheme:
 //   X-Auth-Sign = md5(`${appId}&${unixSec}&${appKey}`).hex
-// with the access token in X-Authorization (Bearer-normalized — the server
+// with the access token in Authorization (Bearer-normalized — the server
 // returns tokens that may already carry the prefix). Values all come from the
 // user's autoclaw-plan.json; nothing is embedded here (see plan.ts boundary).
 import { randomUUID, createHash } from "node:crypto";
@@ -21,7 +21,7 @@ export function signHeaders(plan: AutoclawPlan, opts: SignOptions = {}, now = Da
     "X-Auth-TimeStamp": ts,
     "X-Auth-Sign": createHash("md5").update(`${plan.identity.appId}&${ts}&${plan.identity.appKey}`).digest("hex"),
     "X-Lang": plan.client.lang,
-    "X-Authorization": bearer(plan.auth.accessToken),
+    "Authorization": bearer(plan.auth.accessToken),  // gateway dropped legacy X-Authorization (measured 2026-10-24)
     "X-Client-Type": "pc",
     "x_trace_id": plan.client.traceSource,
   };
