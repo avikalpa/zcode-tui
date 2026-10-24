@@ -73,7 +73,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, appendFileSync, op
 import { spawn } from "node:child_process";
 import pkgJson from "../../package.json";
 import { ModelDialog, type ModelChoice } from "./model-dialog";
-import { StatusDialog, type PlanUsage } from "./status-dialog";
+import { StatusDialog, type McpDialogState, type PlanUsage } from "./status-dialog";
 import { readPlanState, refreshPlanCatalog } from "./plan-state";
 
 const VERSION = pkgJson.version;
@@ -1106,10 +1106,6 @@ type SkillsDialogState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "ready"; skills: { id: string; name: string; description?: string }[] };
-type McpDialogState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "ready"; servers: { name: string; status: string; error?: string }[] };
 type PluginRow = { id: string; name: string; version?: string; enabled: boolean };
 type PluginsDialogState =
   | { kind: "idle" | "loading"; plugins: PluginRow[] }
@@ -1350,7 +1346,7 @@ export function App({
           });
         })
         .catch(() => {
-          if (live) setMcpState({ kind: "ready", servers: [] });
+          if (live) setMcpState({ kind: "unavailable" });
         });
       return () => {
         live = false;
@@ -3930,9 +3926,11 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
     const mcpOptions: DialogOption<string | null>[] =
       mcpState.kind === "idle" || mcpState.kind === "loading"
         ? [{ id: "loading", label: "Connecting …", value: null }]
-        : mcpState.servers.length === 0
+        : mcpState.kind === "unavailable"
+          ? [{ id: "unavailable", label: "MCP servers unavailable", value: null, disabled: true }]
+        : mcpState.kind === "ready" && mcpState.servers.length === 0
           ? [{ id: "none", label: "No MCP servers configured", value: null }]
-          : mcpState.servers.map((server) => ({
+          : (mcpState.kind === "ready" ? mcpState.servers : []).map((server) => ({
               id: server.name,
               label: server.name,
               status: statusCell(server.status),

@@ -84,6 +84,19 @@ Reference remains the owner-selected OpenCode `v2ref`
   asserts the resumed session ID. Search ranking and grouped-list geometry
   remain open comparisons.
 
+- Unit 4: Status copies the reference's colored MCP bullet, bold name and
+  subdued wrapped status/error detail. Failed `mcp/list` is unavailable in
+  Status and the MCP picker, distinct from a successful empty list.
+  Component/App fixtures prove that distinction; short-terminal keyboard
+  scrolling reaches wrapped details without losing title/esc chrome.
+  MIT attribution is retained in third-party notices.
+
+Validation: 218 tests passed, 0 failed; TypeScript clean; no-TTY launcher
+and real-backend home smoke exit 0. A real 100×30 PTY renders the home
+composer before the deliberate 10-second timeout (124). No model prompt
+was sent in boot smoke. Four bounded lane commits; no merge/release/deploy
+performed by this sitting. Broader day-1/2 and live-pixel parity remain open.
+
 See [sitting 3 decisions](../design/02-ux-parity.md) for references and gaps.
 
 ## Shipped (1:1 unless noted)

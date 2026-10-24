@@ -66,3 +66,36 @@ Tests cover the shared picker, actual ModelDialog provider/model selection
 and refusal, and App's filtered session/resume target. These are stdin,
 render and request proofs; not live visual equivalence. Search ranking and
 short-terminal grouped-list geometry remain separate comparison items.
+
+## Status details and unavailable data
+
+Ported the pinned `component/dialog-status.tsx` MCP row structure: a colored
+bullet, bold server name and subdued wrapped detail. Connected, disabled
+and authentication states use the reference's grammar; failures show their
+available detail, with Failed as an explicit missing-detail fallback.
+Existing plan/account sections remain the previously requested extension.
+
+A rejected `mcp/list` now yields unavailable in both Status and the MCP
+picker instead of a successful empty result. Other plan sections still
+render. Component and production-App fixtures cover that distinction.
+Keyboard End/Home at 60×20 reaches a wrapped failure and returns to plan
+content while the title/esc chrome remains visible. Existing wheel coverage
+also remains. OpenCode's MIT attribution is included in third-party notices.
+
+## Sitting 3 validation
+
+Final full suite: `bun test` — 218 passed, 0 failed across 23 files.
+`bun x tsc --noEmit` passes with the shared MCP state type. The final status
+and App subset also passes after that type-only consolidation.
+The lane launcher exits 0 without a TTY; `src/tui/live-smoke.tsx` exits 0
+against the installed backend and renders the home composer. A real
+100×30 xterm PTY boot renders that composer without an error and exits 124
+at the deliberate ten-second timeout. No prompts were submitted during
+boot smoke. Private raw captures/logs are retained outside the repository.
+These checks do not establish live side-by-side pixel parity.
+
+Four bounded units are committed/pushed on the review lane. This sitting
+performs no merge, release or deploy. Remaining comparisons include folded
+long paste, asynchronous attachment paste cancellation/order, rich history,
+search ranking and small grouped pickers, plus the broader day-1/2 message,
+spacing, toast and scroll comparison.

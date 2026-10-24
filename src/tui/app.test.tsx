@@ -4,7 +4,7 @@ import { testRender } from "@opentui/react/test-utils";
 import type { AppServer } from "../protocol/client";
 import { App } from "./app";
 
-function fakeClient(onResume?: (id: string) => void) {
+function fakeClient(onResume?: (id: string) => void, mcpUnavailable = false) {
   const sessions = [
     { sessionId: "sess_fixture_one", title: "Checking sessions list", status: "idle", mode: "build", updatedAt: Date.parse("2026-09-04T12:00:00Z") },
     { sessionId: "sess_fixture_two", title: "Fixing the composer", status: "idle", mode: "build", updatedAt: Date.parse("2026-09-03T12:00:00Z") },
@@ -12,6 +12,7 @@ function fakeClient(onResume?: (id: string) => void) {
   const client = {
     request: async (method: string, params?: { sessionId?: string }) => {
       if (method === "session/list") return { sessions };
+      if (method === "mcp/list" && mcpUnavailable) throw new Error("Synthetic MCP request failure");
       if (method === "session/resume") {
         onResume?.(params?.sessionId ?? "");
         return { session: { status: "idle" }, messages: [] };
@@ -30,6 +31,16 @@ function fakeClient(onResume?: (id: string) => void) {
 const AppModule = await import("./app");
 
 describe("zcode-tui OpenCode-shaped shell", () => {
+  test("status preserves an MCP request failure as unavailable", async () => {
+    const setup = await testRender(<App client={fakeClient(undefined, true)} onQuit={() => {}} />, { width: 100, height: 40 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Ask anything"));
+      await act(async () => { await setup.mockInput.pressKeys([..."/status", "\r"]); });
+      const frame = await setup.waitForFrame((f) => f.includes("MCP servers unavailable"));
+      expect(frame).not.toContain("No MCP servers");
+      expect(frame).toContain("Status");
+    } finally { setup.renderer.destroy(); }
+  });
   test("session search plus Enter resumes the filtered row in one burst", async () => {
     const resumed: string[] = [];
     const setup = await testRender(<App client={fakeClient((id) => resumed.push(id))} onQuit={() => {}} />, { width: 100, height: 30 });
