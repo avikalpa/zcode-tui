@@ -3,6 +3,10 @@ import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import type { AppServer } from "../protocol/client";
 import { App } from "./app";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createModelPreferenceRepository } from "./session/model-preference";
 
 function fakeClient(onResume?: (id: string) => void, mcpUnavailable = false, withMcp = false) {
   const sessions = [
@@ -32,6 +36,21 @@ function fakeClient(onResume?: (id: string) => void, mcpUnavailable = false, wit
 const AppModule = await import("./app");
 
 describe("zcode-tui OpenCode-shaped shell", () => {
+  test("clicking the toast close affordance dismisses an actual App notification", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "zc-toast-"));
+    const setup = await testRender(<App client={fakeClient()} onQuit={() => {}}
+      preferences={createModelPreferenceRepository(join(dir, "state.json"))} />, { width: 100, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Ask anything"));
+      await act(async () => { await setup.mockInput.pressKeys([..."/thinking", "\r"]); });
+      const frame = await setup.waitForFrame((f) => f.includes("thinking →"));
+      const lines = frame.split("\n"); const y = lines.findIndex((line) => line.includes("thinking →"));
+      const x = lines[y].lastIndexOf("x");
+      expect(x).toBeGreaterThan(0);
+      await act(async () => { await setup.mockMouse.click(x, y); });
+      expect(await setup.waitForFrame((f) => !f.includes("thinking →"))).not.toContain("thinking →");
+    } finally { setup.renderer.destroy(); rmSync(dir, { recursive: true, force: true }); }
+  });
   test("home MCP count and shortcuts fit on the same footer row", async () => {
     const setup = await testRender(<App client={fakeClient(undefined, false, true)} onQuit={() => {}} />, { width: 100, height: 30 });
     try {

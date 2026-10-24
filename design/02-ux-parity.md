@@ -149,3 +149,18 @@ while retaining the adapter's existing single-Escape interrupt semantics.
 A production-App MCP/footer test fails on the previous commit and passes
 now. Three rendered fixtures cover one-row home metadata, narrow Unicode
 location plus usage, and running interrupt plus usage. Typecheck passes.
+
+## Sitting 4 — toast lifecycle and affordance
+
+Ported `ui/toast.tsx`'s hover pause/resume, remaining-time accounting,
+hover-time arrival queue, pending count, click dismissal/action dispatch,
+five-second default and unmount timer cleanup. The surface follows top=1,
+max-width sizing, split heavy vertical borders, title/message spacing and
+hovered affordance from the pinned reference. Existing App notifications
+now use that controller; there is no independent status-flash timer.
+
+The actual App's notification-close regression fails on the previous
+commit and passes now. Clock-controlled lifecycle checks prove remaining
+time, ordered queued delivery, replacement, action dispatch and cleanup;
+a rendered mouse fixture proves activation. Typecheck and full suite pass
+(234 tests). Live side-by-side terminal pixels remain open.

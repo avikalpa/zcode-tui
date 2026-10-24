@@ -123,6 +123,12 @@ Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`
   Production App regression fails before/pass after; three component render
   fixtures also pass. Typecheck and full suite pass (229 tests).
 
+- Unit 4: toast interaction ports the pinned reference's hover pause,
+  pending queue, click affordance, split border, sizing and five-second
+  default; timer cleanup follows unmount. Actual App click-dismissal
+  regression fails before/pass after. Lifecycle and rendered mouse tests
+  pass; full suite 234/234 and typecheck pass.
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2

@@ -8,6 +8,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions, usePaste } from "@opentui/react";
 import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
+import { Toast, useToast } from "./toast";
 import { PromptFooter } from "./prompt-footer";
 import { SelectDialog, TextPromptDialog, ModalBackdrop, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
@@ -632,44 +633,6 @@ function runningMarker(active: boolean): string {
   return active ? "▪" : "";
 }
 
-// The OpenCode toast overlay (consult item 3): top right, panel fill, split
-// left+right borders tinted by variant, single slot — an arriving toast
-// replaces the active one.
-function Toast({
-  C,
-  message,
-  variant,
-  width,
-}: {
-  C: ThemeTokens;
-  message: string;
-  variant: "info" | "success" | "warning" | "error";
-  width: number;
-}) {
-  const border = variant === "success" ? C.success : variant === "warning" ? C.warning : variant === "error" ? C.error : C.user;
-  return (
-    <box
-      style={{
-        position: "absolute",
-        top: 2,
-        right: 2,
-        zIndex: 2000,
-        width: Math.min(60, Math.max(20, width - 6)),
-        backgroundColor: C.panel,
-        paddingLeft: 2,
-        paddingRight: 2,
-        paddingTop: 1,
-        paddingBottom: 1,
-        borderStyle: "single",
-        border: ["left", "right"],
-        borderColor: border,
-      }}
-    >
-      <text content={message} fg={C.fg} wrapMode="word" />
-    </box>
-  );
-}
-
 // The keybind hint grammar: the chord reads bright, the action muted, pairs
 // separated by three spaces — the reference underline line.
 function HintBits({ text, C }: { text: string; C: ThemeTokens }) {
@@ -1242,16 +1205,9 @@ export function App({
   };
   const [typing, setTyping] = useState(true);
 
-  // Transient status toast — the OpenCode toast overlay (top right, split
-  // variant-tinted borders, single slot, 5s / 7s for errors).
-  const [toast, setToast] = useState<{ message: string; variant: "info" | "success" | "warning" | "error" } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Deviation queue 3 closed: confirmations ride the v2 toast overlay
-  // ONLY — no transient status-line text (the slot was invisible anyway).
+  const { currentToast: toast, pending: toastPending, controller: toasts } = useToast();
   const flashStatus = (message: string, variant: "info" | "success" | "warning" | "error" = "info") => {
-    setToast({ message, variant });
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), variant === "error" ? 7000 : 5000);
+    toasts.show({ message, variant });
   };
   // Slash-command autocomplete (the OpenCode composer popup): the match list
   // is derived from the draft; idx and dismissal are refs so the keyboard
@@ -4116,7 +4072,7 @@ footerHints={[
           </box>
           <box style={{ flexGrow: 1 }} />
         </box>
-        {toast ? <Toast C={C} message={toast.message} variant={toast.variant} width={dims.width} /> : null}
+        {toast ? <Toast C={C} toast={toast} pending={toastPending} width={dims.width} onHover={(hovered) => hovered ? toasts.pause() : toasts.resume()} onActivate={toasts.activate} /> : null}
       </box>
     );
   }
@@ -4318,7 +4274,7 @@ footerHints={[
       <box style={{ height: 1, paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
         <PromptFooter C={C} width={Math.max(1, dims.width - 5)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} running={running} spinner={spinner} lost={lost} context={ctxLabel} />
       </box>
-      {toast ? <Toast C={C} message={toast.message} variant={toast.variant} width={dims.width} /> : null}
+      {toast ? <Toast C={C} toast={toast} pending={toastPending} width={dims.width} onHover={(hovered) => hovered ? toasts.pause() : toasts.resume()} onActivate={toasts.activate} /> : null}
     </box>
   );
 }
