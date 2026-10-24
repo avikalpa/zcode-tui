@@ -99,6 +99,17 @@ performed by this sitting. Broader day-1/2 and live-pixel parity remain open.
 
 See [sitting 3 decisions](../design/02-ux-parity.md) for references and gaps.
 
+## 2026-10-24 UX parity sitting 4 (lane; never merged here)
+
+Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`.
+
+- Unit 1: ported the shared picker's bounded category scrollbox, spacing,
+  narrow stacked footer and wrap navigation from `ui/dialog-select.tsx`
+  and `ui/select-controller.ts`. A short terminal can reach the last group
+  with its footer visible; all options remain wheel-scrollable. Two new
+  regression checks fail before and pass after; 221 tests and typecheck
+  pass. Ranking and full live-pixel comparison remain open.
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2

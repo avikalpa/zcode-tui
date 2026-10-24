@@ -15,8 +15,8 @@
 // been reconciled away, so keeping filter state here makes every modal
 // deterministic under fast PTY typing.
 import { useEffect, useRef, useState } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { TextAttributes } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions, useRenderer } from "@opentui/react";
+import { CliRenderEvents, ScrollBoxRenderable, TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
 import { stringWidth } from "./diff/string-width";
 
@@ -45,7 +45,7 @@ type DialogAction<T> = (
 // Width tiers from the reference modal: medium 60, large 88, xlarge 116.
 function tierWidth(size: "medium" | "large" | "xlarge" | undefined, width: number): number {
   const base = size === "xlarge" ? 116 : size === "large" ? 88 : 60;
-  return Math.min(base, Math.max(20, width - 2));
+  return Math.min(base, Math.max(1, width - 2));
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -151,21 +151,32 @@ export function SelectDialog<T>({
 
   const shown = options.filter((o) => matchesDialogFilter(o, filter));
   const sel = clamp(idx, 0, Math.max(0, shown.length - 1));
-  // The card must FIT its own maxHeight: pad(2) + title + search + hints row
-  // + every group header (with its spacer) is chrome the list cannot eat, or
-  // the footer hints get clipped off the bottom (measured 2026-09-16,
-  // 30-row renderer). The option window shrinks to leave that room.
-  const backdropRows = Math.floor(dims.height / 4);
-  const maxHeight = Math.max(8, dims.height - backdropRows - 2);
-  const chromeRows = 5 + (footerHints && footerHints.length > 0 ? 1 : 0);
-  const groupCount = new Set(shown.filter((o) => o.group).map((o) => o.group)).size;
-  const headerRows = groupCount > 0 ? groupCount * 2 - 1 : 0;
-  const visibleCount = Math.max(3, Math.min(22, maxHeight - chromeRows - headerRows));
-  const winStart = Math.max(
-    0,
-    Math.min(sel - Math.floor(visibleCount / 2), Math.max(0, shown.length - visibleCount)),
-  );
-  const visible = shown.slice(winStart, winStart + visibleCount);
+  // Ported from OpenCode b084acc packages/tui/src/ui/dialog-select.tsx:
+  // category headers belong inside the bounded scrollbox, not the chrome.
+  const scroll = useRef<ScrollBoxRenderable | null>(null);
+  const renderer = useRenderer();
+  const leftHints = footerHints?.filter((h) => h.side !== "right") ?? [];
+  const rightHints = footerHints?.filter((h) => h.side === "right") ?? [];
+  const narrow = dims.width < 60;
+  const footerRows = footerHints?.length ? Math.max(narrow ? leftHints.length : 1, rightHints.length ? 1 : 0) : 0;
+  const maxHeight = Math.max(1, dims.height - Math.floor(dims.height / 4) - 1);
+  const contentRows = shown.reduce((rows, o, i) => rows + 1 + (o.group && o.group !== shown[i - 1]?.group ? (i ? 2 : 1) : 0), 0);
+  const listHeight = Math.max(1, Math.min(contentRows || 1, Math.max(1, Math.floor(dims.height / 2) - 6), maxHeight - 7 - footerRows));
+
+  useEffect(() => {
+    const reveal = () => {
+      const viewport = scroll.current;
+      const target = viewport?.getChildren()[sel];
+      if (!viewport || !target) return;
+      // Wrappers include a category heading; reveal the actual option row.
+      const row = target.getChildren().at(-1) ?? target;
+      viewport.scrollBy(row.y - viewport.y - Math.floor(viewport.height / 2));
+      if (sel === 0) viewport.scrollTo(0);
+    };
+    renderer.once(CliRenderEvents.FRAME, reveal);
+    renderer.requestRender();
+    return () => { renderer.off(CliRenderEvents.FRAME, reveal); };
+  }, [renderer, sel, filter, options, dims.width, dims.height]);
 
   // Solid's reference store updates within a key burst. React state lands
   // later, so keyboard truth must be immediate for filter -> arrows -> Enter
@@ -180,6 +191,11 @@ export function SelectDialog<T>({
     idxRef.current = clamp(next, 0, Math.max(0, rows.length - 1));
     setIdx(idxRef.current);
     onHighlight?.(rows[idxRef.current]);
+  };
+  const stepSelection = (delta: number) => {
+    const count = filteredNow().length;
+    const next = idxRef.current + delta;
+    moveSelection(next < 0 ? count - 1 : next >= count ? 0 : next);
   };
   const changeFilter = (next: string) => {
     filterRef.current = next;
@@ -211,13 +227,13 @@ export function SelectDialog<T>({
     if (key.ctrl && key.name === "r") { onAction?.("rename", selectionNow()); return; }
     if (key.ctrl && key.name === "a") { onAction?.("all", selectionNow()); return; }
     if (key.name === "return") { select(); return; }
-    if (key.name === "up") { moveSelection(idxRef.current - 1); return; }
+    if (key.name === "up") { stepSelection(-1); return; }
     if (key.name === "down") {
-      moveSelection(idxRef.current + 1);
+      stepSelection(1);
       return;
     }
-    if (key.name === "pageup") { moveSelection(idxRef.current - 10); return; }
-    if (key.name === "pagedown") { moveSelection(idxRef.current + 10); return; }
+    if (key.name === "pageup") { stepSelection(-10); return; }
+    if (key.name === "pagedown") { stepSelection(10); return; }
     if (key.name === "home") { moveSelection(0); return; }
     if (key.name === "end") { moveSelection(filteredNow().length - 1); return; }
     if (onHorizontal && (key.name === "left" || key.name === "right") && !key.ctrl && !key.meta) {
@@ -240,21 +256,21 @@ export function SelectDialog<T>({
       <box
         style={{
           width: cardWidth,
-          maxHeight: dims.height - Math.floor(dims.height / 4) - 2,
+          maxHeight,
           flexDirection: "column",
           flexShrink: 0,
           backgroundColor: C.panel,
           paddingTop: 1,
           paddingBottom: 1,
-          paddingLeft: 2,
-          paddingRight: 2,
+
         }}
       >
-        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
+        <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 4, paddingRight: 4 }}>
           <text content={title} fg={C.fg} attributes={TextAttributes.BOLD} />
           <text content="esc" fg={C.faint} onMouseUp={onClose} />
         </box>
-        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <box style={{ height: 1, flexDirection: "row", flexShrink: 0, paddingLeft: 4, paddingRight: 4 }}>
           {filter ? (
             <>
               <text content={filter} fg={C.fg} />
@@ -267,13 +283,14 @@ export function SelectDialog<T>({
             </>
           )}
         </box>
-        {visible.map((o) => {
-          const abs = shown.indexOf(o);
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <scrollbox ref={scroll} style={{ height: listHeight, flexShrink: 0, paddingLeft: 1, paddingRight: 1 }} scrollbarOptions={{ visible: false }}>
+        {shown.map((o, abs) => {
           const selected = abs === sel;
           const current = o.id === currentId;
-          const previous = visible[visible.indexOf(o) - 1];
+          const previous = shown[abs - 1];
           const group = o.group && o.group !== previous?.group ? o.group : undefined;
-          const groupSpacer = visible.indexOf(o) > 0;
+          const groupSpacer = abs > 0;
           const statusWidth = o.status ? stringWidth(o.status.text) + 1 : 0;
           const rowWidth = Math.max(4, cardWidth - 8 - statusWidth);
           const title = `${o.label}${o.meta ? `  ${o.meta}` : ""}`;
@@ -286,7 +303,7 @@ export function SelectDialog<T>({
           return (
             <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
               {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}
-              {group ? <text content={` ${group}`} fg={C.accent} attributes={TextAttributes.BOLD} /> : null}
+              {group ? <text content={group} fg={C.accent} attributes={TextAttributes.BOLD} style={{ paddingLeft: 3, height: 1 }} /> : null}
               <box
                 onMouseMove={() => { if (abs !== sel) moveSelection(abs); }}
                 onMouseDown={() => moveSelection(abs)}
@@ -296,7 +313,7 @@ export function SelectDialog<T>({
                   flexDirection: "row",
                   flexShrink: 0,
                   paddingLeft: current || o.gutter ? 1 : 3,
-                  paddingRight: 1,
+                  paddingRight: 3,
                   backgroundColor: selected ? C.accent : o.bg,
                 }}
               >
@@ -326,10 +343,12 @@ export function SelectDialog<T>({
             </box>
           );
         })}
-        {visible.length === 0 ? <text content=" No matching items" fg={C.faint} /> : null}
+        {shown.length === 0 ? <text content="No matching items" fg={C.faint} style={{ paddingLeft: 3 }} /> : null}
+        </scrollbox>
+        <box style={{ height: 1, flexShrink: 0 }} />
         {footerHints && footerHints.length > 0 ? (
-          <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
-            <box style={{ flexDirection: "row", flexShrink: 0 }}>
+          <box style={{ height: footerRows, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 4, paddingRight: 2 }}>
+            <box style={{ flexDirection: narrow ? "column" : "row", flexShrink: 0 }}>
               {footerHints.filter((h) => h.side !== "right").map((hint) => (
                 <box key={hint.key} style={{ flexDirection: "row", flexShrink: 0 }}>
                   <text content={hint.label} fg={C.fg} attributes={TextAttributes.BOLD} />
@@ -353,11 +372,7 @@ export function SelectDialog<T>({
             ) : null}
           </box>
         ) : null}
-        {shown.length > visible.length ? (
-          <box style={{ height: 1, flexShrink: 0 }}>
-            <text content={` ${winStart + 1}-${winStart + visible.length} / ${shown.length} ${countLabel ?? ""}`} fg={C.faint} />
-          </box>
-        ) : null}
+
       </box>
     </ModalBackdrop>
   );

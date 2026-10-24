@@ -99,3 +99,20 @@ performs no merge, release or deploy. Remaining comparisons include folded
 long paste, asynchronous attachment paste cancellation/order, rich history,
 search ranking and small grouped pickers, plus the broader day-1/2 message,
 spacing, toast and scroll comparison.
+
+## Sitting 4 — grouped picker viewport
+
+The pinned `ui/dialog-select.tsx` keeps category headings inside a bounded
+scrollbox, caps list height at half the terminal minus six rows, spaces the
+filter/body/footer, and stacks left footer actions below 60 columns. The
+adapter now uses that structure instead of subtracting every category from
+an option-count window. Keyboard reveal follows the actual rendered row;
+Home/End and wheel scrolling share the scrollbox. Arrow and page navigation
+wrap with the reference's `ui/select-controller.ts` rules.
+
+At 40×18 the inherited footer clipped; the regression now keeps all three
+session actions and the current last row visible. The 60×20 grouped-list
+fixture reaches the last model and returns to the first without losing
+chrome. New boundary navigation checks fail before and pass after.
+Validation: 221 tests pass; TypeScript passes. These are rendered character
+and input proofs, with live terminal pixel comparison still open.

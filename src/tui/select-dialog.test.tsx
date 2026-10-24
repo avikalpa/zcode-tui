@@ -142,3 +142,52 @@ describe("picker interaction parity", () => {
     } finally { setup.renderer.destroy(); }
   });
 });
+
+describe("grouped picker viewport", () => {
+  const grouped = Array.from({ length: 12 }, (_, i) => ({
+    id: `model-${i}`, label: `Fixture model ${String(i).padStart(2, "0")}`,
+    group: `Provider ${i}`, value: `model-${i}`,
+  }));
+  test("short terminal keeps the selected last group and footer visible", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Select model" options={grouped}
+      footerHints={[{ key: "enter", label: "select" }, { key: "ctrl+f", label: "favorite" }]}
+      onSelect={(v) => picked.push(v)} onClose={() => {}} />, { width: 60, height: 20 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Select model"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[F"]); });
+      const end = await setup.waitForFrame((f) => f.includes("Fixture model 11"));
+      expect(end).toContain("select enter");
+      expect(end).toContain("favorite ctrl+f");
+      expect(end).toContain("esc");
+      await act(async () => { await setup.mockInput.pressKeys(["\r"]); });
+      expect(picked).toEqual(["model-11"]);
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[H"]); });
+      const start = await setup.waitForFrame((f) => f.includes("Fixture model 00"));
+      expect(start).toContain("Provider 0");
+      expect(start).toContain("select enter");
+    } finally { setup.renderer.destroy(); }
+  });
+  test("narrow footer stacks actions and preserves the last selection", async () => {
+    const setup = await testRender(<SelectDialog title="Sessions" options={grouped}
+      footerHints={[{ key: "ctrl+f", label: "pin/unpin" }, { key: "ctrl+d", label: "delete" }, { key: "ctrl+r", label: "rename" }]}
+      currentId="model-11" onSelect={() => {}} onClose={() => {}} />, { width: 40, height: 18 });
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("Fixture model 11"));
+      expect(frame).toContain("pin/unpin ctrl+f");
+      expect(frame).toContain("delete ctrl+d");
+      expect(frame).toContain("rename ctrl+r");
+      expect(frame).toContain("●");
+    } finally { setup.renderer.destroy(); }
+  });
+  test("arrows and page movement wrap like the reference", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Themes" options={OPTIONS}
+      onSelect={(v) => picked.push(v)} onClose={() => {}} />, { width: 60, height: 20 });
+    try {
+      await setup.waitForFrame((f) => f.includes("alpha"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[A", "\r", "\x1b[B", "\r", "\x1b[6~", "\r"]); });
+      expect(picked).toEqual(["gamma", "alpha", "alpha"]);
+    } finally { setup.renderer.destroy(); }
+  });
+});
