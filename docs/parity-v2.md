@@ -144,6 +144,36 @@ attachment paste, rich history, specialized model sorting/server session
 search, broader message/code/diff/streaming and live terminal pixels.
 See [sittings 3–4 decisions](../design/02-ux-parity.md).
 
+## 2026-10-24 UX parity sitting 5 (lane; never merged here)
+
+Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`.
+
+- Unit 1: the transcript scrollbox carries the reference session-column pad
+  (2, or 1 below 44 columns), and the user turn renders the reference left
+  `┃` rule in the agent color spanning padTop/text/padBottom — rule at
+  column 2, text at column 5 (`routes/session/index.tsx` 1276–1278, 2259+).
+  Assistant and tool rows dropped private right paddings. The drafted tests
+  exposed a real production bug: the live `tool_call` handler dropped
+  `toolInput`, so shell blocks showed "Writing command…" forever; it now
+  stores it. Two App interaction tests fail before/pass after; 254 tests
+  and typecheck pass.
+
+- Unit 2: transcript vertical rhythm follows the reference row grammar —
+  the single blank line between rows comes from the row wrapper
+  (`SessionRowView` marginTop 1), never from content boxes. Block tools
+  keep only their border paddings (paddingTop/Bottom 1, paddingLeft 2,
+  gap 1), inline tool rows only paddingLeft 3, and the turn footer is its
+  own row one blank below the reply. The drafted geometry tests exposed a
+  second production bug: the submit-time empty assistant turn painted its
+  row gap as a stray blank line ahead of the tool row below it. The
+  reference builds rows from message parts, so an assistant message with
+  no parts contributes no row; MessageView now renders nothing for an
+  assistant turn with no text, thinking or footer. Three App interaction
+  tests (block tool one blank above/below, pending inline row one blank
+  above, footer one blank below the reply) pin the geometry; full suite
+  257/257 and typecheck pass; no-TTY boot renders home before the
+  intentional timeout.
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2
