@@ -243,7 +243,7 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
       // pi registers a provider through its models array: an empty one makes
       // --provider autoclaw fail with "Unknown provider" even though the
       // default id is set. Seed the mined ids so the config is self-consistent.
-      models = FALLBACK_MODELS.map((id) => ({ id, contextWindow: 262_144, maxTokens: 32_768, reasoning: false }));
+      models = FALLBACK_MODELS.map((id) => ({ id, contextWindow: 262_144, maxTokens: 32_768, reasoning: true })); // owner law: max thinking
       console.error(`autoclaw run: catalog unavailable (live fetch failed, no cache) — seeding fallback ids, default ${defaultModel}`);
     }
     const agentDir = writePiProviderConfig(proxy.port, models, defaultModel);

@@ -146,6 +146,9 @@ async function main() {
     mode: "build",
     persistence: "immediate",
   };
+  // Owner law: MAX thinking effort on every zcode-tui session (zai plans,
+  // start plan, autoclaw alike). The runtime defaults low otherwise.
+  createParams.options = { ...((createParams.options as Record<string, unknown>) ?? {}), reasoningLevel: "enabled" };
   if (values.model) {
     // 0.7.2: session/create takes an OBJECT ref {modelId, providerId};
     // a string id is mapped with the --provider route (default zai).

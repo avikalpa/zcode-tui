@@ -318,7 +318,7 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
           const doc = JSON.parse(payload) as Record<string, unknown>;
           doc.metadata ??= { user_id: "zcode-tui-worker" };
           doc.tool_choice ??= { type: "auto" };
-          doc.output_config ??= { effort: "low" };
+          doc.output_config ??= { effort: "max" }; // owner law: MAX thinking on all plans
           payload = JSON.stringify(doc);
         } catch { /* non-JSON body — forward as-is */ }
         let res = await offPeakMessages(target.serverTicketId, payload);
@@ -361,7 +361,9 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
         // reasoning:false — pi then omits the `thinking` field, which the
         // off-peak gateway rejects with 3001 parameter error (measured:
         // canary/T-037/canary-retry all died on it, 2026-10-23).
-        models: [{ id: model, name: model, reasoning: false, contextWindow: 262_144, maxTokens: 32_768 }],
+        // Owner law: MAX thinking everywhere. reasoning:true makes pi emit the
+        // thinking field; the proxy pairs it with output_config effort:max.
+        models: [{ id: model, name: model, reasoning: true, contextWindow: 262_144, maxTokens: 32_768 }],
       } },
     }, null, 2) + "\n");
     setLocalTaskState(row.offPeakTaskId, "running", { startedAt: Date.now() });

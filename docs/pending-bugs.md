@@ -1,0 +1,24 @@
+# zcode-tui pending bugs (1.0.0 polish)
+
+## BUG-001: mid-session stall — quiet-window, stale-reclaim, and transcript truncation all miss (2026-10-24)
+Symptom: a 45-min-class big dream (ztq-d087cb67, GLM-5.3) froze mid-run: transcript last
+event ms≈711s, then 24+ min silence with the run.ts process alive; the 600s tool-quiet
+window never fired its cut; the route's 45-min stale-reclaim never fired; the transcript
+file truncated 4.6MB → 4.6KB while frozen.
+Kill-path defect: manual SIGTERM → the queue classified it "auth/config (terminal)"
+(no retry) instead of stall/transient.
+Fix requirements: (1) quiet-window must fire on writeTranscript silence (not only on
+event-stream silence); (2) reclaimStale must consider started_at + heartbeat, not only
+route timeout; (3) SIGTERM on a running task → outcome "stalled", retryable; (4) find
+and fix the transcript truncation path (writeTranscript rewriting vs appending).
+Owner law: ALWAYS root-cause zcode-tui defects — alpha polish until 1.0.0.
+
+## BUG-002: thinking blocks render tiny (UX parity)
+opencode renders thinking as collapsible, visually distinct blocks; zcode-tui renders
+them flat/small. Owned by the 4-day UX-parity grind (lane/zcode-tui/ux-sol-parity-2).
+
+## BUG-003 (fixed, verify in production): reasoning effort defaulted low
+Executors injected output_config effort:"low" (bisect-era) and run.ts sessions never
+set reasoningLevel. Landed: effort:"max" + reasoning:true in idle/autoclaw executors,
+session/create options reasoningLevel:"enabled" in run.ts (owner law: MAX thinking on
+all zai/start/autoclaw plans). VERIFY: next natural sessions show max-effort thinking.
