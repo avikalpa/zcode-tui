@@ -133,7 +133,7 @@ describe("sign headers", () => {
     expect(h["X-Auth-Appid"]).toBe("100000");
     expect(h["X-Product"]).toBe("fixture");
     expect(h["X-Tm"]).toBe(process.platform === "darwin" ? "mac" : process.platform);
-    expect(h["X-Authorization"]).toBe("Bearer tok-1");
+    expect(h["Authorization"]).toBe("Bearer tok-1");
     expect(h["X-Request-Model"]).toBe("m1");
     expect(h["X-Trace-Id"]).toBe("rid-1");
     expect(h["X-Client-Type"]).toBe("pc");
@@ -225,7 +225,7 @@ describe("signing proxy", () => {
       fetch: async (req) => {
         const u = new URL(req.url);
         seen.paths.push(u.pathname);
-        seen.auth.push(req.headers.get("x-authorization") ?? "");
+        seen.auth.push(req.headers.get("authorization") ?? ""); // the gateway reads Authorization (2026-10-24)
         seen.sign.push(req.headers.get("x-auth-sign") ?? "");
         seen.model.push(req.headers.get("x-request-model") ?? "");
         if (u.pathname === "/refresh") {

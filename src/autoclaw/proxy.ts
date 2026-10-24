@@ -72,7 +72,7 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
       if (creditsPath) {
         const sendCredits = () => fetchImpl(plan.endpoint.base + creditsPath, {
           method: "GET",
-          headers: { ...signHeaders(plan), "X-Authorization": bearer(plan.auth.accessToken) },
+          headers: { ...signHeaders(plan) },
           redirect: "error",
         }).then((up) => up.text());
         let text = await sendCredits();
@@ -100,7 +100,6 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
       const send = (tokenChanged = false): Promise<Response> => {
         const headers: Record<string, string> = {
           ...signHeaders(plan, { model, requestId: randomUUID() }),
-          "X-Authorization": bearer(plan.auth.accessToken),
         };
         if (body) headers["Content-Type"] = req.headers.get("content-type") ?? "application/json";
         for (const h of ["accept", "anthropic-version", "anthropic-beta", "user-agent"]) {
