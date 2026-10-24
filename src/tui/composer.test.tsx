@@ -1,16 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppServer } from "../protocol/client";
 import { App } from "./app";
 import { createModelPreferenceRepository } from "./session/model-preference";
 
-async function composer(width = 100) {
+async function composer(width = 100, state: Record<string, unknown> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "zc-composer-"));
   const preferences = createModelPreferenceRepository(join(dir, "state.json"));
+  if (Object.keys(state).length > 0) preferences.update(() => state);
   const sent: string[] = [];
   let push = (_event: Record<string, unknown>) => {};
   const client = {
@@ -117,5 +118,57 @@ describe("production composer reference interaction", () => {
       await s.keys([..."intended fixture"]);
       expect(await s.send()).toBe("intended fixture");
     } finally { s.cleanup(); }
+  });
+});
+
+describe("production composer paste folding", () => {
+  test("a long paste folds to its label, edits shift it, and submit carries the full text", async () => {
+    const s = await composer();
+    try {
+      await s.keys([..."head "]);
+      await act(async () => { await s.mockInput.pasteBracketedText("alpha\nbravo\ncharlie"); });
+      await s.waitForFrame((f) => f.includes("[Pasted ~3 lines]"));
+      // The fold leaves one separator space; typing resumes right after it.
+      await s.keys([..."tail"]);
+      expect(await s.send()).toBe("head alpha\nbravo\ncharlie tail");
+    } finally { s.cleanup(); }
+  });
+
+  test("re-pasting the folded text at the cursor expands the fold", async () => {
+    const s = await composer();
+    try {
+      const long = "delta\necho\nfoxtrot";
+      await act(async () => { await s.mockInput.pasteBracketedText(long); });
+      await s.waitForFrame((f) => f.includes("[Pasted ~3 lines]"));
+      await act(async () => { await s.mockInput.pasteBracketedText(long); });
+      await s.waitForFrame((f) => !f.includes("[Pasted ~3 lines]"));
+      expect(await s.send()).toBe(long);
+    } finally { s.cleanup(); }
+  });
+
+  test("prompt.paste=full keeps the raw text unfolded", async () => {
+    const s = await composer(100, { paste: "full" });
+    try {
+      const long = "golf\nhotel\nindia";
+      await s.keys([..."keep "]);
+      await act(async () => { await s.mockInput.pasteBracketedText(long); });
+      await s.waitForFrame((f) => f.includes("india") && !f.includes("[Pasted ~3 lines]"));
+      expect(await s.send()).toBe("keep golf\nhotel\nindia");
+    } finally { s.cleanup(); }
+  });
+
+  test("pasting an SVG path tracks the content under its SVG label", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "zc-svg-paste-"));
+    try {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg"><rect width="2" height="2"/></svg>`;
+      const file = join(dir, "logo.svg");
+      writeFileSync(file, svg);
+      const s = await composer();
+      try {
+        await act(async () => { await s.mockInput.pasteBracketedText(file); });
+        await s.waitForFrame((f) => f.includes("[SVG: logo.svg]"));
+        expect(await s.send()).toBe(svg);
+      } finally { s.cleanup(); }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
