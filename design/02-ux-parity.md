@@ -1,4 +1,4 @@
-# UX parity sitting 3
+# UX parity sittings 3–4
 
 Reference: the owner-selected OpenCode v2ref at
 `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`. Source comparison is local;
@@ -65,7 +65,7 @@ absent selection does. Disabled separate-runner models remain inert.
 Tests cover the shared picker, actual ModelDialog provider/model selection
 and refusal, and App's filtered session/resume target. These are stdin,
 render and request proofs; not live visual equivalence. Search ranking and
-short-terminal grouped-list geometry remain separate comparison items.
+short-terminal grouped-list geometry were closed by sitting 4 below.
 
 ## Status details and unavailable data
 
@@ -99,3 +99,92 @@ performs no merge, release or deploy. Remaining comparisons include folded
 long paste, asynchronous attachment paste cancellation/order, rich history,
 search ranking and small grouped pickers, plus the broader day-1/2 message,
 spacing, toast and scroll comparison.
+
+## Sitting 4 — grouped picker viewport
+
+The pinned `ui/dialog-select.tsx` keeps category headings inside a bounded
+scrollbox, caps list height at half the terminal minus six rows, spaces the
+filter/body/footer, and stacks left footer actions below 60 columns. The
+adapter now uses that structure instead of subtracting every category from
+an option-count window. Keyboard reveal follows the actual rendered row;
+Home/End and wheel scrolling share the scrollbox. Arrow and page navigation
+wrap with the reference's `ui/select-controller.ts` rules.
+
+At 40×18 the inherited footer clipped; the regression now keeps all three
+session actions and the current last row visible. The 60×20 grouped-list
+fixture reaches the last model and returns to the first without losing
+chrome. New boundary navigation checks fail before and pass after.
+Validation: 221 tests pass; TypeScript passes. These are rendered character
+and input proofs, with live terminal pixel comparison still open.
+
+## Sitting 4 — ranked search and stable selection
+
+The shared picker uses the reference's fuzzysort 3.1.0, title weight 2,
+category and supplemental search weight 1, then first-seen category grouping.
+Abbreviations match; title matches precede provider-only matches. Rendering,
+keyboard selection and actions use that same order within a key burst.
+When favorite/pin actions move a row between sections, selection follows
+its provider-qualified identity rather than its previous numerical index.
+Tests exercise abbreviations plus Enter and actual ModelDialog favorite /
+unfavorite transitions. Disabled separate-runner rows remain informational
+and inert, an intentional existing plan-catalog adaptation.
+
+Validation: 225 tests and typecheck pass. The dependency/lock change adds
+only fuzzysort; existing resolved packages are unchanged. The local Bun
+cannot read the inherited v2 lockfile and attempted a broad dependency
+refresh; that refresh was discarded. Tests retain the inherited renderer
+versions, with the new package held in lane-only dependencies.
+
+## Sitting 4 — prompt status sizing
+
+The prompt footer follows `component/prompt/index.tsx`'s shrinking location
+cell and `feature-plugins/prompt/footer.tsx`'s cell-width budget for usage
+and shortcuts. It reuses the already-ported `ui/file-path.tsx` truncator,
+including Unicode grapheme handling. The home MCP extension now occupies a
+compact cell instead of a second full-width box nested in the footer.
+The inherited shortcut and home version extensions remain; no extra host
+state is invented. Running status uses the reference `esc interrupt` label
+while retaining the adapter's existing single-Escape interrupt semantics.
+
+A production-App MCP/footer test fails on the previous commit and passes
+now. Three rendered fixtures cover one-row home metadata, narrow Unicode
+location plus usage, and running interrupt plus usage. Typecheck passes.
+
+## Sitting 4 — toast lifecycle and affordance
+
+Ported `ui/toast.tsx`'s hover pause/resume, remaining-time accounting,
+hover-time arrival queue, pending count, click dismissal/action dispatch,
+five-second default and unmount timer cleanup. The surface follows top=1,
+max-width sizing, split heavy vertical borders, title/message spacing and
+hovered affordance from the pinned reference. Existing App notifications
+now use that controller; there is no independent status-flash timer.
+
+The actual App's notification-close regression fails on the previous
+commit and passes now. Clock-controlled lifecycle checks prove remaining
+time, ordered queued delivery, replacement, action dispatch and cleanup;
+a rendered mouse fixture proves activation. Typecheck and full suite pass
+(234 tests). Live side-by-side terminal pixels remain open.
+
+## Sitting 4 — text prompt input and final checks
+
+The reference `ui/dialog-prompt.tsx` uses a focused native textarea and reads
+its current buffer on confirm. The adapter now does the same, with explicit
+blur on teardown, bold title and a blank row before the editor. This fixes
+same-burst typing/Enter submitting stale React text, missing selection /
+cursor editing and ignored bracketed paste. Three editor regressions fail
+before and pass after. A production App rename-dialog interaction then
+opens Status from the restored composer, proving editor focus was released.
+The existing host-rename limitation remains explicitly reported to the user.
+
+Final sitting 4 validation: 238 tests pass, zero failures; TypeScript passes.
+Real installed-backend home smoke exits 0. The actual lane launcher, with
+no compiled dist binary, renders the home composer in a 100×30 xterm PTY
+and exits 124 at the intentional ten-second timeout; no runtime error is
+reported. The no-TTY launcher exits 0. No model prompts were submitted by
+live smoke. Logs and private runtime captures stay outside this repository.
+
+Five units are committed and pushed to the review lane; no merge, release
+or deploy is performed here. Remaining work includes long-paste folding,
+asynchronous attachment paste, attachment-rich prompt history, specialized
+upstream model sorting/server session search, broader message/code/diff and
+streaming comparisons, and live side-by-side terminal pixels.

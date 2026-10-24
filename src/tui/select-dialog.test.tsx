@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import { SelectDialog, matchesDialogFilter, type DialogOption } from "./select-dialog";
+import { SelectDialog, TextPromptDialog, matchesDialogFilter, filterDialogOptions, type DialogOption } from "./select-dialog";
 
 const OPTIONS: DialogOption<string>[] = [
   { id: "alpha", label: "alpha", value: "alpha" },
@@ -100,15 +100,15 @@ describe("picker interaction parity", () => {
   test("filter + navigation + action uses the same immediate selected row", async () => {
     const acted: string[] = [];
     const setup = await testRender(<SelectDialog title="Select model" options={[
+      { id: "third", label: "Fixture Other", value: "third" },
       { id: "first", label: "Coding One", group: "Coding Plan", value: "first" },
       { id: "second", label: "Coding Two", group: "Coding Plan", value: "second" },
-      { id: "third", label: "Fixture Other", value: "third" },
     ]} onAction={(_action, option) => acted.push(option?.id ?? "missing")}
       onSelect={() => {}} onClose={() => {}} />, { width: 80, height: 30 });
     try {
       await setup.waitForFrame((f) => f.includes("Coding Two"));
       await act(async () => { await setup.mockInput.pressKeys([..."coding", "\x1b[B", "\x06"]); });
-      expect(acted).toEqual(["second"]);
+      expect(acted).toEqual(["first"]);
     } finally { setup.renderer.destroy(); }
   });
   test("search accepts words across the model name and provider", () => {
@@ -138,6 +138,122 @@ describe("picker interaction parity", () => {
       await clickText("Ready model");
       expect(picked).toEqual(["ready"]);
       await clickText("esc");
+      expect(closed).toBe(true);
+    } finally { setup.renderer.destroy(); }
+  });
+});
+
+describe("grouped picker viewport", () => {
+  const grouped = Array.from({ length: 12 }, (_, i) => ({
+    id: `model-${i}`, label: `Fixture model ${String(i).padStart(2, "0")}`,
+    group: `Provider ${i}`, value: `model-${i}`,
+  }));
+  test("short terminal keeps the selected last group and footer visible", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Select model" options={grouped}
+      footerHints={[{ key: "enter", label: "select" }, { key: "ctrl+f", label: "favorite" }]}
+      onSelect={(v) => picked.push(v)} onClose={() => {}} />, { width: 60, height: 20 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Select model"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[F"]); });
+      const end = await setup.waitForFrame((f) => f.includes("Fixture model 11"));
+      expect(end).toContain("select enter");
+      expect(end).toContain("favorite ctrl+f");
+      expect(end).toContain("esc");
+      await act(async () => { await setup.mockInput.pressKeys(["\r"]); });
+      expect(picked).toEqual(["model-11"]);
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[H"]); });
+      const start = await setup.waitForFrame((f) => f.includes("Fixture model 00"));
+      expect(start).toContain("Provider 0");
+      expect(start).toContain("select enter");
+    } finally { setup.renderer.destroy(); }
+  });
+  test("narrow footer stacks actions and preserves the last selection", async () => {
+    const setup = await testRender(<SelectDialog title="Sessions" options={grouped}
+      footerHints={[{ key: "ctrl+f", label: "pin/unpin" }, { key: "ctrl+d", label: "delete" }, { key: "ctrl+r", label: "rename" }]}
+      currentId="model-11" onSelect={() => {}} onClose={() => {}} />, { width: 40, height: 18 });
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("Fixture model 11"));
+      expect(frame).toContain("pin/unpin ctrl+f");
+      expect(frame).toContain("delete ctrl+d");
+      expect(frame).toContain("rename ctrl+r");
+      expect(frame).toContain("●");
+    } finally { setup.renderer.destroy(); }
+  });
+  test("arrows and page movement wrap like the reference", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Themes" options={OPTIONS}
+      onSelect={(v) => picked.push(v)} onClose={() => {}} />, { width: 60, height: 20 });
+    try {
+      await setup.waitForFrame((f) => f.includes("alpha"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[A", "\r", "\x1b[B", "\r", "\x1b[6~", "\r"]); });
+      expect(picked).toEqual(["gamma", "alpha", "alpha"]);
+    } finally { setup.renderer.destroy(); }
+  });
+});
+
+
+describe("ranked picker search", () => {
+  test("abbreviations match and title matches outrank provider-only matches", () => {
+    const options = [
+      { id: "provider", label: "Other model", group: "Flash", value: "provider" },
+      { id: "title", label: "Flash", group: "Fixture", value: "title" },
+      { id: "abbr", label: "Code Review Engine", group: "Fixture", value: "abbr" },
+    ];
+    expect(filterDialogOptions(options, "flash").map((o) => o.id)).toEqual(["title", "provider"]);
+    expect(filterDialogOptions(options, "cdrev").map((o) => o.id)).toEqual(["abbr"]);
+  });
+  test("provider groups stay contiguous without changing first-seen group order", () => {
+    const options = [
+      { id: "a", label: "First", group: "One", value: "a" },
+      { id: "b", label: "Second", group: "Two", value: "b" },
+      { id: "c", label: "Third", group: "One", value: "c" },
+    ];
+    expect(filterDialogOptions(options, "").map((o) => o.id)).toEqual(["a", "c", "b"]);
+  });
+  test("fuzzy query plus Enter dispatches the ranked model within one burst", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<SelectDialog title="Models" options={[
+      { id: "provider", label: "Other model", group: "Flash", value: "provider" },
+      { id: "title", label: "Flash", group: "Fixture", value: "title" },
+    ]} onSelect={(v) => picked.push(v)} onClose={() => {}} />, { width: 80, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Models"));
+      await act(async () => { await setup.mockInput.pressKeys([..."flsh", "\r"]); });
+      expect(picked).toEqual(["title"]);
+    } finally { setup.renderer.destroy(); }
+  });
+});
+
+
+describe("text prompt native editing", () => {
+  test("typing and Enter in one burst submit the complete value", async () => {
+    const values: string[] = [];
+    const setup = await testRender(<TextPromptDialog title="Fixture title" onSubmit={(v) => values.push(v)} onClose={() => {}} />, { width: 80, height: 25 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Fixture title"));
+      await act(async () => { await setup.mockInput.pressKeys([..."new title", "\r"]); });
+      expect(values).toEqual(["new title"]);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("selection replaces the initial value before same-burst submission", async () => {
+    const values: string[] = [];
+    const setup = await testRender(<TextPromptDialog title="Fixture title" initialValue="old title"
+      onSubmit={(v) => values.push(v)} onClose={() => {}} />, { width: 80, height: 25 });
+    try {
+      await setup.waitForFrame((f) => f.includes("old title"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[H", "\x1b[1;2F", ..."replacement title", "\r"]); });
+      expect(values).toEqual(["replacement title"]);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("bracketed paste reaches the dialog editor and Escape cancels", async () => {
+    const values: string[] = []; let closed = false;
+    const setup = await testRender(<TextPromptDialog title="Fixture title" onSubmit={(v) => values.push(v)} onClose={() => { closed = true; }} />, { width: 80, height: 25 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Fixture title"));
+      await act(async () => { await setup.mockInput.pasteBracketedText("pasted title"); await setup.mockInput.pressKeys(["\r"]); });
+      expect(values).toEqual(["pasted title"]);
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b"], 100); });
       expect(closed).toBe(true);
     } finally { setup.renderer.destroy(); }
   });

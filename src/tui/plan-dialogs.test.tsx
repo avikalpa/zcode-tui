@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { act } from "react";
+import { act, useState } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ModelDialog, modelOptions, type ModelChoice } from "./model-dialog";
 import { StatusDialog } from "./status-dialog";
@@ -29,6 +29,24 @@ describe("plan dialogs", () => {
       const frame = await setup.waitForFrame((f) => f.includes("Fixture Large") && !f.includes("Coding Large"));
       expect(frame).toContain("separate runner");
       expect(picked).toEqual(["coding-large"]);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("favorite and unfavorite retain the highlighted model across section moves", async () => {
+    const picked: string[] = [];
+    function Harness() {
+      const [favorite, setFavorite] = useState<ModelChoice[]>([]);
+      return <ModelDialog models={models} plans={plans} prefs={{ recent: [], favorite }} current={models[0]} C={THEMES.opencode}
+        onSelect={(m) => picked.push(m.modelId)} onFavorite={(m) => setFavorite((items) => items.length ? [] : [m])} onClose={() => {}} />;
+    }
+    const setup = await testRender(<Harness />, { width: 100, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Coding Large"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[B", "\x06"]); });
+      await setup.waitForFrame((f) => f.includes("Favorites"));
+      await act(async () => { await setup.mockInput.pressKeys(["\r", "\x06"]); });
+      await setup.waitForFrame((f) => !f.includes("Favorites") && f.includes("Coding Large"));
+      await act(async () => { await setup.mockInput.pressKeys(["\r"]); });
+      expect(picked).toEqual(["coding-large", "coding-large"]);
     } finally { setup.renderer.destroy(); }
   });
   test("both provider groups and all four cached models fit the normal picker", async () => {

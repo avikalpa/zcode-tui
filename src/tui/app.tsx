@@ -8,6 +8,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions, usePaste } from "@opentui/react";
 import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
+import { Toast, useToast } from "./toast";
+import { PromptFooter } from "./prompt-footer";
 import { SelectDialog, TextPromptDialog, ModalBackdrop, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
@@ -631,44 +633,6 @@ function runningMarker(active: boolean): string {
   return active ? "▪" : "";
 }
 
-// The OpenCode toast overlay (consult item 3): top right, panel fill, split
-// left+right borders tinted by variant, single slot — an arriving toast
-// replaces the active one.
-function Toast({
-  C,
-  message,
-  variant,
-  width,
-}: {
-  C: ThemeTokens;
-  message: string;
-  variant: "info" | "success" | "warning" | "error";
-  width: number;
-}) {
-  const border = variant === "success" ? C.success : variant === "warning" ? C.warning : variant === "error" ? C.error : C.user;
-  return (
-    <box
-      style={{
-        position: "absolute",
-        top: 2,
-        right: 2,
-        zIndex: 2000,
-        width: Math.min(60, Math.max(20, width - 6)),
-        backgroundColor: C.panel,
-        paddingLeft: 2,
-        paddingRight: 2,
-        paddingTop: 1,
-        paddingBottom: 1,
-        borderStyle: "single",
-        border: ["left", "right"],
-        borderColor: border,
-      }}
-    >
-      <text content={message} fg={C.fg} wrapMode="word" />
-    </box>
-  );
-}
-
 // The keybind hint grammar: the chord reads bright, the action muted, pairs
 // separated by three spaces — the reference underline line.
 function HintBits({ text, C }: { text: string; C: ThemeTokens }) {
@@ -1241,16 +1205,9 @@ export function App({
   };
   const [typing, setTyping] = useState(true);
 
-  // Transient status toast — the OpenCode toast overlay (top right, split
-  // variant-tinted borders, single slot, 5s / 7s for errors).
-  const [toast, setToast] = useState<{ message: string; variant: "info" | "success" | "warning" | "error" } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Deviation queue 3 closed: confirmations ride the v2 toast overlay
-  // ONLY — no transient status-line text (the slot was invisible anyway).
+  const { currentToast: toast, pending: toastPending, controller: toasts } = useToast();
   const flashStatus = (message: string, variant: "info" | "success" | "warning" | "error" = "info") => {
-    setToast({ message, variant });
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), variant === "error" ? 7000 : 5000);
+    toasts.show({ message, variant });
   };
   // Slash-command autocomplete (the OpenCode composer popup): the match list
   // is derived from the draft; idx and dismissal are refs so the keyboard
@@ -1611,7 +1568,7 @@ export function App({
     ? null
     : ([Math.min(selAnchor, cursor ?? draft.length), Math.max(selAnchor, cursor ?? draft.length)] as [number, number]);
   const cwdFull = shortCwd(process.cwd());
-  const cwd = cwdFull.length > 42 ? `…${cwdFull.slice(-41)}` : cwdFull;
+  const cwd = cwdFull;
   const cwdFiles = useRef<string[] | null>(null);
   const cwdFileMatches = (token: string): string[] => {
     try {
@@ -4095,8 +4052,7 @@ footerHints={[
     thinkingOff: thoughtLevel === "disabled",
     leaderActive,
   };
-  const hintBits = "shift+tab agents   ctrl+p commands";
-  const ctxLabel = ctx && ctx.window > 0 ? `${formatContextLabel(ctx.used, ctx.window)}  ` : "";
+  const ctxLabel = ctx && ctx.window > 0 ? formatContextLabel(ctx.used, ctx.window) : "";
 
   if (view === "home") {
     return (
@@ -4111,25 +4067,12 @@ footerHints={[
             {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
             <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
           </box>
-          <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
-            <text content={`${cwd.length > 26 ? `…${cwd.slice(-25)}` : cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
-            {mcpStatus && mcpStatus.total > 0 ? (
-              <box style={{ width: promptWidth, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
-                <text
-                  content={"⊙ " + (mcpStatus.failed > 0 ? `${mcpStatus.failed} MCP failed` : `${mcpStatus.total} MCP`)}
-                  fg={mcpStatus.failed > 0 ? C.error : C.success}
-                />
-                {dims.width >= 64 ? <text content="/mcps" fg={C.subtle} /> : null}
-              </box>
-            ) : null}
-            <box style={{ flexDirection: "row", flexShrink: 0 }}>
-              <HintBits text={hintBits} C={C} />
-              <text content={`   ${VERSION}`} fg={C.faint} />
-            </box>
+          <box style={{ width: promptWidth, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
+            <PromptFooter C={C} width={Math.max(1, promptWidth - 2)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} mcp={mcpStatus} version={VERSION} />
           </box>
           <box style={{ flexGrow: 1 }} />
         </box>
-        {toast ? <Toast C={C} message={toast.message} variant={toast.variant} width={dims.width} /> : null}
+        {toast ? <Toast C={C} toast={toast} pending={toastPending} width={dims.width} onHover={(hovered) => hovered ? toasts.pause() : toasts.resume()} onActivate={toasts.activate} /> : null}
       </box>
     );
   }
@@ -4328,25 +4271,10 @@ footerHints={[
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
         <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
       </box>
-      <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
-        {running ? (
-          // v2 busy statusline grammar: the static spinner group then the
-          // status text `{interruptLabel()} stop` — "esc stop" here (our
-          // single-esc stop); the invented "Working…" retired 0.6.30.
-          <text content={`${spinner} esc stop`} fg={C.fg} />
-        ) : (
-          <text content={lost ? "backend lost · r to reconnect" : `${cwd}${gitBranch ? `:${gitBranch}` : ""}`} fg={C.subtle} />
-        )}
-        {running ? (
-          <text content={ctxLabel} fg={C.subtle} />
-        ) : (
-          <box style={{ flexDirection: "row", flexShrink: 0 }}>
-            {ctxLabel ? <text content={ctxLabel} fg={C.subtle} /> : null}
-            <HintBits text={hintBits} C={C} />
-          </box>
-        )}
+      <box style={{ height: 1, paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
+        <PromptFooter C={C} width={Math.max(1, dims.width - 5)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} running={running} spinner={spinner} lost={lost} context={ctxLabel} />
       </box>
-      {toast ? <Toast C={C} message={toast.message} variant={toast.variant} width={dims.width} /> : null}
+      {toast ? <Toast C={C} toast={toast} pending={toastPending} width={dims.width} onHover={(hovered) => hovered ? toasts.pause() : toasts.resume()} onActivate={toasts.activate} /> : null}
     </box>
   );
 }
