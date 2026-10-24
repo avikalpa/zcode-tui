@@ -715,3 +715,22 @@ Owner directive 2026-09-17: after EVERY UX iteration, re-write the Remaining
 section to the truth (move lines to Shipped with the wave version, re-pull
 upstream when it releases) — continue until this file's Remaining is empty
 (modulo the non-parities and host-verb blocks).
+
+- Unit 4: the paste pipeline follows the reference enqueuePaste/pasteInputText
+  contract (`prompt/index.tsx` 373–390, 1428–1475): every paste serializes on
+  one queue, and changed() — captured at dequeue — drops a paste whose
+  composer moved underneath it across the async resolution boundary. The
+  predicate reads unmount, dialog/permission/diff input ownership, session
+  switch, typing flip, draft edits, and unflushed burst bytes (this
+  binding's keystroke coalescer stands in for the reference's synchronous
+  key insertion, so pending burst bytes count as movement). Two defects the
+  drafted tests exposed: typed-while-resolving appended the paste text
+  AFTER the typed bytes (the old `!resolved` branch inserted
+  unconditionally — the common non-attachment case inverted user order),
+  and two pastes could resolve out of event order (no serialization). A
+  gated pasteResolver prop (mirroring the existing preferences injection)
+  makes the race deterministic in tests. Three App interaction tests in
+  paste-queue.test.tsx pin drop-on-change, queue serialization, and the
+  unedited landing path — all failed before and pass after; full suite
+  273/273 across 31 files, typecheck exit 0, no-TTY boot renders home
+  composer + `⊙ 5 MCP` before the intentional timeout.
