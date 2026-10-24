@@ -731,6 +731,12 @@ export const MessageView = memo(function MessageView({
   const footer = m.durationMs !== undefined && !streaming
     ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, m.interrupted)
     : null;
+  // The reference builds rows from message parts, so an assistant message
+  // with no parts yet contributes no SessionRowView; the submit-time
+  // placeholder turn must not paint its row gap as a stray blank line.
+  if (!m.text.trim() && !m.thinking && !m.thinkingParts?.length && !streaming && !footer) {
+    return null;
+  }
   return (
     <box style={{ flexDirection: "column", paddingLeft: 3, paddingTop: 1, flexShrink: 0 }}>
       <ThinkingBlock
@@ -754,7 +760,7 @@ export const MessageView = memo(function MessageView({
         <text content={wrapText(m.text || (m.thinking ? "" : "…"), Math.max(20, width - 6)).join("\n")} fg={C.fg} />
       )}
       {footer ? (
-        <box style={{ flexDirection: "row", paddingTop: 0, flexShrink: 0 }}>
+        <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
           <text content={footer.head} fg={C.user} />
           <text content={footer.rest ? ` · ${footer.rest}` : ""} fg={C.subtle} />
         </box>

@@ -212,13 +212,13 @@ export function ToolPart(props: {
   const inlineRow = (icon: string, color: string, children: string, pending: string, opts?: { strikethrough?: boolean }) => {
     if (loading) {
       return (
-        <box style={{ paddingLeft: 3, paddingTop: 1, flexDirection: "row", flexShrink: 0 }}>
+        <box style={{ paddingLeft: 3, flexDirection: "row", flexShrink: 0 }}>
           <text content={`${spinnerPrefix}${pending}`} fg={color} />
         </box>
       );
     }
     return (
-      <box style={{ paddingLeft: 3, paddingTop: 1, flexDirection: "row", flexShrink: 0 }}>
+      <box style={{ paddingLeft: 3, flexDirection: "row", flexShrink: 0 }}>
         <text content={icon} width={INLINE_TOOL_ICON_WIDTH} fg={failed ? C.error : color} attributes={opts?.strikethrough ? TextAttributes.STRIKETHROUGH : undefined} />
         <text content={failed && error ? error : children} fg={failed ? C.error : color} attributes={opts?.strikethrough ? TextAttributes.STRIKETHROUGH : undefined} wrapMode="none" />
       </box>
@@ -241,8 +241,6 @@ export function ToolPart(props: {
         paddingBottom: 1,
         paddingLeft: 2,
         gap: 1,
-        marginTop: 1,
-        marginBottom: 1,
         flexDirection: "column",
         flexShrink: 0,
       }}
