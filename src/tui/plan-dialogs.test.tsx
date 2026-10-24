@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ModelDialog, modelOptions, type ModelChoice } from "./model-dialog";
 import { StatusDialog } from "./status-dialog";
@@ -16,6 +17,20 @@ const plans: PlanState = {
 };
 const prefs = { recent: [], favorite: [] };
 describe("plan dialogs", () => {
+  test("model search burst selects the intended model and refuses a separate runner", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<ModelDialog models={models} plans={plans} prefs={prefs} current={models[0]} C={THEMES.opencode}
+      onSelect={(m) => picked.push(m.modelId)} onFavorite={() => {}} onClose={() => {}} />, { width: 100, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Coding Large"));
+      await act(async () => { await setup.mockInput.pressKeys([..."coding large", "\r"]); });
+      expect(picked).toEqual(["coding-large"]);
+      await act(async () => { await setup.mockInput.pressKeys([...Array(12).fill("\x7f"), ..."fixture large", "\r"]); });
+      const frame = await setup.waitForFrame((f) => f.includes("Fixture Large") && !f.includes("Coding Large"));
+      expect(frame).toContain("separate runner");
+      expect(picked).toEqual(["coding-large"]);
+    } finally { setup.renderer.destroy(); }
+  });
   test("both provider groups and all four cached models fit the normal picker", async () => {
     const setup = await testRender(<ModelDialog models={models} plans={plans} prefs={prefs} current={models[0]} C={THEMES.opencode} onSelect={() => {}} onFavorite={() => {}} onClose={() => {}} />, { width: 100, height: 30 });
     try {
@@ -48,6 +63,31 @@ describe("plan dialogs", () => {
       const frame = await setup.waitForFrame((f) => f.includes("No MCP servers"), { maxPasses: 20 });
       for (const text of ["Entitlements unavailable", "Quota meters unavailable", "not configured", "not provisioned", "0 models · unavailable", "Usage unavailable"]) expect(frame).toContain(text);
       expect(frame).not.toContain("(0%)");
+    } finally { setup.renderer.destroy(); }
+  });
+  test("MCP request failure is unavailable, not an empty successful list", async () => {
+    const setup = await testRender(<StatusDialog C={THEMES.opencode} plans={plans} usage={{ kind: "unavailable" }}
+      mcpState={{ kind: "unavailable" }} width={80} height={40} onClose={() => {}} />, { width: 80, height: 40 });
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("MCP servers unavailable"));
+      expect(frame).not.toContain("No MCP servers");
+      expect(frame).not.toContain("MCP servers · loading");
+      expect(frame).toContain("Z.AI Coding Plan");
+      expect(frame).toContain("AutoClaw");
+    } finally { setup.renderer.destroy(); }
+  });
+  test("status keyboard End/Home reaches server details while keeping chrome", async () => {
+    const setup = await testRender(<StatusDialog C={THEMES.opencode} plans={plans} usage={{ kind: "ready", tokens: 10 }}
+      mcpState={{ kind: "ready", servers: [{ name: "Fixture failed server", status: "failed", error: "Fixture connection refused" }] }}
+      width={60} height={20} onClose={() => {}} />, { width: 60, height: 20 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Status"));
+      await act(async () => { setup.mockInput.pressKey("END"); });
+      const bottom = await setup.waitForFrame((f) => f.includes("Fixture connection refused"));
+      expect(bottom).toContain("Status");
+      expect(bottom).toContain("esc close");
+      await act(async () => { setup.mockInput.pressKey("HOME"); });
+      expect(await setup.waitForFrame((f) => f.includes("Z.AI Coding Plan"))).toContain("Status");
     } finally { setup.renderer.destroy(); }
   });
   test("short status viewport keeps the title visible and scrolls to the final server", async () => {

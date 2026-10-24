@@ -1,4 +1,5 @@
-// OpenCode component/dialog-status.tsx: flat sections, subdued details,
+// Adapted from MIT OpenCode b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad
+// packages/tui/src/component/dialog-status.tsx (see THIRD-PARTY-NOTICES.md): flat sections, subdued details,
 // status-colored bullets, and the shared esc dismissal affordance.
 import { useKeyboard } from "@opentui/react";
 import { useRef } from "react";
@@ -6,7 +7,7 @@ import { ScrollBoxRenderable, TextAttributes } from "@opentui/core";
 import { ModalBackdrop } from "./select-dialog";
 import type { ThemeTokens } from "./design";
 import { credentialAge, meterText, type PlanState } from "./plan-state";
-export type McpDialogState = { kind: "idle" | "loading" } | { kind: "ready"; servers: { name: string; status: string; error?: string }[] };
+export type McpDialogState = { kind: "idle" | "loading" | "unavailable" } | { kind: "ready"; servers: { name: string; status: string; error?: string }[] };
 export type PlanUsage = { kind: "loading" | "unavailable" } | { kind: "ready"; tokens: number; sessions?: number };
 export function StatusDialog({ C, onClose, mcpState, plans, usage, width, height }: {
   C: ThemeTokens; onClose: () => void; mcpState: McpDialogState; plans: PlanState; usage: PlanUsage; width: number; height: number;
@@ -54,8 +55,18 @@ export function StatusDialog({ C, onClose, mcpState, plans, usage, width, height
             {!plans.autoclaw.present ? <text content="Run zcode-tui autoclaw setup" fg={C.subtle} /> : null}
           </box>
           <box style={{ flexDirection: "column", flexShrink: 0 }}>
-            <text content={servers === null ? "MCP servers · loading…" : servers.length ? `${servers.length} MCP server${servers.length === 1 ? "" : "s"}` : "No MCP servers"} fg={C.fg} />
-            {servers?.map((s) => <text key={s.name} content={`• ${s.name} · ${s.status === "connected" ? "Connected" : s.status === "failed" ? "Failed" : s.status === "disabled" ? "Disabled in configuration" : s.status === "needs_auth" ? "Needs authentication" : s.status}${s.error ? `: ${s.error}` : ""}`} fg={color(s.status)} />)}
+            <text content={mcpState.kind === "unavailable" ? "MCP servers unavailable · request failed" : servers === null ? "MCP servers · loading…" : servers.length ? `${servers.length} MCP server${servers.length === 1 ? "" : "s"}` : "No MCP servers"} fg={C.fg} />
+            {servers?.map((s) => <box key={s.name} style={{ flexDirection: "row", gap: 1, flexShrink: 0 }}>
+              <text content="•" fg={color(s.status)} style={{ flexShrink: 0 }} />
+              <text fg={C.fg} wrapMode="word" style={{ flexShrink: 1, flexGrow: 1 }}>
+                <b>{s.name}</b>{" "}
+                <span fg={C.subtle}>{s.status === "connected" ? "Connected"
+                  : s.status === "failed" ? s.error || "Failed"
+                  : s.status === "disabled" ? "Disabled in configuration"
+                  : s.status === "needs_auth" ? `Needs authentication${s.error ? `: ${s.error}` : ""}`
+                  : s.status}</span>
+              </text>
+            </box>)}
           </box>
         </box>
       </scrollbox>

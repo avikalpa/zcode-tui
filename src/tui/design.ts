@@ -324,7 +324,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "mcps", aliases: ["mcp"], description: "MCP server status" },
   { name: "plugins", aliases: ["plugin"], description: "enable or disable plugins" },
   { name: "effort", aliases: [], description: "choose reasoning effort · low high max" },
-  { name: "variants", aliases: ["thinking", "effort"], description: "switch model variant" },
+  { name: "variants", aliases: [], description: "switch model variant" },
   { name: "settings", aliases: [], description: "open settings" },
   { name: "thinking", aliases: [], description: "expand or collapse thinking" },
   { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
