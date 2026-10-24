@@ -326,7 +326,7 @@ export const SLASH_COMMANDS: SlashCommandSpec[] = [
   { name: "effort", aliases: [], description: "choose reasoning effort · low high max" },
   { name: "variants", aliases: ["thinking", "effort"], description: "switch model variant" },
   { name: "settings", aliases: [], description: "open settings" },
-  { name: "thinking", aliases: [], description: "toggle thinking" },
+  { name: "thinking", aliases: [], description: "expand or collapse thinking" },
   { name: "fork", aliases: [], description: "fork the session at the latest checkpoint" },
   { name: "copy", aliases: [], description: "copy the session transcript to the clipboard" },
   { name: "export", aliases: [], description: "export the session transcript as markdown" },
@@ -358,7 +358,8 @@ export function parseSlashCommand(input: string): SlashCommand {
   const token = input.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? "";
   if (!token.startsWith("/")) return null;
   const name = token.slice(1);
-  const spec = SLASH_COMMANDS.find((c) => c.name === name || c.aliases.includes(name));
+  const spec = SLASH_COMMANDS.find((c) => c.name === name)
+    ?? SLASH_COMMANDS.find((c) => c.aliases.includes(name));
   return spec ? (spec.name as Exclude<SlashCommand, null>) : null;
 }
 

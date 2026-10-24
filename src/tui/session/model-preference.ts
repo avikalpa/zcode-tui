@@ -12,6 +12,7 @@
 import { watch } from "node:fs";
 import path from "node:path";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import type { ThinkingMode } from "./thinking";
 import type { DiffPreferences } from "../diff/diff-viewer";
 import { withLockSync, type FlockOptions } from "./flock";
 
@@ -26,6 +27,7 @@ export type UiState = {
   diff: DiffPreferences;
   animations: boolean;
   fileContext: boolean;
+  thinking: ThinkingMode;
   // The v2 config.theme voice (0.6.32): name = active theme, mode = the
   // color-mode lock ("dark"|"light"|"system"; null = never set — an unset
   // or "system" mode is an unlocked mode).
@@ -39,6 +41,7 @@ const EMPTY: UiState = {
   diff: {},
   animations: true,
   fileContext: true,
+  thinking: "hide",
   theme: { name: null, mode: null },
 };
 
@@ -90,6 +93,7 @@ function decode(raw: unknown): UiState {
       diff: obj.diff && typeof obj.diff === "object" ? (obj.diff as DiffPreferences) : {},
       animations: typeof obj.animations === "boolean" ? obj.animations : true,
       fileContext: typeof obj.fileContext === "boolean" ? obj.fileContext : true,
+      thinking: obj.thinking === "show" ? "show" : "hide",
       theme: (() => {
         const raw = (obj.theme && typeof obj.theme === "object" ? obj.theme : {}) as Record<string, unknown>;
         return {
