@@ -38,6 +38,20 @@ requeues honestly. VERIFY on the next live occurrence: the transcript must
 show a steer, not a stop. Desktop-side tolerance is a ZCode-desktop defect,
 not fixable here — noted for the campaign report.
 
+### BUG-005 addendum (2026-10-24 late) — narrowed to ONE unknown
+Bundle ground truth (zwork ManagedModelRequestRuntime): chat auth is
+**X-Authorization** (the runtime nulls Authorization and sets X-Authorization
+from the account credential), plus resolveHeaders adds X-Session-Id,
+X-Request-Model, X-Client-Type, x_trace_id=autoclaw-desktop, and the chat
+client sends x-api-key: "zwork-managed-model" (constant) + its own
+user-agent. With that exact shape the direct probe moved 401 → **406
+(empty body)** across all model ids and accept/version/stream/beta variants.
+The desktop's token-usage log proves the plane works (provider=zwork-managed,
+model=zai_glm-5.3-flash, 990 requests). Remaining unknown: one request
+dimension a direct probe cannot see (likely renderer-session-scoped header
+or cookie, or a body-affecting transform). Root cause requires one captured
+real desktop chat request (owner approved). Interim: parity dreamer runs on
+zai; autoclaw proof task parked (ztq-d46252ed).
 ## BUG-005 — AutoClaw managed chat rejects all held credentials (401 Invalid token) — OPEN, owner-gated
 Discovered 2026-10-24 while chasing the owner's report: autoclaw credits
 unused for 24h+ (dashboard). Chain: (1) route rotation bug — per-ns count

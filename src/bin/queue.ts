@@ -666,7 +666,7 @@ export class QueueServer {
 
 // ---------------------------------------------------------------------------
 
-async function main() {
+export async function main() {
   syncAuthHeadless();
   // The autoclaw route is dispatchable only when the harness AND a
   // provisioned plan credential exist on this host (measured honestly).
