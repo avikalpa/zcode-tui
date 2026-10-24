@@ -308,6 +308,11 @@ export const ROUTES: Record<RouteName, RouteDef> = {
     peakGated: false, // zero plan-quota cost; the server owns the schedule
     available: true,
     remoteHost: "jojo", // jojo's task index + desktop execute queued tickets
+    // Measured fault (audit ztq-a1c071d4): a task dispatched with model=""
+    // (e.g. after rerouteTask cleared it) made the child session fall back to
+    // its own config default — silently breaking the route model law. The
+    // dispatcher resolves the route default instead of hoping the child does.
+    defaultModel: JSON.stringify({ modelId: "GLM-5.3-Flash", providerId: "zai-api", options: { reasoningLevel: "max" } }),
     taskTimeoutMin: 15,
   },
   "opencode-free": {
@@ -332,6 +337,11 @@ export const ROUTES: Record<RouteName, RouteDef> = {
     available: false,
     unavailableReason:
       "no autoclaw-plan.json on this host (run `zcode-tui autoclaw setup` where the official AutoClaw app is authenticated; auth sync replicates it fleet-wide)",
+    // Same config-default fault class as zai-offpeak: legacy ssh dispatch
+    // passed no --model when task.model was empty. The local path resolves
+    // from the plan catalog (resolveManagedModel); this default covers the
+    // legacy path and explicit-dispatch checks. Concrete id — zai_auto 406s.
+    defaultModel: "zai_glm-5.3-flash",
     taskTimeoutMin: 60,
   },
 };

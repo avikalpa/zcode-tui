@@ -279,7 +279,8 @@ export function buildCommand(
         "--workspace", task.workspace,
       ];
       if (task.title) inner.push("--title", JSON.stringify(task.title.slice(0, 120)));
-      if (task.model) inner.push("--model", JSON.stringify(task.model));
+      const offpeakModel = task.model || ROUTES["zai-offpeak"].defaultModel;
+      if (offpeakModel) inner.push("--model", JSON.stringify(offpeakModel));
       const cmd = [
         "ssh",
         "-o", "ServerAliveInterval=15",
@@ -320,7 +321,8 @@ export function buildCommand(
         "--content-file", "-", "--out", ctx.runLog,
         "--workspace", JSON.stringify(task.workspace),
       ];
-      if (task.model) inner.push("--model", JSON.stringify(task.model));
+      const autoclawModel = task.model || ROUTES["autoclaw"].defaultModel;
+      if (autoclawModel) inner.push("--model", JSON.stringify(autoclawModel));
       const cmd = [
         "ssh",
         "-o", "ServerAliveInterval=15",
