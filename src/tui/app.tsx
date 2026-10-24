@@ -71,6 +71,7 @@ import {
   uploadSessionAttachment,
 } from "./attachment";
 import { listBranches, type DiffMode } from "./diff/git";
+import { expandTracked, foldDecision, inPaste, pasteCuts, pasteLabel, reassignParts, type PastePart } from "./paste-fold";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, appendFileSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import pkgJson from "../../package.json";
@@ -921,6 +922,7 @@ function Composer({
   effort,
   thinkingOff,
   leaderActive,
+  pasteParts,
 }: {
   C: ThemeTokens;
   width: number | "100%";
@@ -937,6 +939,7 @@ function Composer({
   effort: string;
   thinkingOff: boolean;
   leaderActive: boolean;
+  pasteParts: { start: number; end: number }[];
 }) {
   const label = modeLabel(mode);
   const accent = leaderActive ? C.border : modeAccent(mode, C);
@@ -948,10 +951,14 @@ function Composer({
   const glyph = cursorBlink ? "█" : " ";
   // Rows come from the offset-carrying wrap so the cursor AND the selected
   // slice land exactly on their characters (input.select.*, 0.6.25).
-  type InputSeg = { text: string; sel: boolean };
+  type InputSeg = { text: string; sel: boolean; paste: boolean };
+  // Paste-part boundaries join the row cut set so a folded label renders as
+  // its own styled segment (v2's extmark.paste scope: bold on the warning
+  // pair) even mid-row.
+  const partCuts = pasteCuts(draft, pasteParts);
   let inputRows: { segs: InputSeg[]; glyphIdx: number; glyph: string }[];
   if (!draft) {
-    inputRows = [{ segs: [{ text: placeholder, sel: false }], glyphIdx: 0, glyph: typing ? glyph : " " }];
+    inputRows = [{ segs: [{ text: placeholder, sel: false, paste: false }], glyphIdx: 0, glyph: typing ? glyph : " " }];
   } else {
     const cur = cursor ?? draft.length;
     const lo = selection ? selection[0] : -1;
@@ -960,6 +967,7 @@ function Composer({
       const rs = row.start;
       const re = rs + row.text.length;
       const cuts = new Set<number>([rs, re]);
+      for (const b of partCuts) if (b > rs && b < re) cuts.add(b);
       const ownsCursor = cur >= rs && cur <= re;
       if (ownsCursor) cuts.add(cur);
       if (lo >= 0) {
@@ -973,7 +981,7 @@ function Composer({
         const a = pts[i];
         const b = pts[i + 1];
         if (b > a) {
-          segs.push({ text: draft.slice(a, b), sel: lo >= 0 && a >= lo && b <= hi });
+          segs.push({ text: draft.slice(a, b), sel: lo >= 0 && a >= lo && b <= hi, paste: inPaste(pasteParts, a) });
           starts.push(a);
         }
       }
@@ -1000,9 +1008,9 @@ function Composer({
           {inputRows.map((row, lineIndex) => (
             <box key={lineIndex} style={{ flexDirection: "row", flexShrink: 0 }}>
               {row.segs.map((seg, si) => (
-                <box key={si} style={{ flexDirection: "row", flexShrink: 0, backgroundColor: seg.sel ? C.accent : undefined }}>
+                <box key={si} style={{ flexDirection: "row", flexShrink: 0, backgroundColor: seg.sel ? C.accent : seg.paste ? C.warning : undefined }}>
                   {row.glyphIdx === si ? <text content={row.glyph} fg={draft ? C.fg : C.subtle} /> : null}
-                  <text content={seg.text} fg={draft ? (seg.sel ? C.bg : C.fg) : C.subtle} />
+                  <text content={seg.text} fg={draft ? (seg.sel || seg.paste ? C.bg : C.fg) : C.subtle} attributes={seg.paste ? TextAttributes.BOLD : undefined} />
                 </box>
               ))}
               {row.glyphIdx === row.segs.length ? <text content={row.glyph} fg={draft ? C.fg : C.subtle} /> : null}
@@ -1146,6 +1154,26 @@ export function App({
     if (alive.length !== promptFilesRef.current.length) {
       promptFilesRef.current = alive;
       setPromptFiles(alive);
+    }
+  }, [draft]);
+  // v2 pasted parts (prompt/index.tsx pasteText + the extmark sync): a folded
+  // paste is a label in the draft with the full text riding in the part. Our
+  // draft is a plain string, so after every edit the parts re-anchor to the
+  // first unclaimed occurrence of their label in document order; a label
+  // edited away drops its part — the plain-draft stand-in for the reference's
+  // virtual-extmark maintenance.
+  const [pasteParts, setPasteParts] = useState<PastePart[]>([]);
+  const pastePartsRef = useRef<PastePart[]>([]);
+  useEffect(() => {
+    const live = reassignParts(draftRef.current, pastePartsRef.current);
+    const same = live.length === pastePartsRef.current.length
+      && live.every((p, i) => {
+        const q = pastePartsRef.current[i];
+        return p.start === q.start && p.end === q.end && p.text === q.text;
+      });
+    if (!same) {
+      pastePartsRef.current = live;
+      setPasteParts(live);
     }
   }, [draft]);
   // The composer cursor: an index into the draft (default = end). Arrows move
@@ -1931,13 +1959,26 @@ export function App({
     }
   };
 
-  const submitPrompt = async (content: string) => {
+  const submitPrompt = async (rawDraft: string) => {
+    // v2 submitText: the folded paste parts splice back over their labels —
+    // the message (and with it the history entry) carries the full pasted
+    // text; the draft never does. Expansion reads the parts BEFORE the
+    // clear, on the RAW draft — the part ranges index rawDraft, so a trim
+    // before expansion would shift every range and corrupt the splice. Only
+    // parts whose recorded range still holds their label expand; a label an
+    // edit destroyed is a dropped extmark (reassignParts already pruned it).
+    const content = expandTracked(
+      rawDraft,
+      pastePartsRef.current.filter((p) => rawDraft.slice(p.start, p.end) === p.label),
+    ).trim();
     const route = submitRoute(content);
     // The alive parts are captured BEFORE the draft clears — after it,
     // the pruning effect treats the labels as deleted.
     const submitParts = promptFilesRef.current.filter((f) => content.includes(f.label));
     setDraft("");
     draftRef.current = "";
+    pastePartsRef.current = [];
+    setPasteParts([]);
     setCursorBoth(null);
     discardPending();
     sugDismissed.current = false;
@@ -2701,6 +2742,41 @@ export function App({
     discardPending();
     if (chunk) insertAtCursor(chunk);
   };
+  // v2 pasteText: a tracked part is its label + a trailing space in the
+  // draft; insertAtCursor leaves the cursor at insertion offset + length in
+  // both the plain and selection branches, so the label range reads off it.
+  const insertPastePart = (text: string, label: string) => {
+    insertAtCursor(`${label} `);
+    const end = cursorRef.current ?? draftRef.current.length;
+    pastePartsRef.current = [...pastePartsRef.current, { start: end - label.length - 1, end: end - 1, text, label }];
+    setPasteParts(pastePartsRef.current);
+  };
+  // v2 pasteInputText (post-attachment branch): 3+ lines or >150 chars over
+  // the trimmed text folds into a virtual `[Pasted ~N lines]` label — the
+  // full text rides in the part and is spliced back at submit — unless
+  // prompt.paste is "full". A paste identical to the fold the cursor sits on
+  // (or one cell after, past the label's trailing space) EXPANDS it instead
+  // of stacking a second fold (the reference's extmark dedupe).
+  const insertPastedText = (text: string) => {
+    if (uiState.current.paste === "full") { insertAtCursor(text); return; }
+    const pasted = text.trim();
+    const { fold, lines } = foldDecision(pasted);
+    if (!fold) { insertAtCursor(text); return; }
+    const label = pasteLabel(lines);
+    const cur = cursorRef.current ?? draftRef.current.length;
+    const twin = pastePartsRef.current.find((p) => (p.end === cur || p.end + 1 === cur) && p.text === pasted);
+    if (twin) {
+      pushUndo();
+      const next = draftRef.current.slice(0, twin.start) + twin.text + draftRef.current.slice(twin.end);
+      draftRef.current = next;
+      setDraft(next);
+      setCursorBoth(twin.start + twin.text.length);
+      pastePartsRef.current = pastePartsRef.current.filter((p) => p !== twin);
+      setPasteParts(pastePartsRef.current);
+      return;
+    }
+    insertPastePart(pasted, label);
+  };
   usePaste((event) => {
     // A dialog/diff/permission owns input while it is visible. Pasted bytes
     // must not leak through its keyboard layer into the hidden composer.
@@ -2725,11 +2801,13 @@ export function App({
     void (async () => {
       const resolved = await resolvePastedAttachments(text).catch(() => undefined);
       if (!resolved || draftRef.current !== beforePaste) {
-        insertAtCursor(text);
+        insertPastedText(text);
         return;
       }
       for (const item of resolved) {
-        if (item.type === "text") insertAtCursor(item.content);
+        // pasteInputText's resolved-text branch is pasteText with the SVG
+        // virtual label — the content rides in the part, never the draft.
+        if (item.type === "text") insertPastePart(item.content, `[SVG: ${item.filename || "image"}]`);
         else attachFile(item);
       }
     })();
@@ -3990,7 +4068,10 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       { id: "copy-session-id", label: "Copy session ID", description: "v2 session.copy.id", value: copySessionId },
       { id: "export", label: "Export session transcript…", description: "markdown · leader x · /export", value: () => setDialog("export") },
       { id: "images-view", label: "View image attachments", description: "v2 prompt.images.view · leader i", value: () => openImagePreview(0) },
-      { id: "stash", label: "stash prompt", description: "park the draft · v2 prompt.stash", value: () => { if (!draft) return; promptStash.push({ prompt: { text: stripAttachmentLabels(draft, promptFilesRef.current.map((f) => f.label)) } }); setDraft(""); setCursorBoth(null); stashChanged(); } },
+      { id: "stash", label: "stash prompt", description: "park the draft · v2 prompt.stash", value: () => { if (!draft) return; // Our stash is plain text (v2 stores the parts), so the folded
+        // pastes expand first — a popped stash must never carry an orphan
+        // label whose part is gone.
+        promptStash.push({ prompt: { text: stripAttachmentLabels(expandTracked(draft, pastePartsRef.current), promptFilesRef.current.map((f) => f.label)) } }); setDraft(""); draftRef.current = ""; pastePartsRef.current = []; setPasteParts([]); setCursorBoth(null); stashChanged(); } },
       { id: "stash-pop", label: "stash pop", description: "restore the newest stashed draft", value: () => { const e = promptStash.pop(); if (!e) return; setDraft(e.prompt.text); setCursorBoth(null); stashChanged(); } },
       { id: "stash-list", label: "stash list…", description: "restore or delete stashed drafts", value: () => { setStashArm(undefined); setDialog("stash"); } },
       { id: "skills", label: "skills…", description: "insert a skill mention · /skills", value: () => setDialog("skills") },
@@ -4065,7 +4146,7 @@ footerHints={[
           <box style={{ width: promptWidth, flexShrink: 0 }}>
             <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
             {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
-            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
+            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
           </box>
           <box style={{ width: promptWidth, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
             <PromptFooter C={C} width={Math.max(1, promptWidth - 2)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} mcp={mcpStatus} version={VERSION} />
@@ -4269,7 +4350,7 @@ footerHints={[
       <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
       {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} /> : null}
       <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-        <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} />
+        <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
       </box>
       <box style={{ height: 1, paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
         <PromptFooter C={C} width={Math.max(1, dims.width - 5)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} running={running} spinner={spinner} lost={lost} context={ctxLabel} />
