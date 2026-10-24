@@ -851,13 +851,22 @@ export async function main() {
         routes: routes.length ? routes : ROUTE_NAMES,
         stateDir, dryRun: Boolean(values["dry-run"]),
       });
+      // Measured fault 2026-10-25: an unconditional unlink let a SLOW
+      // shutting-down serve delete the lock AFTER a replacement serve had
+      // already taken it — the fleet then ran two serves (double dispatch)
+      // with no lock at all. Only remove the lock if it still names US.
+      const removeLockIfOurs = () => {
+        try {
+          if (parseInt(readFileSync(lockPath, "utf8").trim(), 10) === process.pid) unlinkSync(lockPath);
+        } catch { /* gone or unreadable — fine */ }
+      };
       const shutdown = () => {
         srv.shutdown();
-        try { unlinkSync(lockPath); } catch { /* noop */ }
+        removeLockIfOurs();
       };
       process.on("SIGTERM", shutdown);
       process.on("SIGINT", shutdown);
-      process.on("exit", () => { try { unlinkSync(lockPath); } catch { /* noop */ } });
+      process.on("exit", removeLockIfOurs);
       await srv.serve();
       break;
     }
