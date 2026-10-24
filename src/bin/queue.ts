@@ -566,6 +566,18 @@ export class QueueServer {
       return;
     }
 
+    // run.ts exit 5 = cut-midtool: the turn was cut while a tool call was
+    // in flight (session left resumable). Defer LONG (45min) — a tight
+    // re-dispatch would start a fresh session and redo the work (measured:
+    // the exit-4 conflation cycled big dreams every 5 minutes).
+    if (res.code === 5) {
+      this.db.query(`UPDATE tasks SET status='retry_wait', attempts=attempts-1, next_eligible_at=?, last_error='cut-midtool: session left resumable; fresh attempt deferred', last_exit=?, updated_at=? WHERE id=?`)
+        .run(this.now() + 45 * 60_000, res.code, this.now(), task.id);
+      this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "cut-midtool-defer", dur_ms: durMs });
+      this.log(`defer ${task.id}: cut mid-tool; fresh attempt eligible in 45m`);
+      return;
+    }
+
     // run.ts exit 4 = budget stop at the peak boundary — working as
     // designed: defer to after peak, do not burn an attempt.
     if (res.code === def.budgetStopExit) {

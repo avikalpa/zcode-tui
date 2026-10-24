@@ -321,10 +321,14 @@ async function main() {
   if (toolInFlight > 0) {
     // NEVER kill a live tool call and bill it as done: leave the session
     // alive (resumable in the TUI / by the next continue), report honestly.
+    // Exit 5 (distinct from the budget 4): the queue must not mistake a
+    // mid-tool cut for a peak-boundary budget stop — measured 2026-10-24:
+    // the conflation re-dispatched big dreams every 5 minutes on a no-peak
+    // day, each with a fresh session redoing hours of work.
     writeTranscript("cut-midtool");
     await sv.close();
     console.log(`zt-run: cut while tool call in flight (silent >${Math.round(toolQuietMs / 1000)}s) — session ${sessionId} left RUNNING for resume/steer`);
-    process.exit(4);
+    process.exit(5);
   }
   writeTranscript("settled");
   try { await sv.request("session/stop", { sessionId }); } catch { /* maybe ended */ }

@@ -370,3 +370,16 @@ describe("GLM-5.3 routing law (owner 2026-10-24)", () => {
     expect(glm53FullVerdict(codingOnly, now).allowed).toBe(false);
   });
 });
+
+describe("cut-midtool exit protocol (BUG: exit-4 conflation)", () => {
+  test("exit 5 defers 45min without consuming an attempt, distinct from budget", async () => {
+    const { db, srv } = makeServer(async () => ({ code: 5, signal: null, stdout: "zt-run: cut while tool call in flight", stderr: "", timedOut: false }), () => 1_700_000_000_000);
+    insertTask(db, { id: "ztq-cut5", route: "zai-coding-plan", attempts: 0, max_attempts: 3 });
+    await srv.tick();
+    const row = db.query(`SELECT status, attempts, last_error, next_eligible_at FROM tasks`).get() as any;
+    expect(row.status).toBe("retry_wait");
+    expect(row.attempts).toBe(0); // dispatch=1 then -1: the cut never consumed the attempt
+    expect(String(row.last_error)).toContain("cut-midtool");
+    expect(row.next_eligible_at).toBeGreaterThanOrEqual(1_700_000_000_000 + 44 * 60_000);
+  });
+});
