@@ -10,13 +10,13 @@
 // key-first rendering) — owner ruling 2026-09-16 ("the sessions overlay of
 // opencode is more polished; copy it") supersedes the earlier no-footer
 // consult line.
-// Dialogs deliberately use the global keyboard hook instead of a focused
+// Selection dialogs deliberately use the global keyboard hook instead of a focused
 // InputRenderable: OpenTUI can retain focus on a component that has already
 // been reconciled away, so keeping filter state here makes every modal
 // deterministic under fast PTY typing.
 import { useEffect, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions, useRenderer } from "@opentui/react";
-import { CliRenderEvents, ScrollBoxRenderable, TextAttributes } from "@opentui/core";
+import { CliRenderEvents, ScrollBoxRenderable, TextareaRenderable, TextAttributes } from "@opentui/core";
 import { THEMES, type ThemeTokens } from "./design";
 import * as fuzzysort from "fuzzysort";
 import { stringWidth } from "./diff/string-width";
@@ -416,23 +416,25 @@ export function TextPromptDialog({
   onClose: () => void;
   theme?: ThemeTokens;
 }) {
-  const [value, setValue] = useState(initialValue ?? "");
+  // The reference DialogPrompt delegates editing, selection and paste to
+  // OpenTUI's textarea. Read its buffer at submit time, not React state.
+  const textarea = useRef<TextareaRenderable | null>(null);
   const dims = useTerminalDimensions();
   const C = theme ?? THEMES.opencode;
-  const cardWidth = Math.min(60, Math.max(20, dims.width - 2));
-
+  const cardWidth = tierWidth("medium", dims.width);
+  useEffect(() => {
+    const input = textarea.current;
+    input?.focus();
+    input?.gotoLineEnd();
+    return () => { if (input && !input.isDestroyed) input.blur(); };
+  }, []);
   useKeyboard((key) => {
-    if (key.name === "escape" || (key.ctrl && key.name === "c")) { onClose(); return; }
-    if (key.name === "return") {
-      const next = value.trim();
-      if (next) onSubmit(next);
-      return;
-    }
-    if (key.name === "backspace") { setValue((v) => v.slice(0, -1)); return; }
-    if (key.sequence && !key.ctrl && /^[^\x00-\x1f\x7f]+$/u.test(key.sequence)) {
-      setValue((v) => v + key.sequence);
-    }
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) onClose();
   });
+  const submit = () => {
+    const value = textarea.current?.plainText.trim();
+    if (value) onSubmit(value);
+  };
 
   return (
     <ModalBackdrop C={C} width={dims.width} height={dims.height}>
@@ -449,13 +451,14 @@ export function TextPromptDialog({
         }}
       >
         <box style={{ height: 1, flexDirection: "row", justifyContent: "space-between", flexShrink: 0 }}>
-          <text content={title} fg={C.fg} />
+          <text content={title} fg={C.fg} attributes={TextAttributes.BOLD} />
           <text content="esc" fg={C.faint} onMouseUp={onClose} />
         </box>
-        <box style={{ height: 1, flexDirection: "row", flexShrink: 0 }}>
-          <text content={value || placeholder || ""} fg={value ? C.fg : C.faint} />
-          <text content="█" fg={C.accent} />
-        </box>
+        <box style={{ height: 1, flexShrink: 0 }} />
+        <textarea ref={textarea} initialValue={initialValue ?? ""} placeholder={placeholder ?? "Enter text"}
+          placeholderColor={C.faint} textColor={C.fg} focusedTextColor={C.fg} cursorColor={C.fg}
+          wrapMode="none" style={{ height: 1, flexShrink: 0 }}
+          keyBindings={[{ name: "return", action: "submit" }]} onSubmit={submit} />
       </box>
     </ModalBackdrop>
   );

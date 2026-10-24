@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import { SelectDialog, matchesDialogFilter, filterDialogOptions, type DialogOption } from "./select-dialog";
+import { SelectDialog, TextPromptDialog, matchesDialogFilter, filterDialogOptions, type DialogOption } from "./select-dialog";
 
 const OPTIONS: DialogOption<string>[] = [
   { id: "alpha", label: "alpha", value: "alpha" },
@@ -221,6 +221,40 @@ describe("ranked picker search", () => {
       await setup.waitForFrame((f) => f.includes("Models"));
       await act(async () => { await setup.mockInput.pressKeys([..."flsh", "\r"]); });
       expect(picked).toEqual(["title"]);
+    } finally { setup.renderer.destroy(); }
+  });
+});
+
+
+describe("text prompt native editing", () => {
+  test("typing and Enter in one burst submit the complete value", async () => {
+    const values: string[] = [];
+    const setup = await testRender(<TextPromptDialog title="Fixture title" onSubmit={(v) => values.push(v)} onClose={() => {}} />, { width: 80, height: 25 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Fixture title"));
+      await act(async () => { await setup.mockInput.pressKeys([..."new title", "\r"]); });
+      expect(values).toEqual(["new title"]);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("selection replaces the initial value before same-burst submission", async () => {
+    const values: string[] = [];
+    const setup = await testRender(<TextPromptDialog title="Fixture title" initialValue="old title"
+      onSubmit={(v) => values.push(v)} onClose={() => {}} />, { width: 80, height: 25 });
+    try {
+      await setup.waitForFrame((f) => f.includes("old title"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[H", "\x1b[1;2F", ..."replacement title", "\r"]); });
+      expect(values).toEqual(["replacement title"]);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("bracketed paste reaches the dialog editor and Escape cancels", async () => {
+    const values: string[] = []; let closed = false;
+    const setup = await testRender(<TextPromptDialog title="Fixture title" onSubmit={(v) => values.push(v)} onClose={() => { closed = true; }} />, { width: 80, height: 25 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Fixture title"));
+      await act(async () => { await setup.mockInput.pasteBracketedText("pasted title"); await setup.mockInput.pressKeys(["\r"]); });
+      expect(values).toEqual(["pasted title"]);
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b"], 100); });
+      expect(closed).toBe(true);
     } finally { setup.renderer.destroy(); }
   });
 });

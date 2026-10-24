@@ -51,6 +51,20 @@ describe("zcode-tui OpenCode-shaped shell", () => {
       expect(await setup.waitForFrame((f) => !f.includes("thinking →"))).not.toContain("thinking →");
     } finally { setup.renderer.destroy(); rmSync(dir, { recursive: true, force: true }); }
   });
+  test("closing a text dialog releases editor focus back to the App composer", async () => {
+    const setup = await testRender(<App client={fakeClient()} onQuit={() => {}} />, { width: 100, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Ask anything"));
+      await act(async () => { await setup.mockInput.pressKeys([..."/sessions", "\r"]); });
+      await setup.waitForFrame((f) => f.includes("Checking sessions list"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x12"]); });
+      await setup.waitForFrame((f) => f.includes("Rename Checking"));
+      await act(async () => { await setup.mockInput.pressKeys(["\x1b[H", "\x1b[1;2F", ..."Fixture renamed", "\r"]); });
+      await setup.waitForFrame((f) => f.includes("rename pending host support · Fixture renamed"));
+      await act(async () => { await setup.mockInput.pressKeys([..."/status", "\r"]); });
+      expect(await setup.waitForFrame((f) => f.includes("Z.AI Coding Plan"))).toContain("Status");
+    } finally { setup.renderer.destroy(); }
+  });
   test("home MCP count and shortcuts fit on the same footer row", async () => {
     const setup = await testRender(<App client={fakeClient(undefined, false, true)} onQuit={() => {}} />, { width: 100, height: 30 });
     try {

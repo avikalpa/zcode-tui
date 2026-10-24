@@ -1,4 +1,4 @@
-# UX parity sitting 3
+# UX parity sittings 3–4
 
 Reference: the owner-selected OpenCode v2ref at
 `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`. Source comparison is local;
@@ -65,7 +65,7 @@ absent selection does. Disabled separate-runner models remain inert.
 Tests cover the shared picker, actual ModelDialog provider/model selection
 and refusal, and App's filtered session/resume target. These are stdin,
 render and request proofs; not live visual equivalence. Search ranking and
-short-terminal grouped-list geometry remain separate comparison items.
+short-terminal grouped-list geometry were closed by sitting 4 below.
 
 ## Status details and unavailable data
 
@@ -164,3 +164,27 @@ commit and passes now. Clock-controlled lifecycle checks prove remaining
 time, ordered queued delivery, replacement, action dispatch and cleanup;
 a rendered mouse fixture proves activation. Typecheck and full suite pass
 (234 tests). Live side-by-side terminal pixels remain open.
+
+## Sitting 4 — text prompt input and final checks
+
+The reference `ui/dialog-prompt.tsx` uses a focused native textarea and reads
+its current buffer on confirm. The adapter now does the same, with explicit
+blur on teardown, bold title and a blank row before the editor. This fixes
+same-burst typing/Enter submitting stale React text, missing selection /
+cursor editing and ignored bracketed paste. Three editor regressions fail
+before and pass after. A production App rename-dialog interaction then
+opens Status from the restored composer, proving editor focus was released.
+The existing host-rename limitation remains explicitly reported to the user.
+
+Final sitting 4 validation: 238 tests pass, zero failures; TypeScript passes.
+Real installed-backend home smoke exits 0. The actual lane launcher, with
+no compiled dist binary, renders the home composer in a 100×30 xterm PTY
+and exits 124 at the intentional ten-second timeout; no runtime error is
+reported. The no-TTY launcher exits 0. No model prompts were submitted by
+live smoke. Logs and private runtime captures stay outside this repository.
+
+Five units are committed and pushed to the review lane; no merge, release
+or deploy is performed here. Remaining work includes long-paste folding,
+asynchronous attachment paste, attachment-rich prompt history, specialized
+upstream model sorting/server session search, broader message/code/diff and
+streaming comparisons, and live side-by-side terminal pixels.

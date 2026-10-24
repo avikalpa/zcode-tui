@@ -129,6 +129,21 @@ Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`
   regression fails before/pass after. Lifecycle and rendered mouse tests
   pass; full suite 234/234 and typecheck pass.
 
+- Unit 5: text prompts port the reference native textarea, current-buffer
+  submit, selection/edit/paste behavior, focus cleanup and title/editor
+  spacing. Three input regressions fail before/pass after; production App
+  proves the composer works after closing the dialog. Host rename remains
+  unavailable and is explicitly reported, without fake persistence.
+
+Final sitting 4 validation: 238 passed, zero failed; TypeScript clean;
+no-TTY and real-backend home smoke exit 0. A 100×30 xterm PTY boots the lane
+source and renders home without runtime error before the intentional
+10-second timeout (124). No prompts sent by live smoke. Five unit commits
+are pushed; no merge/release/deploy. Remaining: long-paste folding, async
+attachment paste, rich history, specialized model sorting/server session
+search, broader message/code/diff/streaming and live terminal pixels.
+See [sittings 3–4 decisions](../design/02-ux-parity.md).
+
 ## Shipped (1:1 unless noted)
 
 - ~~**permission.prompt.fullscreen**~~ SHIPPED 0.6.36 — the v2
