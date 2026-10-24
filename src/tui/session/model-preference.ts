@@ -28,6 +28,10 @@ export type UiState = {
   animations: boolean;
   fileContext: boolean;
   thinking: ThinkingMode;
+  // The v2 config.prompt.paste voice: "fold" (default) turns a long paste
+  // into a [Pasted ~N lines] label with the text riding in the part; "full"
+  // inserts the raw text.
+  paste: "fold" | "full";
   // The v2 config.theme voice (0.6.32): name = active theme, mode = the
   // color-mode lock ("dark"|"light"|"system"; null = never set — an unset
   // or "system" mode is an unlocked mode).
@@ -42,6 +46,7 @@ const EMPTY: UiState = {
   animations: true,
   fileContext: true,
   thinking: "hide",
+  paste: "fold",
   theme: { name: null, mode: null },
 };
 
@@ -94,6 +99,7 @@ function decode(raw: unknown): UiState {
       animations: typeof obj.animations === "boolean" ? obj.animations : true,
       fileContext: typeof obj.fileContext === "boolean" ? obj.fileContext : true,
       thinking: obj.thinking === "show" ? "show" : "hide",
+      paste: obj.paste === "full" ? "full" : "fold",
       theme: (() => {
         const raw = (obj.theme && typeof obj.theme === "object" ? obj.theme : {}) as Record<string, unknown>;
         return {
