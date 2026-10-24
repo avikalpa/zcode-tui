@@ -182,15 +182,26 @@ const sv = new AppServer({
     } else {
       summary = JSON.stringify(m).slice(0, 120);
     }
-    events.push({ method, kind, ms: Date.now() - t0, summary });
+    // Measured fault (ztq-f9e681c4 / ztq-47a45b7e, 2026-10-25): telemetry
+    // mirrors out-numbered session events 19k vs ~700 and hit the max-events
+    // cap at ~12min, exiting the collector mid-generation; the sticky tool
+    // flag then misbilled the healthy session as cut-midtool. Telemetry
+    // updates liveness (lastEvent) but is NOT mirrored into the transcript
+    // and does NOT count toward the cap.
     lastEvent = Date.now();
+    if (method !== "session/event") return;
+    events.push({ method, kind, ms: Date.now() - t0, summary });
     // Tool-in-flight tracking (trial finding #5, T-036): a long tool call
     // (measured: a 300s `timeout 300 tb mail fetch`) streams nothing and the
     // quiet window killed a LIVE session, which the queue then billed as
-    // completed. Progress events carry toolCallId while a tool runs.
-    if (method === "session/event" && summary.includes("toolCallId")) {
+    // completed. SET only on a tool START — measured 2026-10-25: a
+    // tool_result also carries toolCallId, and with the clear-list missing
+    // the runtime's actual end kinds the flag stuck through the next model
+    // turn, turning a settled session into a phantom cut-midtool.
+    const kindLow = kind.toLowerCase();
+    if (summary.includes("toolCallId") && kindLow.includes("tool") && !kindLow.includes("result")) {
       toolInFlight = Date.now();
-    } else if (kind === "agent_end" || kind === "turn_end" || kind === "message_end" || kind === "idle") {
+    } else if (/end|stop|complete|idle/.test(kindLow)) {
       toolInFlight = 0;
     }
     if (kind.includes("error")) {
