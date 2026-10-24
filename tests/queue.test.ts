@@ -159,10 +159,11 @@ describe("queue supervision verbs", () => {
     const id = insertTask(db, "failed");
     const r = rerouteTask(db, id, "codex");
     expect(r.ok).toBe(true);
-    const row = db.query("SELECT route, status, attempts, started_at, finished_at FROM tasks WHERE id=?").get(id) as Record<string, unknown>;
+    const row = db.query("SELECT route, status, attempts, model, started_at, finished_at FROM tasks WHERE id=?").get(id) as Record<string, unknown>;
     expect(row.route).toBe("codex");
     expect(row.status).toBe("queued");
     expect(row.attempts).toBe(0);
+    expect(row.model).toBe(""); // plane-specific refs never cross routes
     expect(row.started_at).toBeNull();
   });
 
