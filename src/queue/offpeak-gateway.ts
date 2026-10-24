@@ -343,12 +343,11 @@ export async function offPeakMessages(ticketId: string, body: string, init: { si
     method: "POST",
     headers: {
       "content-type": "application/json",
-      // The desktop's anthropic transport carries the version header and the
-      // plan key as x-api-key alongside the bearer (mock capture contract);
-      // without them the real gateway 3001s even on clean bodies.
+      // The desktop supplies its cloud JWT as the Anthropic client's apiKey
+      // as well as the bearer. The coding-plan key has its own header.
       "anthropic-version": "2023-06-01",
-      ...(jwt ? { authorization: `Bearer ${jwt}` } : {}),
-      ...(key ? { "x-coding-plan-api-key": key, "x-api-key": key } : {}),
+      ...(jwt ? { authorization: `Bearer ${jwt}`, "x-api-key": jwt } : {}),
+      ...(key ? { "x-coding-plan-api-key": key } : {}),
       "x-off-peak-ticket-id": ticketId,
     },
     body,
