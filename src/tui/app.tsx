@@ -1113,6 +1113,7 @@ export function App({
   resumeId,
   modelId,
   preferences = uiStateRepository,
+  pasteResolver = resolvePastedAttachments,
 }: {
   client: AppServer;
 
@@ -1121,6 +1122,7 @@ export function App({
   resumeId?: string | null;
   modelId?: string | null;
   preferences?: ReturnType<typeof createModelPreferenceRepository>;
+  pasteResolver?: typeof resolvePastedAttachments;
 }) {
   const [view, setView] = useState<AppView>("home");
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -1130,6 +1132,13 @@ export function App({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [dialog, setDialog] = useState<DialogName>(null);
+  // Live views of the input-owning state for async continuations (the paste
+  // queue's changed() predicate reads these across awaits, where render
+  // closures would be stale).
+  const viewRef = useRef<AppView>("home");
+  viewRef.current = view;
+  const dialogRef = useRef<DialogName>(null);
+  dialogRef.current = dialog;
   // v2 prompt.files — the draft's attachment parts. Labels are virtual
   // text: a part lives while its label survives in the draft (the
   // plain-draft equivalent of v2's extmark sync).
@@ -1254,6 +1263,8 @@ export function App({
     setCursorBoth(Math.max(0, Math.min(draftRef.current.length, cur + delta)));
   };
   const [typing, setTyping] = useState(true);
+  const typingRef = useRef(true);
+  typingRef.current = typing;
 
   const { currentToast: toast, pending: toastPending, controller: toasts } = useToast();
   const flashStatus = (message: string, variant: "info" | "success" | "warning" | "error" = "info") => {
@@ -1575,6 +1586,7 @@ export function App({
     return () => clearInterval(timer);
   }, [view]);
   const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
   const resumed = useRef(false);
   // The themes dialog's ORIGIN theme: captured once at open so the ● marker
   // and the esc-restore follow where you STARTED, not the live preview.
@@ -1671,9 +1683,6 @@ export function App({
     const timer = setInterval(read, 60000);
     return () => clearInterval(timer);
   }, []);
-  useEffect(() => {
-    activeIdRef.current = activeId;
-  }, [activeId]);
 
   // NativeAnnounce (spec §2 cap-2/§3): the phase is DERIVED in one place from
   // the TUI's own state, never scattered through the handlers. Identity (the
@@ -2800,6 +2809,35 @@ export function App({
     }
     insertPastePart(pasted, label);
   };
+  // v2 enqueuePaste (prompt/index.tsx): pastes serialize on one queue, and
+  // the changed() predicate captured at dequeue drops a paste whose composer
+  // moved underneath it across the async resolution boundary — a session
+  // switch, a typing flip (dialog/permission/diff took or returned input) or
+  // any draft edit. Typed keys keep their synchronous order; a late paste
+  // never re-inserts at a cursor that moved past it.
+  const pasteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pasteAliveRef = useRef(true);
+  useEffect(() => () => { pasteAliveRef.current = false; }, []);
+  const enqueuePaste = (run: (changed: () => boolean) => Promise<void>) => {
+    pasteQueueRef.current = pasteQueueRef.current
+      .then(async () => {
+        if (!pasteAliveRef.current || dialogRef.current !== null || askRef.current !== null || viewRef.current === "diff") return;
+        const before = { session: activeIdRef.current, typing: typingRef.current, text: draftRef.current };
+        await run(() =>
+          !pasteAliveRef.current ||
+          dialogRef.current !== null || askRef.current !== null || viewRef.current === "diff" ||
+          activeIdRef.current !== before.session ||
+          typingRef.current !== before.typing ||
+          draftRef.current !== before.text ||
+          // Burst bytes awaiting the coalesce tick are typed input the draft
+          // does not show yet — they win over a late paste exactly like the
+          // keystrokes the reference inserts synchronously.
+          pendingBuf.current.length > 0,
+        );
+      })
+      .catch(() => { /* a failed paste is dropped; the queue survives */ });
+    return pasteQueueRef.current;
+  };
   usePaste((event) => {
     // A dialog/diff/permission owns input while it is visible. Pasted bytes
     // must not leak through its keyboard layer into the hidden composer.
@@ -2808,22 +2846,25 @@ export function App({
     const text = decodePasteBytes(event.bytes).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     if (!text) return;
     if (!typing) {
-      // Pasting from a nav surface starts composing — and keeps pasted bytes
-      // out of the nav verbs (a pasted "q" must not quit the TUI).
+      // Pasting from a nav surface starts composing on a fresh draft — and
+      // keeps pasted bytes out of the nav verbs (a pasted "q" must not quit
+      // the TUI). The ref flips with the state so the queue's before-capture
+      // reads the new mode even before the render commits.
       draftRef.current = "";
       setDraft("");
       setCursorBoth(null);
+      typingRef.current = true;
       setTyping(true);
     }
     sugDismissed.current = false;
     moveSug(0);
     // v2 pasteInputText: a paste that IS an attachment path (image/pdf,
-    // or a multi-path paste) becomes prompt parts — labels insert, not
-    // the text. Typed-while-resolving falls back to the plain insert.
-    const beforePaste = draftRef.current;
-    void (async () => {
-      const resolved = await resolvePastedAttachments(text).catch(() => undefined);
-      if (!resolved || draftRef.current !== beforePaste) {
+    // or a multi-path paste) becomes prompt parts — labels insert, not the
+    // text. changed() across the resolution boundary drops the paste.
+    void enqueuePaste(async (changed) => {
+      const resolved = await pasteResolver(text).catch(() => undefined);
+      if (changed()) return;
+      if (!resolved) {
         insertPastedText(text);
         return;
       }
@@ -2833,7 +2874,7 @@ export function App({
         if (item.type === "text") insertPastePart(item.content, `[SVG: ${item.filename || "image"}]`);
         else attachFile(item);
       }
-    })();
+    });
   });
 
   useKeyboard((key) => {
