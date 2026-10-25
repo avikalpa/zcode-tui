@@ -1,15 +1,29 @@
 // Signed client for the user's own AutoClaw managed model plane.
 // Wire contract mined 2026-10-23 from the user's AutoClaw 2.0.3 bundle and
-// validated LIVE (sign accepted; refresh returned code 0; the plan's own
-// 403/810001 rate gate observed). The sign is the bundle's own scheme:
-//   X-Auth-Sign = md5(`${appId}&${unixSec}&${appKey}`).hex
-// with the access token in Authorization (Bearer-normalized — the server
-// returns tokens that may already carry the prefix). Values all come from the
-// user's autoclaw-plan.json; nothing is embedded here (see plan.ts boundary).
+// RE-VALIDATED LIVE 2026-10-25 against the desktop's own connection table
+// (runtime.sqlite model_connections: protocol "openai-completions", base
+// /autoclaw-proxy/proxy/autoclaw). The full shape that passes auth (403/810001
+// plan-busy, not 401) is:
+//   X-Auth-Sign   = md5(`${appId}&${unixSec}&${appKey}`).hex
+//   X-Authorization = Bearer <token>   (the bundle DELETES Authorization)
+//   + X-Version/X-Tm/X-Product/X-Auth-Appid/X-Auth-TimeStamp/X-Lang/X-Channel
+//   + X-Request-Model/X-Client-Type/x_trace_id/X-Trace-Id/X-Request-Id/X-Session-Id
+// The token must come from /userapi/v1/agent-refresh (source_id "autoclaw") —
+// those JWTs carry source_id "agentaccess_token"; the login-stored
+// "autoclawaccess_token" JWT is rejected by the model plane (measured).
+// Values all come from the user's autoclaw-plan.json; nothing is embedded
+// here (see plan.ts boundary).
 import { randomUUID, createHash } from "node:crypto";
 import { bearer, writePlan, type AutoclawPlan } from "./plan";
 
-export interface SignOptions { model?: string; requestId?: string; sessionId?: string }
+export interface SignOptions {
+  model?: string; requestId?: string; sessionId?: string;
+  /** Which header carries the access token, per measured surface (2026-10-25):
+   *  model plane → "x-authorization" (default; Authorization there = 401),
+   *  catalog/wallet reads → "authorization" (200 measured),
+   *  refresh → "none" (200 measured with sign headers only). */
+  auth?: "x-authorization" | "authorization" | "none";
+}
 
 export function signHeaders(plan: AutoclawPlan, opts: SignOptions = {}, now = Date.now): Record<string, string> {
   const ts = String(Math.floor(now() / 1000));
@@ -21,10 +35,12 @@ export function signHeaders(plan: AutoclawPlan, opts: SignOptions = {}, now = Da
     "X-Auth-TimeStamp": ts,
     "X-Auth-Sign": createHash("md5").update(`${plan.identity.appId}&${ts}&${plan.identity.appKey}`).digest("hex"),
     "X-Lang": plan.client.lang,
-    "Authorization": bearer(plan.auth.accessToken),  // gateway dropped legacy X-Authorization (measured 2026-10-24)
     "X-Client-Type": "pc",
     "x_trace_id": plan.client.traceSource,
   };
+  const auth = opts.auth ?? "x-authorization";
+  if (auth === "x-authorization") headers["X-Authorization"] = bearer(plan.auth.accessToken);
+  else if (auth === "authorization") headers["Authorization"] = bearer(plan.auth.accessToken);
   const channel = plan.client.channel?.trim();
   if (channel) headers["X-Channel"] = channel;
   const rid = opts.requestId ?? randomUUID();
@@ -69,21 +85,24 @@ export type RefreshResult =
   | { ok: false; failureClass: "hard" | "soft" | "transient"; detail: string };
 
 /**
- * POST /userapi/v1/refresh (fallback /userapi/v1/agent-refresh on business
+ * POST /userapi/v1/agent-refresh (fallback /userapi/v1/refresh on business
  * code 400002) with {refresh_token, source_id, device_id}; envelope
  * {code:0, data:{access_token, refresh_token}}. Persists the rotated pair.
+ * agent-refresh leads: measured 2026-10-25, /refresh answers 400002
+ * "Middleware sign error" even when signed, while /agent-refresh returns
+ * code 0 with the agentaccess_token class the model plane accepts.
  */
 export async function refreshCredential(
   plan: AutoclawPlan,
   fetchImpl: typeof fetch = fetch,
   planPath?: string,
 ): Promise<RefreshResult> {
-  for (const path of [plan.refresh.path, plan.refresh.fallbackPath]) {
+  for (const path of [plan.refresh.fallbackPath, plan.refresh.path]) {
     let res: Response;
     try {
       res = await fetchImpl(plan.endpoint.base + path, {
         method: "POST",
-        headers: { ...signHeaders(plan), "Content-Type": "application/json" },
+        headers: { ...signHeaders(plan, { auth: "none" }), "Content-Type": "application/json" },
         body: JSON.stringify({
           refresh_token: plan.auth.refreshToken,
           source_id: plan.refresh.sourceId,
@@ -111,7 +130,7 @@ export async function refreshCredential(
       try { writePlan(plan, planPath); } catch { /* in-memory refresh still holds */ }
       return { ok: true, accessToken: plan.auth.accessToken, refreshToken: plan.auth.refreshToken };
     }
-    if (code === 400002) continue; // try the agent-refresh fallback path
+    if (code === 400002) continue; // try the other refresh path
     const failureClass = code === 400000 ? "hard" : code === 510002 ? "soft" : "transient";
     return { ok: false, failureClass, detail: `envelope code ${code}` };
   }
@@ -127,7 +146,7 @@ export async function fetchModelCatalog(plan: AutoclawPlan, fetchImpl: typeof fe
   let res: Response;
   try {
     res = await fetchImpl(plan.endpoint.base + plan.endpoint.modelConfigPath, {
-      headers: signHeaders(plan),
+      headers: signHeaders(plan, { auth: "authorization" }), // catalog read: 200 on Authorization (measured 2026-10-25)
     });
   } catch (e) {
     return { ok: false, failure: `network: ${(e as Error).message}` };
@@ -171,7 +190,7 @@ export async function fetchCreditsBalance(plan: AutoclawPlan, fetchImpl: typeof 
     let res: Response;
     try {
       res = await fetchImpl(plan.endpoint.base + src.path + (src.query ? `?${src.query}` : ""), {
-        headers: signHeaders(plan),
+        headers: signHeaders(plan, { auth: "authorization" }), // wallet read: Authorization plane (0.8.0 measured)
       });
     } catch (e) {
       return { ok: false, failure: `network: ${(e as Error).message}` };

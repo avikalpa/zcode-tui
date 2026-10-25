@@ -133,7 +133,8 @@ describe("sign headers", () => {
     expect(h["X-Auth-Appid"]).toBe("100000");
     expect(h["X-Product"]).toBe("fixture");
     expect(h["X-Tm"]).toBe(process.platform === "darwin" ? "mac" : process.platform);
-    expect(h["Authorization"]).toBe("Bearer tok-1");
+    expect(h["X-Authorization"]).toBe("Bearer tok-1"); // desktop shape: token on X-Authorization
+    expect(h["Authorization"]).toBeUndefined();        // plain Authorization deleted
     expect(h["X-Request-Model"]).toBe("m1");
     expect(h["X-Trace-Id"]).toBe("rid-1");
     expect(h["X-Client-Type"]).toBe("pc");
@@ -158,14 +159,14 @@ describe("refresh credential", () => {
     }) as typeof fetch;
     const r = await refreshCredential(plan, fetchImpl, file);
     expect(r.ok).toBe(true);
-    expect(calls[0].url).toBe("http://mock/refresh");
+    expect(calls[0].url).toBe("http://mock/agent-refresh"); // agent-refresh leads (measured 2026-10-25)
     expect(calls[0].body).toEqual({ refresh_token: "ref-1", source_id: "fixture", device_id: "dev-1" });
     const stored = JSON.parse(readFileSync(file, "utf8"));
     expect(stored.auth.accessToken).toBe("Bearer fresh-2");
     expect(stored.auth.refreshToken).toBe("ref-2");
   });
 
-  test("400002 falls back to agent-refresh; 400000 is hard; 510002 soft", async () => {
+  test("agent-refresh leads; 400002 falls through to /refresh; 400000 is hard; 510002 soft", async () => {
     const plan = fixturePlan({ endpoint: { base: "http://mock", proxyPath: "/p", modelConfigPath: "/pc" } });
     const responses: object[] = [
       { code: 400002 },
@@ -213,11 +214,11 @@ describe("managed failure classes", () => {
 });
 
 describe("signing proxy", () => {
-  test("forwards signed requests upstream; strips client auth; 401 triggers refresh+retry", async () => {
+  test("forwards signed requests upstream on X-Authorization; 401 triggers refresh+retry", async () => {
     const home = mkdtempSync(join(tmpdir(), "zt-px-"));
     const planFile = join(home, "plan.json");
-    const seen: { auth: string[]; sign: string[]; model: string[]; bodies: string[]; paths: string[] } = {
-      auth: [], sign: [], model: [], bodies: [], paths: [],
+    const seen: { auth: (string | null)[]; xauth: (string | null)[]; sign: string[]; model: (string | null)[]; bodies: string[]; paths: string[] } = {
+      auth: [], xauth: [], sign: [], model: [], bodies: [], paths: [],
     };
     let upstreamMode: "ok" | "unauthorized-then-ok" = "unauthorized-then-ok";
     const upstream = Bun.serve({
@@ -225,10 +226,12 @@ describe("signing proxy", () => {
       fetch: async (req) => {
         const u = new URL(req.url);
         seen.paths.push(u.pathname);
-        seen.auth.push(req.headers.get("authorization") ?? ""); // the gateway reads Authorization (2026-10-24)
+        // desktop shape (2026-10-25): token rides X-Authorization; Authorization deleted
+        seen.auth.push(req.headers.get("authorization"));
+        seen.xauth.push(req.headers.get("x-authorization"));
         seen.sign.push(req.headers.get("x-auth-sign") ?? "");
-        seen.model.push(req.headers.get("x-request-model") ?? "");
-        if (u.pathname === "/refresh") {
+        seen.model.push(req.headers.get("x-request-model"));
+        if (u.pathname === "/agent-refresh" || u.pathname === "/refresh") {
           return Response.json({ code: 0, data: { access_token: "Bearer tok-2", refresh_token: "ref-2" } });
         }
         seen.bodies.push(await req.text());
@@ -246,11 +249,11 @@ describe("signing proxy", () => {
     const proxy = await startManagedProxy(plan, { planPath: planFile, fetchImpl: fetch });
     try {
       const client = Bun.serve({
-        port: 0, // stands in for pi's anthropic client
+        port: 0, // stands in for pi's openai-completions client
         fetch: async (req) => {
-          return fetch(`http://127.0.0.1:${proxy.port}/v1/messages`, {
+          return fetch(`http://127.0.0.1:${proxy.port}/v1/chat/completions`, {
             method: "POST",
-            headers: { "content-type": "application/json", authorization: "Bearer client-should-be-stripped", "anthropic-version": "2023-06-01" },
+            headers: { "content-type": "application/json", authorization: "Bearer client-should-be-stripped" },
             body: JSON.stringify({ model: "zai_auto-fast", max_tokens: 8, messages: [{ role: "user", content: "ping" }] }),
           });
         },
@@ -263,15 +266,18 @@ describe("signing proxy", () => {
       } finally {
         client.stop(true);
       }
-      expect(seen.paths).toEqual(["/proxy/fixture/v1/messages", "/refresh", "/proxy/fixture/v1/messages"]);
+      // agent-refresh leads (measured 2026-10-25: /refresh 400002s even when signed)
+      expect(seen.paths).toEqual(["/proxy/fixture/v1/chat/completions", "/agent-refresh", "/proxy/fixture/v1/chat/completions"]);
       expect(seen.bodies.length).toBe(2);
       // Only the message carries X-Request-Model; the refresh call does not.
       expect(seen.model.filter(Boolean).every((m) => m === "zai_auto-fast")).toBe(true);
       expect(seen.model.filter(Boolean)).toHaveLength(2);
       expect(seen.sign.every((s) => /^[0-9a-f]{32}$/.test(s))).toBe(true);
-      expect(seen.auth[0]).toBe("Bearer tok-1");
-      expect(seen.auth[1]).toBe("Bearer tok-1"); // the refresh call rides the then-current token
-      expect(seen.auth[2]).toBe("Bearer tok-2"); // refreshed pair retried
+      // the model plane never sees plain Authorization — not ours, not the client's
+      expect(seen.auth.every((a) => a === null)).toBe(true);
+      expect(seen.xauth[0]).toBe("Bearer tok-1");
+      expect(seen.xauth[1]).toBeNull();          // refresh rides sign headers only (measured 2026-10-25)
+      expect(seen.xauth[2]).toBe("Bearer tok-2"); // refreshed pair retried
       const stored = JSON.parse(readFileSync(planFile, "utf8"));
       expect(stored.auth.accessToken).toBe("Bearer tok-2");
     } finally {
