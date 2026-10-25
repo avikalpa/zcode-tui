@@ -172,6 +172,15 @@ export type ToolPartModel = {
   metadata?: Record<string, unknown>;
 };
 
+// Reference subagentModelLabel (routes/session/index.tsx): "provider/model#variant"
+// resolves to the registry display name when a list is supplied; without one
+// the reference part stands in, with the variant parenthesised.
+export function subagentModelLabel(value: string | undefined) {
+  if (!value) return undefined;
+  const [reference, variant] = value.split("#");
+  return `${reference}${variant ? ` (${variant})` : ""}`;
+}
+
 export function toolDisplay(tool: string): string {
   const known = new Set([
     "shell", "glob", "read", "grep", "webfetch", "websearch",
@@ -241,11 +250,15 @@ export function ToolPart(props: {
   );
 
   // ---- InlineToolRow (message-parts.tsx) ----
-  const inlineRow = (icon: string, color: string, children: string, pending: string, opts?: { strikethrough?: boolean }) => {
+  // The reference spinner law (InlineToolRow's spinner Match): a tool that
+  // passes `spinner` shows its CHILDREN under the spinner glyph while
+  // running ("⠋ Read /path"); one that does not shows the pending label
+  // ("⠋ Preparing write…").
+  const inlineRow = (icon: string, color: string, children: string, pending: string, opts?: { strikethrough?: boolean; spinner?: boolean }) => {
     if (loading) {
       return (
         <box style={{ paddingLeft: 3, flexDirection: "row", flexShrink: 0 }}>
-          <text content={`${spinnerPrefix}${pending}`} fg={color} />
+          <text content={`${spinnerPrefix}${opts?.spinner ? children : pending}`} fg={color} />
         </box>
       );
     }
@@ -380,14 +393,14 @@ export function ToolPart(props: {
         : [];
       return (
         <box style={{ flexDirection: "column", flexShrink: 0 }}>
-          {inlineRow("→", C.subtle, `Read ${inputPath(input) ?? ""}`, "Reading file…")}
-          {props.expanded
-            ? loaded.map((filepath) => (
-                <box key={filepath} style={{ paddingLeft: 6, flexDirection: "row", flexShrink: 0 }}>
-                  <text content={`↳ Loaded ${filepath}`} fg={C.subtle} />
-                </box>
-              ))
-            : null}
+          {inlineRow("→", C.subtle, `Read ${inputPath(input) ?? ""}`, "Reading file…", { spinner: m.status === "running" })}
+          {/* The reference renders the loaded rows unconditionally
+              (routes/session/index.tsx Read). */}
+          {loaded.map((filepath) => (
+            <box key={filepath} style={{ paddingLeft: 6, flexDirection: "row", flexShrink: 0 }}>
+              <text content={`↳ Loaded ${filepath}`} fg={C.subtle} />
+            </box>
+          ))}
         </box>
       );
     }
@@ -408,14 +421,20 @@ export function ToolPart(props: {
     case "subagent": {
       const description = stringValue(input.description);
       const agent = stringValue(input.agent) ?? stringValue(input.subagent_type) ?? "General";
-      const title = `${agent.charAt(0).toUpperCase()}${agent.slice(1)} Subagent — ${description ?? "Subagent"}`;
+      const model = subagentModelLabel(stringValue(input.model));
+      const title = `${agent.charAt(0).toUpperCase()}${agent.slice(1)} Subagent — ${description ?? "Subagent"}${model ? ` · ${model}` : ""}`;
       const icon = complete ? "✓" : "│";
-      return inlineRow(icon, C.subtle, title, "Delegating…");
+      // The reference runs the subagent row with its children under the
+      // spinner (spinner={!continuation() && isRunning()}); the pending
+      // label only covers a subagent with no description yet.
+      return inlineRow(icon, C.subtle, title, description ? title : "Delegating…", { spinner: loading });
     }
     case "question":
       return inlineRow("◈", C.subtle, String(input.question ?? "Question"), "Asking…");
-    case "skill":
-      return inlineRow("→", C.subtle, String(input.skill ?? input.name ?? "Skill"), "Loading skill…");
+    case "skill": {
+      const name = stringValue(metadata.name) ?? stringValue(input.id) ?? stringValue(input.name) ?? "Skill";
+      return inlineRow("→", C.subtle, `Skill "${name}"`, "Loading skill…");
+    }
     case "patch": {
       const targets = [...String(input.patchText ?? "").matchAll(/\*\*\* (?:Add|Update|Delete) File: ([^\r\n]+)/g)].map(
         (match) => match[1].trim(),
