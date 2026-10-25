@@ -17,6 +17,15 @@ import type { ThemeTokens } from "../design";
 import { stringWidth } from "../diff/string-width";
 import { FilePath } from "../diff/file-path";
 import { PatchDiff } from "../diff/patch-diff";
+import { filetypeOf } from "../diff/diff-viewer";
+
+// Reference Edit view law (routes/session/index.tsx Edit): the config
+// override first, else split on wide terminals and unified below 120
+// columns. The config override is a viewer-side adaptation here; the tool
+// row carries the auto default.
+export function editDiffView(width: number): "split" | "unified" {
+  return width > 120 ? "split" : "unified";
+}
 
 // ---- ui/border.ts ----
 export const EmptyBorder = {
@@ -351,24 +360,27 @@ export function ToolPart(props: {
         return blockTool({
           path: { label: "← Edit", value: path ?? "" },
           children: (
-            <PatchDiff
-              diff={patch}
-              hunkFg={C.subtle}
-              view="unified"
-              showLineNumbers
-              wrapMode="char"
-              fg={C.fg}
-              addedBg={C.success}
-              removedBg={C.error}
-              contextBg={C.surface}
-              addedSignColor={C.success}
-              removedSignColor={C.error}
-              lineNumberFg={C.faint}
-              lineNumberBg={C.surface}
-              addedLineNumberBg={C.surface}
-              removedLineNumberBg={C.surface}
-              syntaxStyle={props.syntaxStyle}
-            />
+            <box style={{ paddingLeft: 1, flexShrink: 0 }}>
+              <PatchDiff
+                diff={patch}
+                hunkFg={C.subtle}
+                view={editDiffView(props.width)}
+                filetype={filetypeOf(path ?? "")}
+                showLineNumbers
+                wrapMode="char"
+                fg={C.fg}
+                addedBg={C.success}
+                removedBg={C.error}
+                contextBg={C.surface}
+                addedSignColor={C.success}
+                removedSignColor={C.error}
+                lineNumberFg={C.faint}
+                lineNumberBg={C.surface}
+                addedLineNumberBg={C.surface}
+                removedLineNumberBg={C.surface}
+                syntaxStyle={props.syntaxStyle}
+              />
+            </box>
           ),
         });
       }

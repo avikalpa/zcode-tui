@@ -7,10 +7,12 @@
 // establish live pixels.
 import { describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
-import { ToolPart, subagentModelLabel, toolDisplay } from "./session/tool-parts";
+import { ToolPart, editDiffView, subagentModelLabel, toolDisplay } from "./session/tool-parts";
 import { THEMES } from "./design";
 
 const C = Object.values(THEMES)[0]!;
+
+const PATCH = "@@ -1,1 +1,1 @@\n-const old = 1;\n+const fresh = 2;\n";
 
 function mount(node: React.ReactNode) {
   return <box style={{ width: 80, flexDirection: "column" }}>{node}</box>;
@@ -110,5 +112,41 @@ describe("inline tool rows (reference spinner + children law)", () => {
     expect(subagentModelLabel("glm-5.3-flash")).toBe("glm-5.3-flash");
     expect(subagentModelLabel(undefined)).toBeUndefined();
     expect(toolDisplay("bash")).toBe("shell");
+  });
+});
+
+describe("edit block (reference Edit view law)", () => {
+  test("split on wide terminals, unified below 120 columns", () => {
+    expect(editDiffView(130)).toBe("split");
+    expect(editDiffView(120)).toBe("unified");
+    expect(editDiffView(80)).toBe("unified");
+  });
+
+  test("a one-line replacement is side-by-side at 130 and stacked at 80", async () => {
+    const part = (width: number) => (
+      <ToolPart
+        C={C}
+        m={{ tool: "edit", status: "completed", input: { file_path: "/tmp/fixture.ts" }, metadata: { files: [{ patch: PATCH }] } }}
+        expanded={false}
+        width={width}
+        spinnerChar="⠋"
+      />
+    );
+    const wide = await testRender(mount(part(130)), { width: 130, height: 12 });
+    try {
+      const frame = await wide.waitForFrame((f) => f.includes("const fresh = 2"), { maxPasses: 20 });
+      const row = frame.split("\n").find((l) => l.includes("const fresh = 2"));
+      expect(row).toContain("const old = 1");
+    } finally {
+      wide.renderer.destroy();
+    }
+    const narrow = await testRender(mount(part(80)), { width: 80, height: 12 });
+    try {
+      const frame = await narrow.waitForFrame((f) => f.includes("const fresh = 2"), { maxPasses: 20 });
+      const row = frame.split("\n").find((l) => l.includes("const fresh = 2"));
+      expect(row).not.toContain("const old = 1");
+    } finally {
+      narrow.renderer.destroy();
+    }
   });
 });
