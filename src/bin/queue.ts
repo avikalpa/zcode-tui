@@ -318,7 +318,12 @@ export function buildCommand(
           // literal quotes into argv and ENOENT'd every cwd; G4).
           "--workspace", task.workspace,
         ];
-        if (task.model) local.push("--model", task.model);
+        // route default applies here too — the legacy branch below already
+        // did; a bare dispatch silently ran the catalog's first model
+        // (zai_auto) instead of the pinned GLM-5.3-Flash (measured 2026-10-25,
+        // dev serve) — the same config-default fault class core.ts documents
+        const localModel = task.model || ROUTES["autoclaw"].defaultModel;
+        if (localModel) local.push("--model", localModel);
         return { cmd: local, cwd: task.workspace, stdin: `${UNATTENDED_PREAMBLE}\n\n${task.prompt}` };
       }
       // Legacy fallback: pi CLI inside the appimage runtime on the desktop
