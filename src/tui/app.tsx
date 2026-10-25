@@ -1943,8 +1943,8 @@ export function App({
     }
   };
 
-  const send = async (content: string, targetId = activeId, parts = promptFilesRef.current.filter((f) => content.includes(f.label)), rich?: RichPrompt) => {
-    if (!targetId || running) return;
+  const send = async (content: string, targetId = activeId, parts = promptFilesRef.current.filter((f) => content.includes(f.label)), rich?: RichPrompt): Promise<boolean> => {
+    if (!targetId || running) return false;
     probe("turn-start", content.slice(0, 40));
     // v2 submit: the alive labels leave the text (virtual text), the parts
     // ride as attachments — uploaded begin/chunk/commit, sent by ref. Parts
@@ -1969,7 +1969,13 @@ export function App({
     setHistory((h) => (isDuplicateEntry(h[0], historyEntry) ? h : [historyEntry, ...h].slice(0, 50)));
     historyIdx.current = -1;
     if (rich) promptHistory.append(rich);
-    setMsgs((m) => [...m, { role: "user", text: echoText }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
+    // Reference prompt/index.tsx: the optimistic rows are admitted at submit
+    // and roll back on failure — hold the identities so the rollback removes
+    // exactly these two rows even if unrelated rows land in between.
+    const userRow: TurnMessage = { role: "user", text: echoText };
+    const assistantRow: TurnMessage = { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() };
+    const rollbackTurn = () => setMsgs((m) => m.filter((row) => row !== userRow && row !== assistantRow));
+    setMsgs((m) => [...m, userRow, assistantRow]);
     let attachments: { ref: string; fileName: string; mime: string; bytes: number }[] | undefined;
     if (parts.length > 0) {
       setStatus(`uploading ${parts.length} attachment${parts.length === 1 ? "" : "s"}…`);
@@ -1979,9 +1985,12 @@ export function App({
           const ref = await uploadSessionAttachment(client, targetId, { mime: f.mime, bytes: f.bytes, filename: f.name ?? f.label });
           attachments.push({ ref, fileName: f.name ?? f.label, mime: f.mime, bytes: f.bytes.byteLength });
         } catch (e) {
-          setStatus(`attachment upload failed: ${e instanceof Error ? e.message : e}`);
+          // Reference fail(): an error toast, the optimistic rows roll back,
+          // and the submit returns false so the caller restores the entry.
+          flashStatus(`attachment upload failed: ${e instanceof Error ? e.message : e}`, "error");
+          rollbackTurn();
           setRunning(false);
-          return;
+          return false;
         }
       }
     }
@@ -1991,9 +2000,29 @@ export function App({
         ? { sessionId: targetId, content: clean, attachments }
         : { sessionId: targetId, content: clean });
     } catch (e) {
-      setStatus(`send failed: ${e instanceof Error ? e.message : e}`);
+      flashStatus(`send failed: ${e instanceof Error ? e.message : e}`, "error");
+      rollbackTurn();
       setRunning(false);
+      return false;
     }
+    return true;
+  };
+
+  // Reference restoreEntry (prompt/index.tsx): a failed submit gives the
+  // composer its entry back — draft, paste folds and attachment tray — with
+  // the cursor back at the end, unless the user already typed something new.
+  // The typing re-arm respects dialog/diff ownership: a surface that opened
+  // over the composer mid-upload keeps its input grab.
+  const restoreSubmit = (text: string, pastes: PastePart[], parts: PromptFilePart[]) => {
+    if (draftRef.current !== "") return;
+    draftRef.current = text;
+    setDraft(text);
+    pastePartsRef.current = pastes;
+    setPasteParts(pastes);
+    promptFilesRef.current = parts;
+    setPromptFiles(parts);
+    setCursorBoth(null);
+    if (!dialogRef.current && viewRef.current !== "diff") setTyping(true);
   };
 
   const submitPrompt = async (rawDraft: string) => {
@@ -2062,11 +2091,15 @@ export function App({
       return;
     }
     if (activeId) {
-      await send(content, activeId, submitParts, rich);
+      const ok = await send(content, activeId, submitParts, rich);
+      if (!ok) restoreSubmit(rawDraft, submitPastes, submitParts);
       return;
     }
     const id = await newSession();
-    if (id) await send(content, id, submitParts, rich);
+    if (id) {
+      const ok = await send(content, id, submitParts, rich);
+      if (!ok) restoreSubmit(rawDraft, submitPastes, submitParts);
+    }
   };
 
   const openSessions = () => {
