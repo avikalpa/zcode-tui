@@ -419,11 +419,9 @@ async function cmdSync(v: Record<string, string | boolean | undefined>): Promise
   if (hosts.length === 0) { console.error("sync: --hosts H[,H] required"); return 2; }
   if (!existsSync(PLAN_FILE)) { console.error(`sync: no plan file at ${PLAN_FILE} (run setup here first)`); return 1; }
   const repo = String(v.repo ?? "~/gh/zcode-tui");
-  const run = (cmd: string[], input?: string) =>
+  const run = (cmd: string[]) =>
     new Promise<number>((resolve) => {
-      const c = Bun.spawn(cmd, { stdin: input !== undefined ? "pipe" : "ignore", stdout: "pipe", stderr: "pipe" });
-      if (input !== undefined) c.stdin.write(input);
-      c.stdin.end();
+      const c = Bun.spawn(cmd, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
       c.exited.then((rc) => resolve(rc));
     });
   let failed = 0;
