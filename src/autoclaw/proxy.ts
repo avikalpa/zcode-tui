@@ -10,8 +10,9 @@
 // same middleware the official app runs in its main process; zcode-tui
 // ships none of its constants (see plan.ts — everything rides the plan file).
 import { randomUUID } from "node:crypto";
-import { bearer, type AutoclawPlan } from "./plan";
+import { bearer, writePlan, type AutoclawPlan } from "./plan";
 import { refreshCredential, signHeaders } from "./gateway";
+import { decryptCredentials, findAutoClawConfigDir } from "./mine";
 
 export interface ProxyOptions {
   port?: number;   // default 0 (ephemeral)
@@ -50,23 +51,53 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
   let refreshFailures = 0;
   let breakerUntil = 0;
 
+  // "the credential we just obtained is still rejected" — a refresh that
+  // answers code 0 but issues tokens the gateway refuses (dead-lineage
+  // signature, measured 2026-10-24/25). Counts toward the same breaker as a
+  // hard refresh failure so a doomed lineage can't be re-minted forever.
+  const noteStillRejected = (): void => {
+    if (++refreshFailures >= REFRESH_BREAKER_TRIP) {
+      breakerUntil = Date.now() + REFRESH_BREAKER_COOLDOWN_MS;
+      refreshFailures = 0;
+    }
+  };
+
   const ensureFreshCredential = async (): Promise<boolean> => {
     if (Date.now() < breakerUntil) return false;
     if (!inflightRefresh) {
-      inflightRefresh = refreshCredential(plan, fetchImpl, opts.planPath).then((r) => {
-        inflightRefresh = null;
-        if (r.ok) {
+      inflightRefresh = (async () => {
+        // FOLLOW the desktop before minting anything: it owns the account
+        // session and rotates in memory, so every refresh of our parallel
+        // lineage orphans its token and gets ours orphaned in return (the
+        // measured 2026-10-25 rotation war — tokens dying within minutes
+        // while the desktop is active). Adopt its persisted pair when it is
+        // strictly newer than ours; only fall back to our own refresh when
+        // the desktop offers nothing (not installed / keyring locked).
+        try {
+          const configDir = findAutoClawConfigDir();
+          if (configDir) {
+            const desktop = decryptCredentials(configDir);
+            if (desktop.accessToken && desktop.updatedAt && plan.auth.updatedAt
+                && desktop.updatedAt > plan.auth.updatedAt) {
+              plan.auth.accessToken = desktop.accessToken;
+              plan.auth.refreshToken = desktop.refreshToken;
+              plan.auth.updatedAt = desktop.updatedAt;
+              try { writePlan(plan, opts.planPath); } catch { /* in-memory adoption holds */ }
+              lastRefreshAt = Date.now();
+              refreshFailures = 0;
+              return true;
+            }
+          }
+        } catch { /* desktop absent or unreadable — refresh below */ }
+        const r = await refreshCredential(plan, fetchImpl, opts.planPath).catch(() => null);
+        if (r && r.ok) {
           lastRefreshAt = Date.now();
           refreshFailures = 0;
-        } else if (++refreshFailures >= REFRESH_BREAKER_TRIP) {
-          breakerUntil = Date.now() + REFRESH_BREAKER_COOLDOWN_MS;
-          refreshFailures = 0;
+          return true;
         }
-        return r.ok;
-      }).catch(() => {
-        inflightRefresh = null;
+        noteStillRejected();
         return false;
-      });
+      })();
     }
     return inflightRefresh;
   };
@@ -103,6 +134,10 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
         if (envelope.code === 410000) {
           const refreshed = await ensureFreshCredential();
           if (refreshed) text = await sendCredits();
+          try {
+            const after = JSON.parse(text) as { code?: unknown };
+            if (after.code === 410000) noteStillRejected();
+          } catch { /* non-envelope */ }
         }
         return new Response(text, { status: 200, headers: { "content-type": "application/json" } });
       }
@@ -145,6 +180,7 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
       if (res.status === 401) {
         const refreshed = await ensureFreshCredential();
         if (refreshed) res = await send(true);
+        if (res.status === 401) noteStillRejected();
       }
       return res;
     },
