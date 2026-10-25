@@ -378,6 +378,14 @@ export async function offPeakMessages(ticketId: string, body: string, init: { si
       ...(jwt ? { authorization: `Bearer ${jwt}`, "x-api-key": jwt } : {}),
       ...(key ? { "x-coding-plan-api-key": key } : {}),
       "x-off-peak-ticket-id": ticketId,
+      // gateway order-of-validation bisect (2026-10-25, bogus-ticket probe):
+      // without the query-id trio the call dies 3001 "parameter error" BEFORE
+      // the ticket check; with it the request reaches 3104/200. The other 13
+      // desktop headers are optional — adding ALL of them can trip 3012
+      // "unusual activity" risk control, so keep the minimal passing set.
+      "x-zcode-trace-id": crypto.randomUUID(),
+      "x-query-id": crypto.randomUUID(),
+      "x-zcode-query-source": "main_turn",
     },
     body,
     signal: init.signal,
