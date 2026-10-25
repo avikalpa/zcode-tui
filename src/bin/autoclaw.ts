@@ -201,7 +201,7 @@ async function readStdin(): Promise<string> {
 }
 
 /** Write the isolated pi agent dir (PI_CODING_AGENT_DIR) pointing at the local proxy. */
-function writePiProviderConfig(port: number, models: { id: string; contextWindow: number; maxTokens: number; reasoning: boolean }[], defaultModel: string): string {
+function writePiProviderConfig(port: number, models: { id: string; contextWindow: number; maxTokens: number; reasoning: boolean }[], defaultModel: string, thinkingLevel: string): string {
   const dir = PI_AGENT_DIR();
   mkdirSync(dir, { recursive: true });
   const cfg = {
@@ -218,6 +218,10 @@ function writePiProviderConfig(port: number, models: { id: string; contextWindow
         models: models.map((m) => ({
           id: m.id,
           name: m.id,
+          // scoped-entry thinking level: pi falls back to it when the CLI
+          // flag is absent — the silent-low-reasoning fault the owner called
+          // out (model runs cheap instead of the pinned level)
+          ...(m.id === defaultModel ? { thinkingLevel } : {}),
           reasoning: m.reasoning,
           contextWindow: m.contextWindow || 262_144,
           maxTokens: m.maxTokens || 32_768,
@@ -230,7 +234,7 @@ function writePiProviderConfig(port: number, models: { id: string; contextWindow
   return dir;
 }
 
-async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, model: string, out: string): Promise<number> {
+async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, model: string, out: string, thinkingLevel = "max"): Promise<number> {
   const proxy = await startManagedProxy(plan, { port: 0 });
   try {
     let models: { id: string; contextWindow: number; maxTokens: number; reasoning: boolean }[] = [];
@@ -253,7 +257,7 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
       models = FALLBACK_MODELS.map((id) => ({ id, contextWindow: 262_144, maxTokens: 32_768, reasoning: true })); // owner law: max thinking
       console.error(`autoclaw run: catalog unavailable (live fetch failed, no cache) — seeding fallback ids, default ${defaultModel}`);
     }
-    const agentDir = writePiProviderConfig(proxy.port, models, defaultModel);
+    const agentDir = writePiProviderConfig(proxy.port, models, defaultModel, thinkingLevel);
 
     const cli = autoclawPiCli();
     if (!cli) { console.error("autoclaw run: pi harness not found — `zcode-tui autoclaw setup --vendor` (public package) or install the official app"); return 1; }
@@ -261,6 +265,9 @@ async function runManaged(plan: AutoclawPlan, brief: string, workspace: string, 
       cli, "--print", "--mode", "json",
       "--provider", "autoclaw",
       "--model", defaultModel,
+      // pin the level: without it a reasoning model can settle at the client
+      // default (low) — the silent-cheap-run fault the owner flagged
+      "--thinking", thinkingLevel,
       "--append-system-prompt", UNATTENDED_PREAMBLE,
       brief,
     ];
@@ -322,9 +329,10 @@ async function runBrief(v: Record<string, string | boolean | undefined>): Promis
   const workspace = v.workspace ? String(v.workspace) : process.cwd();
   const model = v.model ? String(v.model) : "";
   const out = v.out ? String(v.out) : "/tmp/zt-autoclaw-run.json";
+  const thinking = v.thinking ? String(v.thinking) : "max"; // owner law: never a silent cheap run
 
   const plan = readPlan();
-  if (plan) return runManaged(plan, brief, workspace, model, out);
+  if (plan) return runManaged(plan, brief, workspace, model, out, thinking);
 
   // Legacy path: desktop-host pi CLI + provisioned plan apiKey (pre-managed).
   const cli = autoclawPiCli();
@@ -375,6 +383,7 @@ export async function main(): Promise<void> {
       workspace: { type: "string" },
       model: { type: "string" },
       out: { type: "string" },
+      thinking: { type: "string" },
       json: { type: "boolean", default: false },
       "app-dir": { type: "string" },
       "config-dir": { type: "string" },
@@ -399,7 +408,7 @@ export async function main(): Promise<void> {
     console.error("  proxy [--port N] [--host H]                       serve the local signing gateway");
     console.error("  credential <status|refresh>                        plan credential state / rotation");
     console.error("  doctor [--json]                                    plan + harness state");
-    console.error("  run --content-file F [--workspace W] [--model M] [--out O]");
+    console.error("  run --content-file F [--workspace W] [--model M] [--out O] [--thinking LEVEL]");
     console.error("  sync --hosts H[,H] [--repo R]                      ship the plan file (0600) to fleet hosts; no desktop needed there");
     process.exit(2);
   }
