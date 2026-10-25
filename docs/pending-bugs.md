@@ -52,24 +52,13 @@ dimension a direct probe cannot see (likely renderer-session-scoped header
 or cookie, or a body-affecting transform). Root cause requires one captured
 real desktop chat request (owner approved). Interim: parity dreamer runs on
 zai; autoclaw proof task parked (ztq-d46252ed).
-## BUG-005 — AutoClaw managed chat rejects all held credentials (401 Invalid token) — OPEN, owner-gated
-Discovered 2026-10-24 while chasing the owner's report: autoclaw credits
-unused for 24h+ (dashboard). Chain: (1) route rotation bug — per-ns count
-pinned every dream on zai (fixed, yggterm 286ea909+); (2) gateway dropped
-legacy X-Authorization in a server deploy between 10/23-24 — signHeaders now
-sends Authorization; **catalog (model-config) 200 with the desktop's live
-token**; (3) the desktop rotated its token at 11:29 (owner re-auth) revoking
-the mined plan copy — fleet sync left dev stale via the (local-newer) mtime
-race (fix: validity-checked sync, not mtime); (4) STILL OPEN: chat
-(POST /autoclaw-proxy/proxy/autoclaw/v1/messages) returns 401 Invalid token
-for EVERY auth shape we hold — account access token via Authorization /
-x-api-key / both, all model-id families, desktop's own decrypted live token
-(iat 16:04, valid to 10/25) — while the desktop's own chat works. The chat
-path carries an auth dimension not in the mined wire contract (renderer
-session cookie, body signature, or a second token minted at chat time).
-NEEDS: capture one real desktop chat request (owner-approved proxy
-instrumentation) or the missing contract field from the 2.0.3 bundle.
-Proof-task ztq-d46252ed parked; re-enqueue when (4) lands.
+## BUG-005 — AutoClaw managed chat rejects all held credentials (401 Invalid token) — CLOSED 2026-10-25
+
+Closed by the owning agent session: the AutoClaw plan is stable on zcode-tui
+and usable from any fleet machine (owner-confirmed 2026-10-25). The swarm
+plane  was re-enabled through the swarm-config ledger
+(revision 4, d08bfa669d48, owner-endorsed proposal from jojo).
+
 ## BUG-006 — TUI focus test fails on main: dialog-close leaves toast overlay, composer not re-focused — OPEN
 `bun test src/tui/app.test.tsx` — "closing a text dialog releases editor focus
 back to the App composer" fails on pristine origin/main (2026-10-24, verified
