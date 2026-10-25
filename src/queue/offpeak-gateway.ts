@@ -163,26 +163,48 @@ export async function registerOffPeakTask(input: {
   const db = new Database(TASKS_INDEX());
   try {
     // fleet hosts run different desktop vintages: dev's 3.11 tasks-index
-    // predates model_selection (measured 2026-10-25) — add missing columns
-    // additively so the direct registration is version-independent
-    const cols = (db.query(`PRAGMA table_info(off_peak_tasks)`).all() as Array<{ name: string }>).map((c) => c.name);
-    for (const missing of ["model_selection"].filter((c) => !cols.includes(c))) {
-      db.query(`ALTER TABLE off_peak_tasks ADD COLUMN ${missing} TEXT`).run();
-    }
+    // lacks several newer columns (model_selection, project_id, …; measured
+    // 2026-10-25) — insert only the columns the local table actually has so
+    // the direct registration is version-independent
+    const cols = new Set(
+      (db.query(`PRAGMA table_info(off_peak_tasks)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
     // model_selection: the off-peak idle-plan provider (desktop convention)
     const modelSelection = JSON.stringify({
       providerId: "account:zai-offpeak-idle-plan",
       modelId: input.model || "GLM-5.3-Flash",
     });
-    db.query(`INSERT INTO off_peak_tasks (off_peak_task_id, server_ticket_id, title, conversation_id, session_id,
-        prompt, permission_mode, model, thought_level, model_selection,
-        workspace_key, workspace_path, workspace_identity, project_id, host_id, additional_directories,
-        status, queued_at, registered_at, schedulable, queue_position, claim_running, attempt_count, created_at, updated_at)
-      VALUES (?, NULL, ?, NULL, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, 'local', '[]',
-        'queued', ?, ?, 1, NULL, 0, 0, ?, ?)`)
-      .run(offPeakTaskId, input.title.slice(0, 200), input.boundSessionId ?? null, input.prompt,
-        input.permissionMode ?? "yolo", modelSelection,
-        input.workspacePath, input.workspacePath, now, now, now, now);
+    const desired: Record<string, unknown> = {
+      off_peak_task_id: offPeakTaskId,
+      server_ticket_id: null,
+      title: input.title.slice(0, 200),
+      conversation_id: null,
+      session_id: input.boundSessionId ?? null,
+      prompt: input.prompt,
+      permission_mode: input.permissionMode ?? "yolo",
+      model: null,
+      thought_level: null,
+      model_selection: modelSelection,
+      workspace_key: input.workspacePath,
+      workspace_path: input.workspacePath,
+      workspace_identity: null,
+      project_id: null,
+      host_id: "local",
+      additional_directories: "[]",
+      status: "queued",
+      queued_at: now,
+      registered_at: now,
+      schedulable: 1,
+      queue_position: null,
+      claim_running: 0,
+      attempt_count: 0,
+      created_at: now,
+      updated_at: now,
+    };
+    const present = Object.keys(desired).filter((c) => cols.has(c));
+    db.query(
+      `INSERT INTO off_peak_tasks (${present.join(", ")}) VALUES (${present.map(() => "?").join(", ")})`,
+    ).run(...present.map((c) => desired[c]));
   } catch (e) {
     db.close();
     return { ok: false, error: `local row insert failed: ${e instanceof Error ? e.message : String(e)}` };
