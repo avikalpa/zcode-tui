@@ -756,3 +756,24 @@ upstream when it releases) — continue until this file's Remaining is empty
   before the intentional timeout. Deviation recorded: entries submitted
   from other surfaces (the CLI) recall as flat text — their expansion into
   folds cannot be recovered from the shared store.
+
+- Unit 6 (sitting 6): submit failure rollback follows the reference
+  fail/restoreEntry contract (`prompt/index.tsx` submitInner): a failed
+  attachment upload or a rejected session/send rolls the optimistic
+  transcript rows back (the user echo and the placeholder assistant row are
+  held by identity, so the rollback removes exactly those two rows even if
+  unrelated rows land in between), reports the error as an error-variant
+  toast (the reference's toast.show, not a sticky status line), and
+  submitPrompt restores the composer entry — draft text, paste folds and
+  attachment tray refs — with the cursor back at the end, unless the user
+  already typed something new (the reference's `input.plainText !== ""`
+  guard reads our draftRef). The typing re-arm respects dialog/diff
+  ownership: a surface that opened over the composer mid-upload keeps its
+  input grab. The history entry stays on failure, matching the reference
+  (history.append precedes the send gates there too). Three App interaction
+  tests in submit-rollback.test.tsx pin upload-failure rollback + restore,
+  send-failure rollback + restore, and the typed-during-failure guard —
+  all three failed against the parent wiring (red2 log; the first red log
+  caught a stub-ordering artifact and was superseded) and pass after. Full
+  suite 287/287 across 34 files, typecheck exit 0, boot renders home
+  composer + `⊙ 5 MCP` before the intentional timeout.
