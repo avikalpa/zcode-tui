@@ -27,7 +27,8 @@ import { handleOffPeakAsk, ticketAvailability,
   pollTickets,
   offPeakMessages,
   settleTicket,
-  setLocalTaskState} from "../queue/offpeak-gateway";
+  setLocalTaskState,
+  registerOffPeakTask} from "../queue/offpeak-gateway";
 import { autoclawPiCli, UNATTENDED_PREAMBLE, piEventStreamHasError } from "./autoclaw";
 import { syncAuthHeadless } from "../auth/sync";
 
@@ -86,6 +87,25 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
   if (!PERMITTED.includes(permissionMode)) {
     console.error(`idle create: --permission-mode must be one of ${PERMITTED.join(", ")}`);
     process.exit(2);
+  }
+
+  // --direct: register the ticket ourselves (local row + gateway POST) with
+  // no CLI session — version-independent (the OffPeakCreate schema moved
+  // between zcode 3.11 and 3.16; dev FATALed on it 2026-10-25) and ~0 tokens
+  // instead of the ~600k the OffPeakCreate driver spends.
+  if (v.direct) {
+    const reg = await registerOffPeakTask({
+      title, prompt, permissionMode,
+      ...(modelArg ? { model: modelArg } : {}),
+      workspacePath: workspace,
+    });
+    const summary = reg.ok
+      ? { ok: true, offPeakTaskId: reg.task.offPeakTaskId, serverTicketId: null, title, workspace, queuePosition: reg.task.queuePosition ?? null, mode: "direct" }
+      : { ok: false, error: reg.error, refusal: reg.refusal, cooldownMs: reg.cooldownMs, mode: "direct" };
+    if (v.json) console.log("ZT-IDLE-CREATE " + JSON.stringify(summary));
+    console.error(reg.ok ? `idle create: ${reg.message} (direct)` : `idle create FAILED: ${reg.error}${reg.refusal ? ` — ${reg.refusal}` : ""}`);
+    if (v.out) writeFileSync(String(v.out), JSON.stringify(summary, null, 1) + "\n");
+    process.exit(reg.ok ? 0 : 1);
   }
 
   let sawToolResult = "";
@@ -469,6 +489,7 @@ export async function main(): Promise<void> {
       title: { type: "string" },
       model: { type: "string" },
       "permission-mode": { type: "string" },
+      direct: { type: "boolean", default: false },
       task: { type: "string" },
       ticket: { type: "string" },
       "poll-s": { type: "string" },
