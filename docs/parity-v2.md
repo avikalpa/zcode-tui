@@ -823,3 +823,54 @@ upstream when it releases) — continue until this file's Remaining is empty
   live smoke renders home composer + `⊙ 5 MCP`, no-TTY boot exit 124 at
   the intentional timeout. Reference frames kept outside the repo under
   /tmp/zq-ux-parity/ref-dialog-*.txt.
+
+- Unit 9 (sitting 8): the composer autocomplete popup follows the reference
+  Autocomplete treatment (`component/prompt/autocomplete.tsx` 873-951 +
+  `ui/select-controller.ts` + the `prompt.autocomplete.*` keybind law).
+  Geometry: the popup is now the reference overlay — absolutely positioned,
+  bottom-anchored to the top edge of the whole [attachment strip + composer]
+  block (the reference's prompt-body anchor; yoga `bottom: "100%"` gives the
+  reference's `anchor.y - height` with no height arithmetic), SplitBorder
+  `┃` walls in `border.default`, `background.default` inside, zIndex 100 —
+  flow rows no longer shift while it is open (the old in-flow block pushed
+  the composer down / squeezed the transcript). Row grammar: pad 1 both
+  sides; name `text.default`, selected row on `background.action.primary.
+  focused` + `text.action.primary.focused` (the C.accent/C.accentText
+  mapping sitting 7 pinned for the pickers); descriptions join with a
+  LEADING SPACE, subdued, `wrapMode="none"`, no invented cap. Command names
+  align to (longest "/display" + 2) across the FULL command+alias set
+  (`SLASH_PAD`, the reference pads in its commands memo), replacing the
+  fixed 12-column pad. Empty states per trigger — "No matching commands" /
+  "No matching files, agents, or references" — replace the invented generic
+  "No matching items" line and render while the trigger is active; per the
+  reference keybind layer the popup owns return/tab/arrows at zero matches,
+  so return no longer submits a draft whose unmatched slash token is
+  showing and tab no longer indexes into empty match lists. Trigger law
+  ported from `prompt/display.ts` (`triggerToken`): prefix at draft start or
+  after whitespace, whitespace-free query, a slash query may not carry a
+  second slash — mid-path text ("bin/ls") and addresses ("a@b.c") no longer
+  open the popup, fixing a live incoherence where the render side popped
+  mid-text ("abc/ses") while the keyboard handler ignored it. Navigation
+  wraps (moveSelection "wrap") and the window reveals at the edges
+  (revealSelectionOffset, App-held sugWin state — wrapper state does not
+  survive the reconciler remount), replacing the recentering window; @file
+  rows truncate with the reference `truncateMiddle` at width − 4. The
+  dismissal law was audited and left as-is: the printable/backspace resets
+  already implement the reference dismissedValue reopen-on-text-change.
+  Deviations (ledger): no space-above-anchor clamp (the reference caps the
+  popup at the anchor's absolute y — joins the short-terminal leftover);
+  our startsWith matcher retained (the reference's fuzzysort keys + prefix
+  doubling + frecency ranking is a separate leftover); no mouse
+  select/hover on rows yet (keyboard-driven, like the sitting-5
+  exploration deviation). Four App interaction tests in
+  autocomplete.test.tsx (empty-message popup + return swallow + escape
+  release, mid-text no-popup + raw submit, edge reveal, wrap-to-last) and
+  three component frame tests in autocomplete-popup.test.tsx (walls + pad +
+  full-set alignment + leading-space description, both empty messages at
+  the row pad) — all four interaction tests fail against the parent
+  (red log /tmp/zq-ux-parity/sitting-8-red.log; the module also fails to
+  load on the missing SlashPopup export) and pass after. Full suite
+  298/298 across 37 files, typecheck exit 0, live smoke exit 0 (home
+  composer + `⊙ 5 MCP`), and a scratch frame probe of the live home view
+  shows the popup in situ (10 windowed rows, aligned columns, composer
+  block unmoved). Board: infra/meta ACK-09d199007d (plan).
