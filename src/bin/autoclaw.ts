@@ -390,15 +390,64 @@ export async function main(): Promise<void> {
   else if (sub === "setup") process.exit(await cmdSetup(v));
   else if (sub === "proxy") process.exit(await cmdProxy(v));
   else if (sub === "credential") process.exit(await cmdCredential(String(positionals[1] ?? "status")));
+  else if (sub === "sync") process.exit(await cmdSync(v));
   else {
-    console.error("usage: zcode-tui autoclaw <setup|proxy|credential|doctor|run> [...]");
+    console.error("usage: zcode-tui autoclaw <setup|proxy|credential|doctor|run|sync> [...]");
     console.error("  setup [--app-dir D] [--config-dir D] [--vendor]  mine the plan from your own AutoClaw install");
     console.error("  proxy [--port N] [--host H]                       serve the local signing gateway");
     console.error("  credential <status|refresh>                        plan credential state / rotation");
     console.error("  doctor [--json]                                    plan + harness state");
     console.error("  run --content-file F [--workspace W] [--model M] [--out O]");
+    console.error("  sync --hosts H[,H] [--repo R]                      ship the plan file (0600) to fleet hosts; no desktop needed there");
     process.exit(2);
   }
+}
+
+/**
+ * Ship the plan file to fleet hosts — the fleet-independence piece: a host
+ * needs only ~/.config/zcode-tui/autoclaw-plan.json (0600) + a repo checkout
+ * + bun to dispatch on the managed plane; the AutoClaw desktop is not
+ * required there. The refresh pair is host-agnostic (measured: agent-refresh
+ * answers from any machine while the pair is live), so newest-wins rotation
+ * on the desktop host can invalidate copies — a stale host re-syncs or the
+ * proxy's own 401->refresh-retry heals it until the lineage dies.
+ */
+async function cmdSync(v: Record<string, string | boolean | undefined>): Promise<number> {
+  const hosts = String(v.hosts ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+  if (hosts.length === 0) { console.error("sync: --hosts H[,H] required"); return 2; }
+  if (!existsSync(PLAN_FILE)) { console.error(`sync: no plan file at ${PLAN_FILE} (run setup here first)`); return 1; }
+  const repo = String(v.repo ?? "~/gh/zcode-tui");
+  const run = (cmd: string[], input?: string) =>
+    new Promise<number>((resolve) => {
+      const c = Bun.spawn(cmd, { stdin: input !== undefined ? "pipe" : "ignore", stdout: "pipe", stderr: "pipe" });
+      if (input !== undefined) c.stdin.write(input);
+      c.stdin.end();
+      c.exited.then((rc) => resolve(rc));
+    });
+  let failed = 0;
+  for (const host of hosts) {
+    process.stdout.write(`sync ${host}: `);
+    if (await run(["ssh", host, "mkdir -p ~/.config/zcode-tui && chmod 700 ~/.config/zcode-tui"]) !== 0) {
+      console.log("FAILED (ssh/mkdir)"); failed++; continue;
+    }
+    if (await run(["scp", "-q", "-p", PLAN_FILE, `${host}:.config/zcode-tui/autoclaw-plan.json`]) !== 0) {
+      console.log("FAILED (scp)"); failed++; continue;
+    }
+    await run(["ssh", host, "chmod 600 ~/.config/zcode-tui/autoclaw-plan.json"]);
+    // verify the copy can actually read the plane (catalog round trip)
+    const probe = Bun.spawn(["ssh", host,
+      `cd ${repo} 2>/dev/null && ~/.bun/bin/bun run src/bin/autoclaw.ts doctor --json 2>/dev/null || echo NO_REPO`],
+      { stdout: "pipe", stderr: "ignore" });
+    const out = await new Response(probe.stdout).text();
+    try {
+      const doc = JSON.parse(out) as { plan?: { found?: boolean } };
+      console.log(doc.plan?.found ? "OK (doctor sees the plan)" : "shipped, doctor could not read it");
+      if (!doc.plan?.found) failed++;
+    } catch {
+      console.log(out.includes("NO_REPO") ? "shipped (no repo checkout — doctor skipped)" : "shipped (verify skipped)");
+    }
+  }
+  return failed === 0 ? 0 : 1;
 }
 
 if (import.meta.main) {
