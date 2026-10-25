@@ -1,11 +1,14 @@
 // Local signing proxy for the user's AutoClaw managed model plane.
 //
-// Why a proxy: pi (and any Anthropic-protocol client) can point at an arbitrary
-// baseUrl, but the plan's gateway needs per-request signed headers (fresh
-// timestamp + md5 sign). Static config cannot do that, so zcode-tui hosts the
-// sign locally: client -> 127.0.0.1:<port>/v1/messages -> gateway. This is the
-// same middleware the official app runs in its main process; zcode-tui ships
-// none of its constants (see plan.ts — everything rides the user's plan file).
+// Why a proxy: the plan's gateway needs per-request signed headers (fresh
+// timestamp + md5 sign) that static client config cannot produce, so
+// zcode-tui hosts the sign locally: client -> 127.0.0.1:<port> -> gateway.
+// The managed plane speaks the OPENAI-COMPLETIONS protocol at
+// /v1/chat/completions (the desktop's own model_connections table says
+// protocol "openai-completions"; measured live 2026-10-25 — the
+// anthropic /v1/messages path 401s for every token shape). This is the
+// same middleware the official app runs in its main process; zcode-tui
+// ships none of its constants (see plan.ts — everything rides the plan file).
 import { randomUUID } from "node:crypto";
 import { bearer, type AutoclawPlan } from "./plan";
 import { refreshCredential, signHeaders } from "./gateway";
@@ -19,7 +22,7 @@ export interface ProxyOptions {
 
 export interface ManagedProxy { port: number; hostname: string; stop: () => void; healthy: () => boolean }
 
-const ALLOWED_SUFFIXES = ["/v1/messages", "/v1/messages/count_tokens"];
+const ALLOWED_SUFFIXES = ["/v1/chat/completions"];
 
 // the desktop's own credits read paths (gateway-absolute, not behind the
 // autoclaw-proxy prefix) — mined 2026-10-24 from the AutoClaw 2.0.3 bundle
@@ -39,6 +42,9 @@ let inflightRefresh: Promise<boolean> | null = null;
 export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): Promise<ManagedProxy> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const hostname = opts.hostname ?? "127.0.0.1";
+  // X-Session-Id per proxy process — the desktop scopes it per conversation;
+  // one worker run through this proxy is one conversation.
+  const sessionId = randomUUID();
   let lastRefreshAt = 0;
   let requestsServed = 0;
   let refreshFailures = 0;
@@ -87,7 +93,7 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
       if (creditsPath) {
         const sendCredits = () => fetchImpl(plan.endpoint.base + creditsPath, {
           method: "GET",
-          headers: { ...signHeaders(plan) },
+          headers: { ...signHeaders(plan, { auth: "authorization" }) }, // wallet plane reads Authorization
           redirect: "error",
         }).then((up) => up.text());
         let text = await sendCredits();
@@ -114,10 +120,10 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
 
       const send = (tokenChanged = false): Promise<Response> => {
         const headers: Record<string, string> = {
-          ...signHeaders(plan, { model, requestId: randomUUID() }),
+          ...signHeaders(plan, { model, requestId: randomUUID(), sessionId }),
         };
         if (body) headers["Content-Type"] = req.headers.get("content-type") ?? "application/json";
-        for (const h of ["accept", "anthropic-version", "anthropic-beta", "user-agent"]) {
+        for (const h of ["accept", "user-agent"]) {
           const v = req.headers.get(h);
           if (v) headers[h] = v;
         }

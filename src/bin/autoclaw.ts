@@ -210,7 +210,9 @@ function writePiProviderConfig(port: number, models: { id: string; contextWindow
         name: "AutoClaw (managed by zcode-tui)",
         baseUrl: `http://127.0.0.1:${port}`,
         apiKey: "managed-by-zcode-tui",
-        api: "anthropic-messages",
+        // the managed plane speaks openai-completions (desktop model_connections
+        // protocol field, live-measured 2026-10-25); anthropic-messages 401s there
+        api: "openai-completions",
         models: models.map((m) => ({
           id: m.id,
           name: m.id,
