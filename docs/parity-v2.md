@@ -734,3 +734,25 @@ upstream when it releases) — continue until this file's Remaining is empty
   unedited landing path — all failed before and pass after; full suite
   273/273 across 31 files, typecheck exit 0, no-TTY boot renders home
   composer + `⊙ 5 MCP` before the intentional timeout.
+
+- Unit 5: attachment-rich prompt history follows the reference
+  prompt/history.tsx PromptInfo store — a submission with parts records its
+  folded composer form (paste labels in the text, full sources riding in
+  the parts; attachment labels backed by tray parts carrying uri/mime/name,
+  bytes never persisted outside the data: uri), so Up/Down recall restores
+  the folds and the tray (`restoreExtmarksFromPrompt`'s contract; the
+  store swap is wholesale, and index 0 is the fresh empty composer).
+  Adjacent-only dedupe is full-entry JSON equality, not text alone. Rich
+  entries persist to `prompt-history.jsonl` under the TUI state dir
+  (50-entry bound, self-healing rewrite, the reference's exact parse law:
+  text:string + pasted:array) and lead the boot seed over the shared
+  store's plain texts (mergeSeed; a plain text a rich entry already covers
+  by exact text does not list twice). Three App interaction tests — folded
+  recall + full-expansion resubmit round-trip, attachment recall
+  re-uploading the same bytes through the stubbed begin/chunk/commit
+  family, and restart persistence through the sidecar — all three failed
+  against the parent wiring and pass after; eight module tests. Full suite
+  284/284 across 33 files, typecheck exit 0, no-TTY boot renders home
+  before the intentional timeout. Deviation recorded: entries submitted
+  from other surfaces (the CLI) recall as flat text — their expansion into
+  folds cannot be recovered from the shared store.
