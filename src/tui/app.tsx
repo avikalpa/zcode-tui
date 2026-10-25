@@ -754,20 +754,23 @@ export const MessageView = memo(function MessageView({
         done={!streaming || Boolean(m.thinkingParts?.at(-1)?.completedAt !== undefined)}
         C={C} syntaxStyle={mdStyle} spinnerChar={spinnerChar}
       />
-      {!streaming ? (
-        m.text.trim() ? (
-          <markdown
-            content={breakLongTokens(m.text, Math.max(24, width - 8))}
-            syntaxStyle={mdStyle}
-            streaming={true}
-            internalBlockMode="top-level"
-            tableOptions={{ style: "grid" }}
-            conceal={true}
-          />
-        ) : null
-      ) : (
-        <text content={wrapText(m.text || (m.thinking ? "" : "…"), Math.max(20, width - 6)).join("\n")} fg={C.fg} />
-      )}
+      {/* The reference streams THROUGH the markdown component (TextPart
+          streaming={time.completed === undefined}) — partial headings, lists
+          and code fences render styled mid-flight, and the completion swap
+          causes no reflow. The inherited plain-text streaming row predates
+          the parity campaign. */}
+      {m.text.trim() ? (
+        <markdown
+          content={breakLongTokens(m.text, Math.max(24, width - 8))}
+          syntaxStyle={mdStyle}
+          streaming={true}
+          internalBlockMode="top-level"
+          tableOptions={{ style: "grid" }}
+          conceal={true}
+        />
+      ) : streaming && !m.thinking ? (
+        <text content="…" fg={C.fg} />
+      ) : null}
       {footer ? (
         <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
           <text content={footer.head} fg={C.user} />
