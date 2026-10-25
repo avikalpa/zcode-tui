@@ -917,3 +917,16 @@ upstream when it releases) — continue until this file's Remaining is empty
   exported unit; log /tmp/zq-ux-parity/sitting-8-unit3-red.log), green
   after. Full suite 306/306 across 39 files, typecheck exit 0, live
   smoke exit 0.
+
+- Unit 12 (sitting 8): edit blocks take the reference Edit display laws
+  (routes/session/index.tsx Edit): SPLIT diff view above 120 columns
+  (editDiffView ports the auto default; the diffs.view config override
+  stays a viewer-side adaptation), filetype(path) passed to the PatchDiff
+  for syntax-tinted diff lines, and the diff sits in the reference's
+  paddingLeft 1 inset inside the block. Ours hardcoded unified at every
+  width with no filetype and no inset. Two law tests + a frame test
+  distinguishing a side-by-side one-line replacement at 130 columns from
+  the stacked unified rows at 80 (tool-rows.test.tsx); red against the
+  parent at module level (missing editDiffView export; log
+  /tmp/zq-ux-parity/sitting-8-unit4-red.log), green after. Full suite
+  308/308 across 39 files, typecheck exit 0, live smoke exit 0.
