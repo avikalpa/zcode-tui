@@ -208,7 +208,9 @@ function writePiProviderConfig(port: number, models: { id: string; contextWindow
     providers: {
       autoclaw: {
         name: "AutoClaw (managed by zcode-tui)",
-        baseUrl: `http://127.0.0.1:${port}`,
+        // pi's openai-completions client appends /chat/completions to the
+        // baseUrl, so /v1 lives here — landing on the proxy's allowlisted path
+        baseUrl: `http://127.0.0.1:${port}/v1`,
         apiKey: "managed-by-zcode-tui",
         // the managed plane speaks openai-completions (desktop model_connections
         // protocol field, live-measured 2026-10-25); anthropic-messages 401s there
