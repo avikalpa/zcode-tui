@@ -246,6 +246,10 @@ describe("signing proxy", () => {
     });
     writePlan(plan, planFile);
 
+    // isolate from the real desktop: the credential follower would adopt the
+    // live AutoClaw pair on this host and skip the refresh leg under test.
+    // The follower reads the flag at request time — hold it for the whole test.
+    process.env.ZTQ_AUTOCLAW_NO_FOLLOW = "1";
     const proxy = await startManagedProxy(plan, { planPath: planFile, fetchImpl: fetch });
     try {
       const client = Bun.serve({
@@ -281,6 +285,7 @@ describe("signing proxy", () => {
       const stored = JSON.parse(readFileSync(planFile, "utf8"));
       expect(stored.auth.accessToken).toBe("Bearer tok-2");
     } finally {
+      delete process.env.ZTQ_AUTOCLAW_NO_FOLLOW;
       proxy.stop();
       upstream.stop(true);
     }
