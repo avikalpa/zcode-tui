@@ -777,3 +777,24 @@ upstream when it releases) — continue until this file's Remaining is empty
   caught a stub-ordering artifact and was superseded) and pass after. Full
   suite 287/287 across 34 files, typecheck exit 0, boot renders home
   composer + `⊙ 5 MCP` before the intentional timeout.
+
+- Unit 7 (sitting 6): queued prompts follow the reference queue delivery —
+  submitInner expands the tracked pastes BEFORE the delivery split, so the
+  queue entry now carries the folded composer form (queue-time draft plus
+  its alive paste/file parts) and the pump expands before send and records
+  the folded rich history entry exactly like a direct submit. Before, a
+  prompt queued mid-turn sent the literal fold label to the host (the
+  pasted content never reached the session) and recorded a flat plain
+  entry. Second defect the drafted test exposed: the enqueue path cleared
+  the draft without submitPrompt's cursor reset, so the next Up read a
+  stale offset and moved the caret instead of reaching prompt history.
+  send() now consumes exactly the parts it carries (a pump send no longer
+  wipes attachments attached to the composer after queueing; a direct
+  submit's set is unchanged — all alive parts). The queued-row preview and
+  the /queue dialog read the entry's text. One App interaction test in
+  queue-expansion.test.tsx pins expansion-at-send + folded recall — red
+  against the parent (the host received the literal `[Pasted ~N lines]`
+  label, red2 log; the first red log caught the test's own expected-order
+  mistake and was superseded) and green after. Full suite 288/288 across
+  35 files, typecheck exit 0, boot renders home composer + `⊙ 5 MCP`
+  before the intentional timeout.
