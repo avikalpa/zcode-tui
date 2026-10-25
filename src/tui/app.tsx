@@ -1282,9 +1282,13 @@ export function App({
     setSugIdx(n);
   };
   // Prompts typed while a turn runs queue visibly instead of being dropped or
-  // mangled mid-burst; the pump effect sends them when the turn ends.
-  const [queue, setQueue] = useState<string[]>([]);
-  const queueRef = useRef<string[]>([]);
+  // mangled mid-burst; the pump effect sends them when the turn ends. An
+  // entry carries the folded composer form (the queue-time draft plus its
+  // alive paste/file parts) so the pump can expand and record rich history
+  // exactly like a direct submit.
+  type QueuedPrompt = { text: string; pastes: PastePart[]; files: PromptFilePart[] };
+  const [queue, setQueue] = useState<QueuedPrompt[]>([]);
+  const queueRef = useRef<QueuedPrompt[]>([]);
   // promptStash is a module singleton (port of the v2.0.7 PromptStash
   // provider); dialogs read it during render, so mutations bump this tick.
   const [, bumpStash] = useState(0);
@@ -1712,13 +1716,25 @@ export function App({
 
   // Queue pump: when the live turn ends, send the oldest queued prompt. A
   // prompt typed during a turn is therefore visible (queued row above the
-  // composer) and never races the streaming tail.
+  // composer) and never races the streaming tail. Reference submitInner
+  // queue delivery expands the tracked pastes BEFORE the delivery split, so
+  // the pump expands here and records the folded rich entry exactly like a
+  // direct submit.
   useEffect(() => {
     if (running || queue.length === 0 || !activeId) return;
     const [next, ...rest] = queue;
     queueRef.current = rest;
     setQueue(rest);
-    void send(next, activeId);
+    const content = expandTracked(next.text, next.pastes).trim();
+    const parts = next.files.filter((f) => content.includes(f.label));
+    const rich: RichPrompt | undefined = parts.length > 0 || next.pastes.length > 0
+      ? {
+          text: next.text,
+          files: parts.map((f) => ({ uri: f.uri, mime: f.mime, name: f.name, label: f.label })),
+          pasted: next.pastes.map((p) => ({ text: p.text, source: { start: p.start, end: p.end, text: p.label } })),
+        }
+      : undefined;
+    void send(content, activeId, parts, rich);
   }, [running, queue, activeId]);
 
   // The reference editor handoff: suspend the renderer, hand the text to
@@ -1955,8 +1971,11 @@ export function App({
     const echoText = parts.length > 0
       ? `${clean}${clean ? "\n" : ""}${parts.map((f) => (f.name ? `${f.label} ${f.name}` : f.label)).join("\n")}`
       : content;
-    promptFilesRef.current = [];
-    setPromptFiles([]);
+    // Consume exactly the parts this send carries: a direct submit's parts
+    // are all the alive ones, while a queued pump send captured its own —
+    // attachments attached to the composer after queueing must survive.
+    promptFilesRef.current = promptFilesRef.current.filter((f) => !parts.includes(f));
+    setPromptFiles([...promptFilesRef.current]);
     setRunning(true);
     setView("session");
     resetToTail();
@@ -3391,12 +3410,23 @@ export function App({
         const content = draftRef.current.trim();
         if (!content) return;
         if (running) {
-          // Never drop or mangle a prompt typed mid-turn: queue it visibly.
-          const next = [...queueRef.current, content];
+          // Never drop or mangle a prompt typed mid-turn: queue it visibly,
+          // with the paste folds and attachment parts it carried so the pump
+          // can expand and record it like a direct submit.
+          const raw = draftRef.current.trim();
+          const next = [...queueRef.current, {
+            text: raw,
+            pastes: pastePartsRef.current.filter((p) => raw.slice(p.start, p.end) === p.label),
+            files: promptFilesRef.current.filter((f) => raw.includes(f.label)),
+          }];
           queueRef.current = next;
           setQueue(next);
           draftRef.current = "";
           setDraft("");
+          // submitPrompt's clear discipline: the composer resets to the
+          // cursor-at-end state, or the next Up reads a stale offset and
+          // moves the caret instead of reaching prompt history.
+          setCursorBoth(null);
           flashStatus("queued · sends when the turn finishes");
           return;
         }
@@ -3859,7 +3889,7 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
       <SelectDialog
         title="Queued prompts"
         size="large"
-        options={queue.map((q, i) => ({ id: String(i), label: q, value: i }))}
+        options={queue.map((q, i) => ({ id: String(i), label: q.text, value: i }))}
         theme={C}
         footerHints={[
           { key: "enter", label: "remove" },
@@ -4521,7 +4551,7 @@ footerHints={[
       ) : null}
       {queue.length > 0 ? (
         <box style={{ height: 1, flexDirection: "row", paddingLeft: 3, paddingRight: 3, flexShrink: 0 }}>
-          <text content={`⧗ ${queue.length} queued · next: ${queue[0].slice(0, 48)}`} fg={C.warning} />
+          <text content={`⧗ ${queue.length} queued · next: ${queue[0].text.slice(0, 48)}`} fg={C.warning} />
         </box>
       ) : null}
       <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
