@@ -215,13 +215,13 @@ function writePiProviderConfig(port: number, models: { id: string; contextWindow
         // the managed plane speaks openai-completions (desktop model_connections
         // protocol field, live-measured 2026-10-25); anthropic-messages 401s there
         api: "openai-completions",
+        // the thinking level rides the --thinking CLI flag (top precedence in
+        // pi's resolution, measured against pi 0.83 args.js); models.json
+        // entries carry no level key — pi reads levels only from the flag or
+        // --models patterns
         models: models.map((m) => ({
           id: m.id,
           name: m.id,
-          // scoped-entry thinking level: pi falls back to it when the CLI
-          // flag is absent — the silent-low-reasoning fault the owner called
-          // out (model runs cheap instead of the pinned level)
-          ...(m.id === defaultModel ? { thinkingLevel } : {}),
           reasoning: m.reasoning,
           contextWindow: m.contextWindow || 262_144,
           maxTokens: m.maxTokens || 32_768,
