@@ -280,7 +280,10 @@ export function buildCommand(
       // Keepalives: a bare rc=255 (dropped ssh) killed a live attempt once.
       const inner = [
         `cd ${ctx.repo} && ${bun} run src/bin/idle.ts create`,
-        "--prompt-file", "-", "--out", ctx.runLog, "--json",
+        // --direct registers the ticket with the gateway ourselves: the
+        // OffPeakCreate schema moved between zcode 3.11 and 3.16 (dev
+        // FATALed 2026-10-25) and the driver session burns ~600k tokens
+        "--direct", "--prompt-file", "-", "--out", ctx.runLog, "--json",
         "--workspace", task.workspace,
       ];
       if (task.title) inner.push("--title", JSON.stringify(task.title.slice(0, 120)));
