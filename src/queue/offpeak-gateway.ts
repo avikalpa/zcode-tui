@@ -162,6 +162,13 @@ export async function registerOffPeakTask(input: {
   const now = Date.now();
   const db = new Database(TASKS_INDEX());
   try {
+    // fleet hosts run different desktop vintages: dev's 3.11 tasks-index
+    // predates model_selection (measured 2026-10-25) — add missing columns
+    // additively so the direct registration is version-independent
+    const cols = (db.query(`PRAGMA table_info(off_peak_tasks)`).all() as Array<{ name: string }>).map((c) => c.name);
+    for (const missing of ["model_selection"].filter((c) => !cols.includes(c))) {
+      db.query(`ALTER TABLE off_peak_tasks ADD COLUMN ${missing} TEXT`).run();
+    }
     // model_selection: the off-peak idle-plan provider (desktop convention)
     const modelSelection = JSON.stringify({
       providerId: "account:zai-offpeak-idle-plan",
