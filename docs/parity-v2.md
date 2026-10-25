@@ -874,3 +874,22 @@ upstream when it releases) — continue until this file's Remaining is empty
   composer + `⊙ 5 MCP`), and a scratch frame probe of the live home view
   shows the popup in situ (10 windowed rows, aligned columns, composer
   block unmoved). Board: infra/meta ACK-09d199007d (plan).
+
+- Unit 10 (sitting 8): partial assistant text streams THROUGH the markdown
+  component, like the reference TextPart
+  (`streaming={time.completed === undefined}`, message-parts.tsx 147-174).
+  The inherited streaming branch predated the parity campaign and painted
+  a plain `text` row — raw ATX heading markers and unclosed code fences
+  showed verbatim while the answer typed, and the completion swap from
+  plain text to markdown re-flowed the tail. The streaming branch now uses
+  the same markdown block as the completed branch (breakLongTokens +
+  mdStyle + internalBlockMode "top-level" + grid tables + conceal), so the
+  streaming view IS the final view modulo growing content; the "…"
+  placeholder survives for a tail turn with no text and no thinking. The
+  completed branch keeps its inherited `streaming={true}` (proven on
+  opentui 0.5.11; the reference's time-based flag is the same visual
+  result on full content — noted, not copied). Two App interaction tests
+  in stream-markdown.test.tsx (placeholder → concealed heading; partial
+  fence renders as a block without raw backticks) fail against the parent
+  (red log /tmp/zq-ux-parity/sitting-8-unit2-red.log) and pass after.
+  Full suite 300/300 across 38 files, typecheck exit 0, live smoke exit 0.
