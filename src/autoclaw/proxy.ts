@@ -74,6 +74,9 @@ export function startManagedProxy(plan: AutoclawPlan, opts: ProxyOptions = {}): 
         // strictly newer than ours; only fall back to our own refresh when
         // the desktop offers nothing (not installed / keyring locked).
         try {
+          // explicit opt-out: pure-lineage hosts and the test rig — the
+          // follower must find nothing when this is set
+          if (process.env.ZTQ_AUTOCLAW_NO_FOLLOW === "1") throw new Error("follow disabled");
           const configDir = findAutoClawConfigDir();
           if (configDir) {
             const desktop = decryptCredentials(configDir);
