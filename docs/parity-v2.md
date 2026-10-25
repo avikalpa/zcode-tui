@@ -893,3 +893,27 @@ upstream when it releases) — continue until this file's Remaining is empty
   fence renders as a block without raw backticks) fail against the parent
   (red log /tmp/zq-ux-parity/sitting-8-unit2-red.log) and pass after.
   Full suite 300/300 across 38 files, typecheck exit 0, live smoke exit 0.
+
+- Unit 11 (sitting 8): inline tool rows follow the reference
+  InlineToolRow spinner + children law (message-parts.tsx 176-253 + the
+  per-tool call sites). A call site that passes `spinner` runs with its
+  CHILDREN under the spinner glyph — "⠋ Read /path", "⠋ <Subagent
+  title>", "⠋ <generic summary>" — while one that does not (Write, Glob,
+  Grep, WebFetch) keeps the pending label; our inlineRow always showed
+  the pending label, so a running Read read "Reading file…" where the
+  reference reads "⠋ Read /path". Read's "↳ Loaded <path>" rows render
+  unconditionally (the reference has no expansion gate; our ctrl+o gate
+  is dropped, column 6 kept). A running subagent shows its title under
+  the spinner with the reference model suffix — subagentModelLabel ported
+  (provider/model#variant → "provider/model (variant)"; the registry
+  display-name resolution stays an adapter note, ToolPart has no model
+  registry; the ↳ continuation icon is also an adapter note — the zcode
+  protocol has no subagent-continuation input). Skill quotes its
+  resolved name (metadata.name ?? input.id). Question's answered-block
+  and WebSearch's "via <provider>" affordance stay adaptations (our
+  protocol carries neither answers arrays nor the retry animation).
+  Six ToolPart frame tests in tool-rows.test.tsx; red against the parent
+  at module level (missing subagentModelLabel export — the row law had no
+  exported unit; log /tmp/zq-ux-parity/sitting-8-unit3-red.log), green
+  after. Full suite 306/306 across 39 files, typecheck exit 0, live
+  smoke exit 0.
