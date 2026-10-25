@@ -62,6 +62,27 @@ function truncate(value: string, width: number): string {
   }
   return `${out}…`;
 }
+// Locale.truncate port (reference util/locale.ts): the picker title cap is
+// CHARACTER based, not display-width based.
+function truncateChars(value: string, len: number): string {
+  if (value.length <= len) return value;
+  return value.slice(0, Math.max(0, len - 1)) + "…";
+}
+// overflow="hidden" clip port: the visible row text is cut at the row width
+// with NO ellipsis marker — only the 61-character title cap carries one.
+function clipWidth(value: string, width: number): string {
+  if (width <= 0) return "";
+  if (stringWidth(value) <= width) return value;
+  let out = "";
+  let used = 0;
+  for (const char of value) {
+    const w = stringWidth(char);
+    if (used + w > width) break;
+    out += char;
+    used += w;
+  }
+  return out;
+}
 // Ported from OpenCode b084acc packages/tui/src/ui/dialog-select.tsx:
 // weighted fuzzy title/category/searchText matching, then stable grouping.
 export function filterDialogOptions<T>(options: DialogOption<T>[], query: string): DialogOption<T>[] {
@@ -307,6 +328,7 @@ export function SelectDialog<T>({
           )}
         </box>
         <box style={{ height: 1, flexShrink: 0 }} />
+        {shown.length > 0 ? (
         <scrollbox ref={scroll} style={{ height: listHeight, flexShrink: 0, paddingLeft: 1, paddingRight: 1 }} scrollbarOptions={{ visible: false }}>
         {shown.map((o, abs) => {
           const selected = abs === sel;
@@ -314,19 +336,31 @@ export function SelectDialog<T>({
           const previous = shown[abs - 1];
           const group = o.group && o.group !== previous?.group ? o.group : undefined;
           const groupSpacer = abs > 0;
-          const statusWidth = o.status ? stringWidth(o.status.text) + 1 : 0;
-          const rowWidth = Math.max(4, cardWidth - 8 - statusWidth);
+          // Reference row law (dialog-select.tsx Option, verified against
+          // ground-truth frames): the title text owns dialogWidth - 12 cells
+          // (scroll padding, row padding, gutter, title padding, gap), minus
+          // the right status cell. The title caps at 61 CHARACTERS with "…",
+          // the description rides after a single space, and the pair clips at
+          // the usable width without an ellipsis.
+          const statusWidth = o.status ? stringWidth(o.status.text) : 0;
+          const titleUsable = Math.max(1, cardWidth - 12 - statusWidth);
           const title = `${o.label}${o.meta ? `  ${o.meta}` : ""}`;
-          const labelWidth = o.description ? Math.min(stringWidth(title), Math.max(8, Math.floor(rowWidth * 0.65))) : rowWidth;
-          const descriptionWidth = Math.max(0, rowWidth - Math.min(stringWidth(title), labelWidth) - 2);
-          // Reference row shape (dialog-select.tsx): titles align at column 3;
-          // the CURRENT row donates its gutter to a ● so its title stays put,
-          // and its label wears the accent when not selected.
+          const capped = truncateChars(title, 61);
+          const combined = o.description ? `${capped} ${o.description}` : capped;
+          const visible = clipWidth(combined, titleUsable);
+          // The reference description wears its own subdued colour while the
+          // clip cuts across the pair, so split the visible text back at the
+          // title/description boundary.
+          const descVisible = visible.length > capped.length ? visible.slice(capped.length) : "";
           const rowFg = selected ? C.accentText : current ? C.accent : o.disabled ? C.faint : C.fg;
           return (
             <box key={o.id} style={{ flexDirection: "column", flexShrink: 0 }}>
               {group && groupSpacer ? <box style={{ height: 1, flexShrink: 0 }} /> : null}
-              {group ? <text content={group} fg={C.accent} attributes={TextAttributes.BOLD} style={{ paddingLeft: 3, height: 1 }} /> : null}
+              {group ? (
+                <box style={{ height: 1, paddingLeft: 3, flexShrink: 0 }}>
+                  <text content={group} fg={C.accent} attributes={TextAttributes.BOLD} />
+                </box>
+              ) : null}
               <box
                 onMouseMove={() => { if (abs !== sel) moveSelection(abs); }}
                 onMouseDown={() => moveSelection(abs)}
@@ -343,13 +377,15 @@ export function SelectDialog<T>({
                 {current && !o.gutter ? <text content="● " fg={rowFg} /> : null}
                 {o.gutter ? <text content={`${o.gutter} `} fg={selected ? C.accentText : C.accent} /> : null}
                 <text
-                  content={truncate(title, labelWidth)}
+                  content={descVisible ? visible.slice(0, capped.length) : visible}
                   fg={rowFg}
+                  attributes={selected ? TextAttributes.BOLD : undefined}
                 />
-                {o.description && descriptionWidth > 1 ? (
+                {descVisible ? (
                   <text
-                    content={`  ${truncate(o.description, descriptionWidth)}`}
+                    content={descVisible}
                     fg={selected ? C.accentText : C.subtle}
+                    attributes={selected ? TextAttributes.BOLD : undefined}
                   />
                 ) : null}
                 {o.status ? (
@@ -366,8 +402,15 @@ export function SelectDialog<T>({
             </box>
           );
         })}
-        {shown.length === 0 ? <text content="No matching items" fg={C.faint} style={{ paddingLeft: 3 }} /> : null}
         </scrollbox>
+        ) : (
+          // Reference default views (dialog-select.tsx): the empty list and the
+          // unmatched filter each read one subdued line at the title column,
+          // replacing the scrollbox.
+          <box style={{ height: 1, paddingLeft: 4, paddingRight: 4, flexShrink: 0 }}>
+            <text content={filter ? "No results found" : "No items available"} fg={C.faint} />
+          </box>
+        )}
         <box style={{ height: 1, flexShrink: 0 }} />
         {footerHints && footerHints.length > 0 ? (
           <box style={{ height: footerRows, flexDirection: "row", justifyContent: "space-between", flexShrink: 0, paddingLeft: 4, paddingRight: 2 }}>

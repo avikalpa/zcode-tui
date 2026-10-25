@@ -81,7 +81,7 @@ describe("picker interaction parity", () => {
     try {
       await setup.waitForFrame((f) => f.includes("gamma"));
       await act(async () => { await setup.mockInput.pressKeys([..."unmatched", "\r"]); });
-      const frame = await setup.waitForFrame((f) => f.includes("No matching items"));
+      const frame = await setup.waitForFrame((f) => f.includes("No results found"));
       expect(frame).toContain("unmatched");
       expect(picked).toEqual([]);
       expect(closed).toBe(false);
@@ -256,5 +256,82 @@ describe("text prompt native editing", () => {
       await act(async () => { await setup.mockInput.pressKeys(["\x1b"], 100); });
       expect(closed).toBe(true);
     } finally { setup.renderer.destroy(); }
+  });
+});
+
+// Reference Option row law (opencode v2ref b084acc ui/dialog-select.tsx,
+// verified against rendered ground-truth frames captured from the reference
+// test harness at 100x30 / 80x24 / 60x20 — sitting 7 unit 1):
+// - the title truncates at a FIXED 61 characters (Locale.truncate, character
+//   based, "…") regardless of row width — width-relative ratios are wrong;
+// - the description joins with a SINGLE space and the pair hard-clips at the
+//   row's usable width (dialogWidth - 12 - status) WITHOUT an ellipsis;
+// - group headers share the title column (card + 4);
+// - an empty result set reads "No results found" / "No items available".
+describe("picker row geometry (reference Option law)", () => {
+  const LONG = "A very long session title that goes well beyond the sixty-one character truncation boundary for sure";
+
+  test("wide rows cap the title at 61 characters even with room for more", async () => {
+    const setup = await testRender(<SelectDialog title="Sessions" size="large" options={[
+      { id: "s1", label: LONG, value: "s1" },
+    ]} onSelect={() => {}} onClose={() => {}} />, { width: 100, height: 30 });
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("sixty-on"));
+      // Locale.truncate(title, 61): first 60 chars + "…".
+      expect(frame).toContain(`${LONG.slice(0, 60)}…`);
+      // Nothing past the cap survives, even though the row is 76 cells wide.
+      expect(frame).not.toContain(LONG.slice(60));
+    } finally { setup.renderer.destroy(); }
+  });
+
+  test("description joins with one space and hard-clips without an ellipsis", async () => {
+    const setup = await testRender(<SelectDialog title="Sessions" size="large" options={[
+      { id: "s1", label: LONG, value: "s1", description: "some-provider-name" },
+    ]} onSelect={() => {}} onClose={() => {}} />, { width: 100, height: 30 });
+    try {
+      // Card is 88 wide → usable 76; 61-cap + " " + desc clips mid-description.
+      const frame = await setup.waitForFrame((f) => f.includes("sixty-on"));
+      expect(frame).toContain(`${LONG.slice(0, 60)}…`);
+      expect(frame).toContain("some-provi");
+      // The clip is silent: the full description and an ellipsized tail are
+      // both wrong — reference overflow hidden cuts without a marker.
+      expect(frame).not.toContain("some-provider-name");
+      expect(frame).not.toContain("na…");
+    } finally { setup.renderer.destroy(); }
+  });
+
+  test("group headers share the title column", async () => {
+    const setup = await testRender(<SelectDialog title="Sessions" options={[
+      { id: "a", label: "First pinned session", value: "a", group: "Pinned" },
+      { id: "b", label: "Today session", value: "b", group: "Today" },
+    ]} onSelect={() => {}} onClose={() => {}} />, { width: 80, height: 24 });
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("Pinned") && f.includes("Today session"));
+      const lines = frame.split("\n");
+      const headerCol = (lines.find((l) => l.includes("Pinned")) ?? "").indexOf("Pinned");
+      const rowCol = (lines.find((l) => l.includes("First pinned session")) ?? "").indexOf("First pinned session");
+      expect(headerCol).toBeGreaterThan(-1);
+      expect(rowCol).toBeGreaterThan(-1);
+      expect(headerCol).toBe(rowCol);
+    } finally { setup.renderer.destroy(); }
+  });
+
+  test("empty and unmatched lists use the reference default views", async () => {
+    const none = await testRender(<SelectDialog title="Sessions" options={[]}
+      onSelect={() => {}} onClose={() => {}} />, { width: 80, height: 24 });
+    try {
+      const frame = await none.waitForFrame((f) => f.includes("Sessions"));
+      expect(frame).toContain("No items available");
+    } finally { none.renderer.destroy(); }
+
+    const unmatched = await testRender(<SelectDialog title="Sessions" options={[
+      { id: "a", label: "alpha", value: "a" },
+    ]} onSelect={() => {}} onClose={() => {}} />, { width: 80, height: 24 });
+    try {
+      await unmatched.waitForFrame((f) => f.includes("alpha"));
+      await act(async () => { await unmatched.mockInput.pressKeys([..."zzz"]); });
+      const frame = await unmatched.waitForFrame((f) => f.includes("No results found"));
+      expect(frame).toContain("zzz");
+    } finally { unmatched.renderer.destroy(); }
   });
 });
