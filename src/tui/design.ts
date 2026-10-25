@@ -342,6 +342,35 @@ export function matchSlashCommands(prefix: string): SlashCommandSpec[] {
   );
 }
 
+// The popup aligns every command name to (longest "/display" + 2) columns
+// across the FULL command/alias set — the reference pads in its commands
+// memo, not per filter (component/prompt/autocomplete.tsx commands()).
+export const SLASH_PAD =
+  Math.max(...SLASH_COMMANDS.flatMap((c) => [c.name, ...c.aliases]).map((n) => `/${n}`.length)) + 2;
+
+// The composer trigger law (reference prompt/display.ts): the prefix must
+// start the draft or follow whitespace, the query carries no whitespace, and
+// a slash query may not carry a second slash — so mid-path text ("bin/ls")
+// and addresses ("a@b.c") never open the popup.
+export function triggerToken(draft: string, prefix: "/" | "@"): string | null {
+  const idx = draft.lastIndexOf(prefix);
+  if (idx === -1) return null;
+  if (idx > 0 && !/\s/.test(draft[idx - 1]!)) return null;
+  const token = draft.slice(idx + 1);
+  if (/\s/.test(token)) return null;
+  if (prefix === "/" && token.includes("/")) return null;
+  return token;
+}
+
+// Reference Locale.truncateMiddle (util/locale.ts): keep both halves around
+// one ellipsis at the cap.
+export function truncateMiddle(str: string, maxLength: number): string {
+  if (str.length <= maxLength) return str;
+  const keepStart = Math.ceil((maxLength - 1) / 2);
+  const keepEnd = Math.floor((maxLength - 1) / 2);
+  return str.slice(0, keepStart) + "…" + str.slice(-keepEnd);
+}
+
 export type SlashCommand =
   | "agents" | "sessions" | "new" | "home" | "model" | "themes" | "commands"
   | "status" | "effort" | "thinking" | "fork" | "compact" | "quit" | "help" | "timeline"

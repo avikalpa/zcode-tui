@@ -36,9 +36,12 @@ import {
   parseSlashCommand,
   shortCwd,
   SLASH_COMMANDS,
+  SLASH_PAD,
   THEME_NAMES,
   themeModes,
   tokensFor,
+  triggerToken,
+  truncateMiddle,
   type SlashCommandSpec,
   type ThemeMode,
   type ThemeName,
@@ -864,62 +867,74 @@ function sortedThemes(): ThemeName[] {
   return [...THEME_NAMES].sort((a, b) => a.localeCompare(b));
 }
 
-// The composer autocomplete popup — the OpenCode convention this TUI mirrors:
-// typing "/" lists every command filtered as you type, directly above the
-// composer, with enter running the highlighted command. Borderless block,
-// selected row carries the primary highlight with background-coloured text.
-function SlashPopup({
+// The composer autocomplete popup — port of the reference Autocomplete
+// treatment (component/prompt/autocomplete.tsx 873-951): a floating overlay
+// anchored to the composer block's top edge (SplitBorder walls in the border
+// colour, background.default inside), rows padded 1 both sides, the selected
+// row on the primary action background, descriptions joined with a leading
+// space in the subdued colour, command names aligned to the full-set pad,
+// and per-trigger empty messages while the trigger stays active.
+export function SlashPopup({
   commands,
   files,
   idx,
+  win,
   C,
   width,
+  empty,
 }: {
   commands: SlashCommandSpec[];
   files: string[];
   idx: number;
+  win: number;
   C: ThemeTokens;
-  width?: number;
+  width: number;
+  empty?: string;
 }) {
-  // One flat list across both triggers; <=10 rows visible, windowed around the
-  // selection, no scrollbar (consult item 2).
   const items: { key: string; name: string; description?: string }[] = [
-    ...commands.map((c) => ({ key: `/${c.name}`, name: `/${c.name}`, description: c.description })),
-    ...files.map((f) => ({ key: `@${f}`, name: `@${f}` })),
+    ...commands.map((c) => ({ key: `/${c.name}`, name: `/${c.name}`.padEnd(SLASH_PAD), description: c.description })),
+    ...files.map((f) => ({ key: `@${f}`, name: `@${truncateMiddle(f, Math.max(1, width - 4))}` })),
   ];
-  if (items.length === 0) {
-    return (
-      <box style={{ width: width ?? "100%", flexDirection: "column", flexShrink: 0, backgroundColor: C.panel, paddingLeft: 1, paddingRight: 1 }}>
-        <text content="No matching items" fg={C.faint} />
-      </box>
-    );
-  }
-  const sel = Math.min(idx, items.length - 1);
   const visibleCount = Math.min(10, items.length);
-  const win = Math.max(0, Math.min(sel - Math.floor(visibleCount / 2), Math.max(0, items.length - visibleCount)));
-  const visible = items.slice(win, win + visibleCount);
+  const clampedWin = Math.max(0, Math.min(win, Math.max(0, items.length - visibleCount)));
+  const sel = Math.max(clampedWin, Math.min(idx, clampedWin + visibleCount - 1));
   return (
     <box
       style={{
-        width: width ?? "100%",
+        position: "absolute",
+        bottom: "100%",
+        left: 0,
+        width,
+        zIndex: 100,
         flexDirection: "column",
         flexShrink: 0,
-        backgroundColor: C.panel,
-        paddingLeft: 1,
-        paddingRight: 1,
+        border: ["left", "right"],
+        borderColor: C.border,
+        customBorderChars: { topLeft: "", bottomLeft: "", vertical: "┃", topRight: "", bottomRight: "", horizontal: " ", bottomT: "", topT: "", cross: "", leftT: "", rightT: "" },
       }}
     >
-      {visible.map((item) => {
-        const selected = items.indexOf(item) === sel;
-        return (
-          <box key={item.key} style={{ height: 1, flexDirection: "row", flexShrink: 0, backgroundColor: selected ? C.accent : undefined }}>
-            <text content={`${item.name.padEnd(12)}`} fg={selected ? C.accentText : C.fg} />
-            {item.description ? (
-              <text content={item.description} fg={selected ? C.accentText : C.subtle} />
-            ) : null}
+      <box style={{ width: "100%", flexDirection: "column", flexShrink: 0, backgroundColor: C.bg }}>
+        {items.length === 0 && empty ? (
+          <box style={{ height: 1, flexDirection: "row", flexShrink: 0, paddingLeft: 1, paddingRight: 1 }}>
+            <text content={empty} fg={C.subtle} />
           </box>
-        );
-      })}
+        ) : (
+          items.slice(clampedWin, clampedWin + visibleCount).map((item, row) => {
+            const selected = clampedWin + row === sel;
+            return (
+              <box
+                key={item.key}
+                style={{ height: 1, flexDirection: "row", flexShrink: 0, paddingLeft: 1, paddingRight: 1, backgroundColor: selected ? C.accent : undefined }}
+              >
+                <text content={item.name} fg={selected ? C.accentText : C.fg} style={{ flexShrink: 0 }} />
+                {item.description ? (
+                  <text content={` ${item.description}`} fg={selected ? C.accentText : C.subtle} wrapMode="none" />
+                ) : null}
+              </box>
+            );
+          })
+        )}
+      </box>
     </box>
   );
 }
@@ -1273,13 +1288,27 @@ export function App({
   };
   // Slash-command autocomplete (the OpenCode composer popup): the match list
   // is derived from the draft; idx and dismissal are refs so the keyboard
-  // state machine reads immediate truth, exactly like draftRef.
+  // state machine reads immediate truth, exactly like draftRef. win is the
+  // visible window offset — the reference scrolls only far enough to reveal
+  // the selection at the window edge (ui/select-controller revealSelectionOffset).
   const [sugIdx, setSugIdx] = useState(0);
   const sugIdxRef = useRef(0);
+  const [sugWin, setSugWin] = useState(0);
+  const sugWinRef = useRef(0);
   const sugDismissed = useRef(false);
   const moveSug = (n: number) => {
     sugIdxRef.current = n;
     setSugIdx(n);
+    if (n === 0 && sugWinRef.current !== 0) { sugWinRef.current = 0; setSugWin(0); }
+  };
+  const revealSug = (selected: number, total: number) => {
+    const limit = Math.min(10, total);
+    const max = Math.max(0, total - limit);
+    const off = sugWinRef.current;
+    const next = selected < off ? Math.min(max, selected)
+      : selected >= off + limit ? Math.min(max, selected - limit + 1)
+      : Math.max(0, Math.min(max, off));
+    if (next !== sugWinRef.current) { sugWinRef.current = next; setSugWin(next); }
   };
   // Prompts typed while a turn runs queue visibly instead of being dropped or
   // mangled mid-burst; the pump effect sends them when the turn ends. An
@@ -1649,24 +1678,20 @@ export function App({
     }
   };
 
-  // Slash `/token` and workspace `@token` triggers; whitespace after the
-  // token dismisses the popup, backspace into the token reopens it.
-  const lastToken = (prefix: string): string | null => {
-    if (!typing) return null;
-    const idx = draft.lastIndexOf(prefix);
-    if (idx === -1) return null;
-    const token = draft.slice(idx + 1);
-    return /\S*$/.test(token) && !token.includes(" ") ? token : null;
-  };
-  const slashToken = lastToken("/");
-  const atToken = lastToken("@");
+  // Slash `/token` and workspace `@token` triggers; the reference trigger law
+  // (prompt/display.ts) requires the prefix at draft start or after whitespace
+  // and a whitespace-free query — a slash query may not carry a second slash,
+  // so mid-path text never opens the popup. The @ trigger honours the
+  // file-context toggle (our adaptation: off means the popup never opens).
+  // While a trigger is active the popup shows even with zero matches — the
+  // reference empty message — and the popup keys are swallowed.
+  const slashToken = typing ? triggerToken(draft, "/") : null;
+  const atToken = typing && fileContext ? triggerToken(draft, "@") : null;
   const sugMatches: SlashCommandSpec[] = slashToken !== null
     ? matchSlashCommands(slashToken)
     : [];
-  const fileMatches: string[] = atToken !== null && fileContext
-    ? cwdFileMatches(atToken)
-    : [];
-  const sugOpen = (sugMatches.length > 0 || fileMatches.length > 0) && !sugDismissed.current;
+  const fileMatches: string[] = atToken !== null ? cwdFileMatches(atToken) : [];
+  const sugOpen = (slashToken !== null || atToken !== null) && !sugDismissed.current;
 
   // Placeholder cycles through the reference example set every 4s while the
   // composer is empty and focused.
@@ -3193,16 +3218,17 @@ export function App({
           : undefined;
       // A burst mid-flight settles before any structural key touches the draft.
       if (!printable && pendingBuf.current) flushPending();
-      // Slash autocomplete reads the immediate draft ref: while the draft is a
-      // single "/token", up/down/tab/enter belong to the popup, not to
-      // history or submission. A paste riding the raw burst path never opens
-      // it — the token is withheld while a chunk is pending, and a flushed
-      // pasted path does not command-match.
-      const token = draftRef.current.startsWith("/") && !draftRef.current.includes(" ") && !pendingBuf.current
-        ? draftRef.current.slice(1)
-        : null;
+      // Slash autocomplete reads the immediate draft ref: while a trigger is
+      // active, up/down/tab/enter belong to the popup, not to history or
+      // submission — even at zero matches, where the reference popup shows
+      // its empty message and its layer still owns those keys. A paste riding
+      // the raw burst path never opens it — the token is withheld while a
+      // chunk is pending, and a flushed pasted path does not command-match.
+      const token = !pendingBuf.current ? triggerToken(draftRef.current, "/") : null;
       const sugMatches = token === null ? [] : matchSlashCommands(token);
-      const sugOpenNow = sugMatches.length > 0 && !sugDismissed.current;
+      const atTokenNow = !pendingBuf.current && fileContext ? triggerToken(draftRef.current, "@") : null;
+      const fileMatchesNow = atTokenNow !== null ? cwdFileMatches(atTokenNow) : [];
+      const sugOpenNow = (token !== null || atTokenNow !== null) && !sugDismissed.current;
       if (key.name === "escape") {
         if (sugOpenNow) { sugDismissed.current = true; return; }
         if (running) { void stopTurn(); return; }
@@ -3228,35 +3254,34 @@ export function App({
         moveSug(0);
         return;
       }
-      // @ trigger reads the immediate draft ref, same burst-safety rule as
-      // the slash token above.
-      const atIdx = draftRef.current.lastIndexOf("@");
-      const atTokenNow = atIdx !== -1 && !draftRef.current.slice(atIdx + 1).includes(" ")
-        ? draftRef.current.slice(atIdx + 1)
-        : null;
-      const fileMatchesNow = atTokenNow !== null ? cwdFileMatches(atTokenNow) : [];
-      const atOpenNow = atTokenNow !== null && fileMatchesNow.length > 0 && !sugDismissed.current;
       if (sugOpenNow && (key.name === "up" || key.name === "down")) {
-        const delta = key.name === "up" ? -1 : 1;
         const total = sugMatches.length || fileMatchesNow.length;
-        moveSug(Math.max(0, Math.min(total - 1, sugIdxRef.current + delta)));
+        if (total === 0) return;
+        const delta = key.name === "up" ? -1 : 1;
+        // The reference moves with wrap-around (moveSelection policy "wrap").
+        const raw = sugIdxRef.current + delta;
+        const next = raw < 0 ? total - 1 : raw >= total ? 0 : raw;
+        moveSug(next);
+        revealSug(next, total);
         return;
       }
       // opencode agent_cycle: tab cycles agents when the popup is not open
-      // (with the popup up, tab completes).
+      // (with the popup up, tab completes — a no-op at zero matches).
       if (key.name === "tab" && !sugOpenNow) { void cycleMode(); return; }
       if (sugOpenNow && key.name === "tab") {
         if (sugMatches.length > 0) {
-          const picked = `${sugMatches[sugIdxRef.current].name} `;
+          const picked = `${sugMatches[Math.min(sugIdxRef.current, sugMatches.length - 1)].name} `;
           const idx = draftRef.current.lastIndexOf("/");
           draftRef.current = `${draftRef.current.slice(0, idx + 1)}${picked}`;
-        } else {
+        } else if (fileMatchesNow.length > 0) {
           const picked = `${fileMatchesNow[Math.min(sugIdxRef.current, fileMatchesNow.length - 1)]} `;
-          draftRef.current = `${draftRef.current.slice(0, atIdx + 1)}${picked}`;
+          draftRef.current = `${draftRef.current.slice(0, draftRef.current.lastIndexOf("@") + 1)}${picked}`;
         }
-        setDraft(draftRef.current);
-        sugDismissed.current = false;
-        moveSug(0);
+        if (sugMatches.length > 0 || fileMatchesNow.length > 0) {
+          setDraft(draftRef.current);
+          sugDismissed.current = false;
+          moveSug(0);
+        }
         return;
       }
       // Newline insertion: shift+enter, alt+enter, ctrl+j — the reference
@@ -3390,21 +3415,26 @@ export function App({
         // React has committed the previous setState. The ref is the immediate
         // keyboard truth; it keeps `/sessions\r` equivalent to two human
         // keystrokes while the rendered draft remains state-controlled.
-        if (sugOpenNow && sugMatches.length > 0) {
-          const content = `/${sugMatches[Math.min(sugIdxRef.current, sugMatches.length - 1)].name}`;
-          draftRef.current = "";
-          setDraft("");
-          sugDismissed.current = false;
-          moveSug(0);
-          if (!running) void submitPrompt(content);
-          return;
-        }
-        if (sugOpenNow && fileMatchesNow.length > 0) {
-          const picked = fileMatchesNow[Math.min(sugIdxRef.current, fileMatchesNow.length - 1)];
-          const base = draftRef.current.slice(0, draftRef.current.lastIndexOf("@") + 1);
-          draftRef.current = `${base}${picked} `;
-          setDraft(draftRef.current);
-          sugDismissed.current = true;
+        // With the popup open the reference autocomplete layer owns return
+        // even at zero matches (select() no-ops) — the prompt is not sent.
+        if (sugOpenNow) {
+          if (sugMatches.length > 0) {
+            const content = `/${sugMatches[Math.min(sugIdxRef.current, sugMatches.length - 1)].name}`;
+            draftRef.current = "";
+            setDraft("");
+            sugDismissed.current = false;
+            moveSug(0);
+            if (!running) void submitPrompt(content);
+            return;
+          }
+          if (fileMatchesNow.length > 0) {
+            const picked = fileMatchesNow[Math.min(sugIdxRef.current, fileMatchesNow.length - 1)];
+            const base = draftRef.current.slice(0, draftRef.current.lastIndexOf("@") + 1);
+            draftRef.current = `${base}${picked} `;
+            setDraft(draftRef.current);
+            sugDismissed.current = true;
+            return;
+          }
           return;
         }
         const content = draftRef.current.trim();
@@ -4312,7 +4342,7 @@ footerHints={[
           <box style={{ height: 1, flexShrink: 0 }} />
           <box style={{ width: promptWidth, flexShrink: 0 }}>
             <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
-            {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} width={promptWidth} /> : null}
+            {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={promptWidth} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} /> : null}
             <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
           </box>
           <box style={{ width: promptWidth, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
@@ -4554,11 +4584,25 @@ footerHints={[
           <text content={`⧗ ${queue.length} queued · next: ${queue[0].text.slice(0, 48)}`} fg={C.warning} />
         </box>
       ) : null}
-      <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
-      {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} C={C} /> : null}
-      <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-        <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
-      </box>
+      {sugOpen ? (
+        <box style={{ flexDirection: "column", flexShrink: 0 }}>
+          {/* The popup's anchor is the whole [strip + composer] block, the
+              reference prompt body: bottom:"100%" floats it above the strip
+              without displacing any flow row. */}
+          <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={dims.width} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} />
+          <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
+          <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+            <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
+          </box>
+        </box>
+      ) : (
+        <>
+          <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
+          <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
+            <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
+          </box>
+        </>
+      )}
       <box style={{ height: 1, paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
         <PromptFooter C={C} width={Math.max(1, dims.width - 5)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} running={running} spinner={spinner} lost={lost} context={ctxLabel} />
       </box>
