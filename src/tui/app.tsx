@@ -13,6 +13,7 @@ import { PromptFooter } from "./prompt-footer";
 import { SelectDialog, TextPromptDialog, ModalBackdrop, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
+import { isDuplicateEntry, mergeSeed, promptHistory, type HistoryFile, type HistoryItem, type RichPrompt } from "./session/prompt-history";
 import { formatSessionTranscript } from "./session/transcript";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -1164,7 +1165,7 @@ export function App({
   const askRef = useRef<((v: unknown) => void) | null>(null);
   const [lost, setLost] = useState(false);
   const [mode, setMode] = useState<string>("auto");
-  const [history, setHistory] = useState<string[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const historyIdx = useRef(-1);
   const [thoughtLevel, setThoughtLevel] = useState<string>("enabled");
   // Reasoning effort: default matches the runtime catalog's defaultLevel
@@ -1942,7 +1943,7 @@ export function App({
     }
   };
 
-  const send = async (content: string, targetId = activeId, parts = promptFilesRef.current.filter((f) => content.includes(f.label))) => {
+  const send = async (content: string, targetId = activeId, parts = promptFilesRef.current.filter((f) => content.includes(f.label)), rich?: RichPrompt) => {
     if (!targetId || running) return;
     probe("turn-start", content.slice(0, 40));
     // v2 submit: the alive labels leave the text (virtual text), the parts
@@ -1960,9 +1961,14 @@ export function App({
     setView("session");
     resetToTail();
     // OpenCode prompt/history.tsx: retain order and only collapse adjacent
-    // duplicates, with the same 50-entry bound as the history reader.
-    setHistory((h) => h[0] === content ? h : [content, ...h].slice(0, 50));
+    // duplicates — full-entry equality (text + parts), not text alone —
+    // with the same 50-entry bound as the history reader. A submission with
+    // parts records its folded composer form so recall restores the folds
+    // and the tray; plain submissions record the flat text.
+    const historyEntry: HistoryItem = rich ? { text: rich.text, rich: { files: rich.files, pasted: rich.pasted } } : { text: content };
+    setHistory((h) => (isDuplicateEntry(h[0], historyEntry) ? h : [historyEntry, ...h].slice(0, 50)));
     historyIdx.current = -1;
+    if (rich) promptHistory.append(rich);
     setMsgs((m) => [...m, { role: "user", text: echoText }, { role: "assistant", text: "", model: modelLabel(activeModel), turnStart: Date.now() }]);
     let attachments: { ref: string; fileName: string; mime: string; bytes: number }[] | undefined;
     if (parts.length > 0) {
@@ -2004,8 +2010,21 @@ export function App({
     ).trim();
     const route = submitRoute(content);
     // The alive parts are captured BEFORE the draft clears — after it,
-    // the pruning effect treats the labels as deleted.
+    // the pruning effect treats the labels as deleted. Pastes likewise:
+    // only a part whose recorded range still holds its label rides, the
+    // same exact-label arm the expansion above reads.
     const submitParts = promptFilesRef.current.filter((f) => content.includes(f.label));
+    const submitPastes = pastePartsRef.current.filter((p) => rawDraft.slice(p.start, p.end) === p.label);
+    // prompt/history.tsx submitText: a submission with parts records its
+    // folded composer form — labels in the text, sources in the parts — so
+    // Up recalls the folds, not a flat expansion.
+    const rich: RichPrompt | undefined = submitParts.length > 0 || submitPastes.length > 0
+      ? {
+          text: rawDraft.trim(),
+          files: submitParts.map((f) => ({ uri: f.uri, mime: f.mime, name: f.name, label: f.label })),
+          pasted: submitPastes.map((p) => ({ text: p.text, source: { start: p.start, end: p.end, text: p.label } })),
+        }
+      : undefined;
     setDraft("");
     draftRef.current = "";
     pastePartsRef.current = [];
@@ -2043,11 +2062,11 @@ export function App({
       return;
     }
     if (activeId) {
-      await send(content, activeId, submitParts);
+      await send(content, activeId, submitParts, rich);
       return;
     }
     const id = await newSession();
-    if (id) await send(content, id, submitParts);
+    if (id) await send(content, id, submitParts, rich);
   };
 
   const openSessions = () => {
@@ -2688,7 +2707,7 @@ export function App({
       const saved = JSON.parse(readFileSync(`${process.env.HOME}/.config/zcode-tui/pinned.json`, "utf8")) as unknown;
       if (Array.isArray(saved)) setPinned(saved.filter((x): x is string => typeof x === "string"));
     } catch { /* first run */ }
-    setHistory(recentInputs(process.cwd(), 50));
+    setHistory(mergeSeed(promptHistory.all(), recentInputs(process.cwd(), 50)));
     void refresh();
     void loadModels();
     if (process.env.ZCODE_TUI_DISABLE_V4 !== "1") {
@@ -3280,16 +3299,37 @@ export function App({
         }
         if (history.length === 0) return;
         // prompt/history.tsx move refuses a nonempty edited/custom draft.
-        if (draftRef.current && draftRef.current !== history[historyIdx.current]) return;
+        if (draftRef.current && draftRef.current !== history[historyIdx.current]?.text) return;
         const next = previous
           ? Math.min(historyIdx.current + 1, history.length - 1)
           : Math.max(historyIdx.current - 1, -1);
         historyIdx.current = next;
-        const restored = next >= 0 ? history[next] : "";
+        // Reference recall (prompt.history.previous/next): setText +
+        // setStore("prompt", item) + restoreExtmarksFromPrompt — the store
+        // swap is wholesale, so a plain entry recalls with an empty tray and
+        // no folds, and index 0 is the fresh empty composer.
+        const item = next >= 0 ? history[next] : undefined;
+        const restored = item?.text ?? "";
         draftRef.current = restored;
         setDraft(restored);
         setCursorBoth(previous ? 0 : restored.length);
         discardPending();
+        const restoredPastes = (item?.rich?.pasted ?? []).map((p) => ({ start: p.source.start, end: p.source.end, text: p.text, label: p.source.text }));
+        pastePartsRef.current = restoredPastes;
+        setPasteParts(restoredPastes);
+        const storedFiles = item?.rich?.files ?? [];
+        promptFilesRef.current = [];
+        setPromptFiles([]);
+        if (storedFiles.length > 0) {
+          const restoredFiles: PromptFilePart[] = [];
+          for (const f of storedFiles) {
+            const comma = f.uri.indexOf(",");
+            if (!f.uri.startsWith("data:") || comma === -1) continue;
+            restoredFiles.push({ uri: f.uri, mime: f.mime, bytes: new Uint8Array(Buffer.from(f.uri.slice(comma + 1), "base64")), name: f.name, label: f.label });
+          }
+          promptFilesRef.current = restoredFiles;
+          setPromptFiles(restoredFiles);
+        }
         return;
       }
       if (key.name === "return") {
