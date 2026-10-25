@@ -381,6 +381,8 @@ export async function main(): Promise<void> {
       vendor: { type: "boolean", default: false },
       port: { type: "string" },
       host: { type: "string" },
+      hosts: { type: "string" },
+      repo: { type: "string" },
     },
   });
   const sub = String(positionals[0] ?? "");
