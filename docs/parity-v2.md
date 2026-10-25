@@ -798,3 +798,28 @@ upstream when it releases) — continue until this file's Remaining is empty
   mistake and was superseded) and green after. Full suite 288/288 across
   35 files, typecheck exit 0, boot renders home composer + `⊙ 5 MCP`
   before the intentional timeout.
+
+- Unit 8 (sitting 7): picker rows follow the reference Option law
+  (`ui/dialog-select.tsx`), verified against GROUND-TRUTH frames rendered
+  from the reference's own Solid test harness (`captureCharFrame` at
+  100x30/80x24/60x20 — the reference checkout got a frozen `bun install`,
+  HEAD unchanged, node_modules gitignored). The title caps at a FIXED 61
+  CHARACTERS (`Locale.truncate`, "…" on the cap) regardless of row width —
+  the invented 65%-ratio split is gone; the description joins with a
+  SINGLE space and the pair hard-clips at the row's usable width
+  (dialogWidth - 12 - status cell, the reference `contentWidth` grammar)
+  WITHOUT an ellipsis marker, split back into title/description text nodes
+  at the clip boundary so the description keeps its subdued colour;
+  selected rows render bold like the reference Option. Group headers now
+  share the title column (card + 4 — the old `paddingLeft` on `<text>` was
+  silently dropped by the renderer, headers sat at card + 1), and empty
+  lists use the reference default views ("No results found" when a filter
+  is set, "No items available" otherwise) at the title column instead of
+  the invented "No matching items". Four frame-based regression tests in
+  select-dialog.test.tsx (61-cap on a wide row, single-space join +
+  silent clip, header/title column equality, both default views) failed
+  before and pass after; one inherited test's literal updated to the
+  ported default. Full suite 292/292 across 35 files, typecheck exit 0,
+  live smoke renders home composer + `⊙ 5 MCP`, no-TTY boot exit 124 at
+  the intentional timeout. Reference frames kept outside the repo under
+  /tmp/zq-ux-parity/ref-dialog-*.txt.
