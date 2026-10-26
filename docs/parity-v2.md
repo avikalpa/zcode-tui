@@ -1030,3 +1030,20 @@ upstream when it releases) — continue until this file's Remaining is empty
   against parent 351e001 (missing attachTurnMetrics export; log
   /tmp/zq-ux-parity/sitting-10-unit2-red.log), green after. Full suite
   328/328 across 43 files, typecheck exit 0, live smoke exit 0.
+
+- Unit 17 (sitting 10): inline tool rows take the reference status
+  details (routes/session/index.tsx, pinned v2ref). Glob/Grep gate the
+  count segment on Solid <Show> — truthy on finiteNumber — so a zero
+  count hides it entirely (the inherited row rendered "(0 matches)");
+  Read's "↳ Loaded" rows settle on the completed status only (the
+  reference returns [] until state.status === "completed"; the inherited
+  row rendered them whenever metadata carried the list, even mid-run);
+  GenericTool pretty-prints non-string input values with
+  JSON.stringify(value, null, 2) in the expanded detail (the inherited
+  detail emitted compact JSON). Three frame tests + two positive
+  controls in inline-details.test.tsx; 4 red BEHAVIORALLY against
+  parent 6c51392 via a targeted stash of tool-parts.tsx (the first red
+  pass had two test-side defects — a wrong settle needle that ignored
+  the sitting-8 spinner law, and an m literal missing the tool field —
+  superseded by sitting-10-unit3-red2.log), green after. Full suite
+  334/334 across 44 files, typecheck exit 0, live smoke exit 0.
