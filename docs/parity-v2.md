@@ -981,3 +981,29 @@ upstream when it releases) — continue until this file's Remaining is empty
   315/315 across 41 files on re-run (one known cross-file
   dialog-focus flake in the first pass — isolation + re-run clean,
   sitting-5 unit 3 precedent), typecheck exit 0, live smoke exit 0.
+
+- Unit 15 (sitting 10): assistant turns take the reference error/retry
+  footer law (routes/session/index.tsx AssistantFooter 1934-1985 +
+  AssistantRetry 2418-2444 + routes/session/rows.ts 325-329). A
+  terminal-by-error turn renders the `Error: <message>` row in the error
+  colour; a retrying turn renders the countdown warning row (`⚠ Retrying
+  in Ns · attempt N · <message>` while the retry timestamp is ahead,
+  `⚠ Retry due` at zero, once-per-second tick ported); the footer head
+  turns subdued under an error; and the footer row itself renders on
+  terminal-by-error turns even without metrics (rows.ts: terminal =
+  finish || message.error; the footer row is pushed when terminal ||
+  retry — the metrics-less errored turn reads the head alone). A "Step
+  interrupted" error suppresses the error row and rides the footer
+  suffix. The error/retry rows each carry the SessionRowView row gap
+  (paddingTop 1, sitting-5 rhythm law) and the reference's conditional
+  footer marginTop 1 IS the flattened footer's own gap, so the metrics
+  row keeps paddingTop 1. partsToTurns extracts info.error/info.retry
+  (util/error.ts message law: error.message -> error.data.message ->
+  String). The inherited transcript dropped message-level errors
+  entirely — a failed turn was invisible. Presentation only: the rows
+  render when the backend info carries the fields, never otherwise. Five
+  frame tests + three extraction tests in turn-error.test.tsx; 7 red
+  against parent 9f280a4 (behavioral — the rows/fields do not exist;
+  log /tmp/zq-ux-parity/sitting-10-red.log), green after
+  (sitting-10-after.log). Full suite 323/323 across 42 files, typecheck
+  exit 0, live smoke exit 0.
