@@ -328,11 +328,11 @@ export function ToolPart(props: {
     >
       {opts.path ? (
         <box style={{ flexDirection: "row", gap: 1, minWidth: 0, flexShrink: 0 }}>
-          <text content={spinnerPrefix ? opts.path.label.replace(/^# /, "") : opts.path.label} fg={C.subtle} />
+          <text content={`${spinnerPrefix}${opts.path.label.replace(/^# /, "")}`} fg={C.subtle} />
           <FilePath value={opts.path.value} maxWidth={Math.max(2, props.width - 8 - stringWidth(opts.path.label))} fg={C.subtle} />
         </box>
       ) : opts.title ? (
-        <text content={spinnerPrefix ? opts.title.replace(/^# /, "") : opts.title} fg={C.subtle} />
+        <text content={`${spinnerPrefix}${opts.title.replace(/^# /, "")}`} fg={C.subtle} />
       ) : null}
       {opts.children}
       {error ? <text content={error} fg={C.error} /> : null}
@@ -346,21 +346,34 @@ export function ToolPart(props: {
   switch (display) {
     case "shell": {
       // ShellDisplay, minus the background-shell output client (no such
-      // zcode verb): the command + collapsed output in a block.
+      // zcode verb): the command + collapsed output in a block. Reference
+      // running law: the command rides a bare spinner glyph row with the
+      // "$ " prefix withheld; any settled state carries "$ " again, and
+      // expansion wraps word.
       const command = stringValue(input.command) ?? "";
       const workdir = stringValue(input.workdir);
       const prefix = workdir && workdir !== "." ? `cd ${workdir} && ` : "";
-      const fullInput = command ? `${complete ? "$ " : ""}${prefix}${command}` : "";
+      const running = m.status === "running";
+      const fullInput = command ? `${running ? "" : "$ "}${prefix}${command}` : "";
       const maxLines = 10;
-      const maxChars = maxLines * Math.max(20, props.width - 6 - (loading ? 2 : 0));
+      const maxChars = maxLines * Math.max(20, props.width - 6 - (running ? 2 : 0));
       const collapsed = collapseShellOutput(fullInput, output, maxLines, maxChars);
       const shownInput = props.expanded ? fullInput : collapsed.input;
       const shownOutput = props.expanded ? output : collapsed.output;
       return blockTool({
-        title: command ? undefined : loading ? "Writing command…" : "Writing command…",
+        title: command ? undefined : "Writing command…",
         children: (
           <box style={{ flexDirection: "column", gap: 1, flexShrink: 0 }}>
-            {shownInput ? <text content={shownInput} fg={C.fg} wrapMode="char" /> : null}
+            {shownInput ? (
+              running ? (
+                <box style={{ flexDirection: "row", gap: 1, flexShrink: 0 }}>
+                  <text content={props.spinnerChar} fg={C.fg} />
+                  <text content={shownInput} fg={C.fg} wrapMode={props.expanded ? "word" : "char"} />
+                </box>
+              ) : (
+                <text content={shownInput} fg={C.fg} wrapMode={props.expanded ? "word" : "char"} />
+              )
+            ) : null}
             {shownOutput ? <text content={shownOutput} fg={C.subtle} /> : null}
           </box>
         ),

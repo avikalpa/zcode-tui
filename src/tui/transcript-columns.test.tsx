@@ -73,7 +73,12 @@ describe("production transcript reference columns", () => {
       await s.pushEvent({ content: "Fixture done.", stopReason: "end_turn" });
       const frame = await setup_frame(s);
       const toolLine = lineOf(frame, "ls /tmp");
-      expect(toolLine.indexOf("ls /tmp")).toBe(5);
+      // The shell block speaks from the session column: border at 2, the
+      // marker row's two columns at 5-6 (busy glyph while the turn runs,
+      // settled "$ " once done; this synthetic frame has neither — the
+      // turn-scoped spinner blanks at end_turn), command text at 7.
+      expect(toolLine.indexOf("┃")).toBe(2);
+      expect(toolLine.indexOf("ls /tmp")).toBe(7);
       const replyLine = lineOf(frame, "Fixture done.");
       expect(replyLine.indexOf("Fixture done.")).toBe(5);
     } finally { s.cleanup(); }
