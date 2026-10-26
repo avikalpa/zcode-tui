@@ -166,9 +166,52 @@ export async function registerOffPeakTask(input: {
     // lacks several newer columns (model_selection, project_id, …; measured
     // 2026-10-25) — insert only the columns the local table actually has so
     // the direct registration is version-independent
-    const cols = new Set(
+    let cols = new Set(
       (db.query(`PRAGMA table_info(off_peak_tasks)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
+    // Desktop-less hosts (oc measured 2026-10-26): no index file ever existed,
+    // bun:sqlite materializes an EMPTY database, PRAGMA returns no columns and
+    // the filtered insert degrades to `INSERT INTO off_peak_tasks () VALUES ()`
+    // — the literal "near ')': syntax error" that blocked oc all night. When
+    // the table is absent, create it with the desktop's own schema (verbatim
+    // from a live 3.16 index) so this host is self-sufficient.
+    if (cols.size === 0) {
+      db.exec(`CREATE TABLE IF NOT EXISTS off_peak_tasks (
+        off_peak_task_id   TEXT PRIMARY KEY,
+        server_ticket_id   TEXT,
+        title              TEXT NOT NULL DEFAULT '',
+        conversation_id    TEXT,
+        session_id         TEXT,
+        prompt             TEXT NOT NULL,
+        permission_mode    TEXT NOT NULL,
+        model              TEXT,
+        thought_level      TEXT,
+        workspace_key      TEXT NOT NULL,
+        workspace_path     TEXT NOT NULL,
+        workspace_identity TEXT,
+        status             TEXT NOT NULL,
+        queued_at          INTEGER NOT NULL,
+        started_at         INTEGER,
+        ended_at           INTEGER,
+        failure_reason     TEXT,
+        files_changed      INTEGER,
+        settled_at         INTEGER,
+        history_deleted_at INTEGER,
+        registered_at      INTEGER,
+        schedulable        INTEGER NOT NULL DEFAULT 0,
+        queue_position     INTEGER,
+        next_poll_at       INTEGER,
+        claim_running      INTEGER NOT NULL DEFAULT 0,
+        claimed_at         INTEGER,
+        attempt_count      INTEGER NOT NULL DEFAULT 0,
+        last_error         TEXT,
+        created_at         INTEGER NOT NULL,
+        updated_at         INTEGER NOT NULL
+      , model_selection TEXT, project_id TEXT, host_id TEXT, additional_directories TEXT)`);
+      cols = new Set(
+        (db.query(`PRAGMA table_info(off_peak_tasks)`).all() as Array<{ name: string }>).map((c) => c.name),
+      );
+    }
     // model_selection: the off-peak idle-plan provider (desktop convention)
     const modelSelection = JSON.stringify({
       providerId: "account:zai-offpeak-idle-plan",
@@ -208,6 +251,7 @@ export async function registerOffPeakTask(input: {
       updated_at: now,
     };
     const present = Object.keys(desired).filter((c) => cols.has(c));
+    if (present.length === 0) return { ok: false, error: "local index has no usable off_peak_tasks columns (exotic vintage) — registration refused" };
     db.query(
       `INSERT INTO off_peak_tasks (${present.join(", ")}) VALUES (${present.map(() => "?").join(", ")})`,
     ).run(...(present.map((c) => desired[c]) as (string | number | null)[]));
