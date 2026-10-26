@@ -240,6 +240,12 @@ export interface TurnMessage {
   // v2 AssistantFooter appends a subdued `· interrupted` on a stopped turn
   // (0.6.30 port); we stamp it at session/stop time.
   interrupted?: boolean;
+  // v2 AssistantFooter error law (routes/session/index.tsx 1934-1985 +
+  // routes/session/rows.ts 325-329): the message info carries the turn
+  // error and the retry attempt; a terminal-by-error turn renders the
+  // error/retry rows and the footer row even without metrics.
+  error?: string;
+  retry?: { attempt: number; at?: number; message?: string };
   outputTokens?: number;
   // v2.0.8 counts reasoning tokens in the throughput numerator (upstream
   // rows.ts); our payload takes the field when one ever carries it.
@@ -662,6 +668,37 @@ function HintBits({ text, C }: { text: string; C: ThemeTokens }) {
 // The message transcript voice, measured off the OpenCode reference: the user
 // block is a filled panel with a bright left edge, the assistant speaks as
 // plain markdown with a metrics footer, tools are single dim lines.
+// Port of AssistantRetry (routes/session/index.tsx 2418): the retry row
+// counts down to the retry timestamp once per second — `⚠ Retrying in Ns`
+// while waiting, `⚠ Retry due` at zero — in the warning colour.
+function remainingRetrySeconds(at: number | undefined): number {
+  return at === undefined ? 0 : Math.max(0, Math.ceil((at - Date.now()) / 1_000));
+}
+
+function RetryNotice({ retry, C }: { retry: NonNullable<TurnMessage["retry"]>; C: ThemeTokens }) {
+  const [seconds, setSeconds] = useState(() => remainingRetrySeconds(retry.at));
+  useEffect(() => {
+    if (retry.at === undefined) return;
+    const tick = () => {
+      const left = remainingRetrySeconds(retry.at);
+      setSeconds(left);
+      return left;
+    };
+    if (tick() === 0) return;
+    const timer = setInterval(() => {
+      if (tick() === 0) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [retry.at]);
+  const label = seconds > 0 ? `Retrying in ${seconds}s` : "Retry due";
+  const message = retry.message ? ` · ${retry.message}` : "";
+  return (
+    <box style={{ paddingTop: 1, flexShrink: 0 }}>
+      <text content={`⚠ ${label} · attempt ${retry.attempt}${message}`} fg={C.warning} />
+    </box>
+  );
+}
+
 export const MessageView = memo(function MessageView({
   m,
   running,
@@ -737,8 +774,17 @@ export const MessageView = memo(function MessageView({
   }
 
   const streaming = running && isTail;
-  const footer = m.durationMs !== undefined && !streaming
-    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, m.interrupted)
+  // v2 interruption law: the stop stamp OR a "Step interrupted" message
+  // error suppresses the error row and rides the footer suffix instead
+  // (routes/session/index.tsx interrupted memo).
+  const interruptedTurn = Boolean(m.interrupted) || m.error === "Step interrupted";
+  const errored = Boolean(m.error);
+  const retrying = m.retry !== undefined;
+  // rows.ts 325-329: the footer row is pushed when terminal (finish or
+  // error) or retrying — a metrics-less errored turn still renders the
+  // head, just without duration/tok segments.
+  const footer = (m.durationMs !== undefined || errored || retrying) && !streaming
+    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, interruptedTurn)
     : null;
   // The reference builds rows from message parts, so an assistant message
   // with no parts yet contributes no SessionRowView; the submit-time
@@ -771,9 +817,20 @@ export const MessageView = memo(function MessageView({
       ) : streaming && !m.thinking ? (
         <text content="…" fg={C.fg} />
       ) : null}
+      {/* v2 AssistantFooter error law (routes/session/index.tsx 1956-1960):
+          the error/retry rows sit above the metrics line, each carrying the
+          SessionRowView row gap (paddingTop 1, sitting-5 rhythm law); the
+          reference's conditional footer marginTop 1 IS the flattened
+          footer's own gap, so the metrics row keeps paddingTop 1. */}
+      {errored && !interruptedTurn && !retrying ? (
+        <box style={{ paddingTop: 1, flexShrink: 0 }}>
+          <text content={`Error: ${m.error}`} fg={C.error} />
+        </box>
+      ) : null}
+      {m.retry ? <RetryNotice retry={m.retry} C={C} /> : null}
       {footer ? (
         <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
-          <text content={footer.head} fg={C.user} />
+          <text content={footer.head} fg={errored ? C.subtle : C.user} />
           <text content={footer.rest ? ` · ${footer.rest}` : ""} fg={C.subtle} />
         </box>
       ) : null}
@@ -803,6 +860,38 @@ export function breakLongTokens(text: string, limit: number): string {
 // reasoning / tool / text as separate parts). The old extractText pulled
 // .text from ANY part, so reopening a session leaked reasoning into the
 // body and lost the tool rows entirely.
+// util/error.ts errorMessage: message -> data.message -> String form.
+function errorMessageText(error: unknown): string | undefined {
+  if (error === undefined || error === null) return undefined;
+  if (error instanceof Error) {
+    if (error.message) return error.message;
+    if (error.name) return error.name;
+  }
+  if (typeof error === "object") {
+    const rec = error as Record<string, unknown>;
+    if (typeof rec.message === "string" && rec.message) return rec.message;
+    const data = rec.data as Record<string, unknown> | undefined;
+    if (data && typeof data === "object" && typeof data.message === "string" && data.message) return data.message;
+  }
+  const text = String(error);
+  return text && text !== "[object Object]" ? text : undefined;
+}
+
+// The retry attempt block of the assistant info (AssistantRetry reads
+// retry.attempt / retry.at / retry.error.message).
+function retryOf(retry: unknown): TurnMessage["retry"] {
+  if (retry === undefined || retry === null || typeof retry !== "object") return undefined;
+  const rec = retry as Record<string, unknown>;
+  const attempt = Number(rec.attempt);
+  if (!Number.isFinite(attempt)) return undefined;
+  const at = Number(rec.at);
+  return {
+    attempt,
+    at: Number.isFinite(at) && at > 0 ? at : undefined,
+    message: errorMessageText(rec.error) ?? errorMessageText(rec.message),
+  };
+}
+
 export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
   const info = (m.info ?? {}) as Record<string, unknown>;
   const role = String(info.role ?? "?");
@@ -861,6 +950,8 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
     thinking: thinkingText || undefined,
     thinkingParts: thinkingParts.length ? thinkingParts : undefined,
     thinkingMs: thinkingDuration(thinkingParts),
+    error: errorMessageText(info.error),
+    retry: retryOf(info.retry),
   }];
   out.push(...toolRows);
   return out;
