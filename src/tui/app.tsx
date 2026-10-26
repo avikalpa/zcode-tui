@@ -246,6 +246,11 @@ export interface TurnMessage {
   // error/retry rows and the footer row even without metrics.
   error?: string;
   retry?: { attempt: number; at?: number; message?: string };
+  // rows.ts projection: the resume payload's finish reason and completion
+  // time — the terminal law (footer rows for finish not tool-calls/unknown)
+  // and the turn-scoped duration (turnDuration) both read them.
+  finish?: string;
+  completedAt?: number;
   outputTokens?: number;
   // v2.0.8 counts reasoning tokens in the throughput numerator (upstream
   // rows.ts); our payload takes the field when one ever carries it.
@@ -892,6 +897,32 @@ function retryOf(retry: unknown): TurnMessage["retry"] {
   };
 }
 
+// rows.ts terminal law (325-329): a footer row renders for an assistant
+// message whose finish is set and not tool-calls/unknown (or errored —
+// handled by the error law above).
+export function isTerminalFinish(finish: string | undefined): boolean {
+  return finish !== undefined && !["tool-calls", "unknown"].includes(finish);
+}
+
+// rows.ts turnDuration (353): the footer duration is TURN-SCOPED — the
+// terminal message's time.completed minus the turn input's time.created
+// (the message's own created time when no input precedes). Stamped on
+// resume, where the payload carries per-step times the live path computes
+// itself.
+export function attachTurnMetrics(turns: TurnMessage[]): TurnMessage[] {
+  let inputCreated: number | undefined;
+  return turns.map((turn) => {
+    if (turn.role === "user") {
+      inputCreated = turn.createdAt;
+      return turn;
+    }
+    if (turn.role !== "assistant" || !isTerminalFinish(turn.finish) || turn.completedAt === undefined) return turn;
+    const start = inputCreated ?? turn.createdAt;
+    if (start === undefined) return turn;
+    return { ...turn, durationMs: Math.max(0, turn.completedAt - start) };
+  });
+}
+
 export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
   const info = (m.info ?? {}) as Record<string, unknown>;
   const role = String(info.role ?? "?");
@@ -952,6 +983,8 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
     thinkingMs: thinkingDuration(thinkingParts),
     error: errorMessageText(info.error),
     retry: retryOf(info.retry),
+    finish: typeof info.finish === "string" ? info.finish : undefined,
+    completedAt: typeof infoTime.completed === "number" && Number.isFinite(infoTime.completed) ? infoTime.completed : undefined,
   }];
   out.push(...toolRows);
   return out;
@@ -2004,7 +2037,11 @@ export function App({
         settings?: unknown;
       };
       const rawMessages = res.messages ?? [];
-      const turns: TurnMessage[] = rawMessages.flatMap((m) => partsToTurns(m as Record<string, unknown>));
+      // rows.ts projection law: the resumed turns carry the terminal
+      // finish/completed times, so the footer rows render on reopened
+      // sessions with the turn-scoped duration (no tok/s — the payload
+      // has no per-step time.streamed for turnTokensPerSecond).
+      const turns: TurnMessage[] = attachTurnMetrics(rawMessages.flatMap((m) => partsToTurns(m as Record<string, unknown>)));
       setMsgs(turns);
       setActiveId(row.sessionId);
       setMode(row.mode ?? "build");
