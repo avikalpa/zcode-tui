@@ -11,6 +11,8 @@ import {
   extractProviderApiKey,
   sourceIsLocal,
   AUTH_SOURCE_ENV,
+  LEGACY_SYNC_ENV,
+  localProviderConfigPath,
   type SyncDeps,
 } from "./sync";
 
@@ -31,11 +33,15 @@ let home: string;
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "zcode-tui-auth-"));
   delete process.env[AUTH_SOURCE_ENV];
+  // The behavior tests below exercise the LEGACY plane explicitly — 2.0.0
+  // gates it behind this env var.
+  process.env[LEGACY_SYNC_ENV] = "1";
 });
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
   delete process.env[AUTH_SOURCE_ENV];
+  delete process.env[LEGACY_SYNC_ENV];
 });
 
 function deps(extra: Partial<SyncDeps> = {}): SyncDeps {
@@ -141,5 +147,19 @@ describe("auth sync", () => {
     saveAuthConfig({ source: "jojo", syncAtStartup: false }, home);
     expect(loadAuthConfig(home).syncAtStartup).toBe(false);
     expect(sourceIsLocal("local")).toBe(true);
+  });
+
+  test("2.0.0 default: the legacy plane is OFF — no env, no sync, nothing touched", () => {
+    delete process.env[LEGACY_SYNC_ENV];
+    machineSettings(SSOT, "stale-key");
+    expect(syncAuthAtStartup(deps())).toBeNull();
+    expect(existsSync(join(home, ".config/zcode-tui/auth.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(home, ".zcode/cli/config.json"), "utf8")).provider.zai.options.apiKey).toBe("stale-key");
+  });
+
+  test("2.0.0: the backend handoff prefers the local machine settings", () => {
+    machineSettings(SSOT, "any-key");
+    expect(localProviderConfigPath(home)).toBe(join(home, ".zcode/v2/provider_config.json"));
+    expect(localProviderConfigPath(join(home, "empty"))).toBeNull();
   });
 });

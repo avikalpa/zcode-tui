@@ -20,9 +20,10 @@ if (args.includes("--version") || args.includes("-V") || !process.stdin.isTTY) {
 }
 // Headless worker verbs: no TTY needed — run (one session, owner directive
 // 2026-10-21), queue (fleet worker queue, 2026-10-22), idle (ZCode idle-time
-// tasks client), autoclaw (AutoClaw plan driver, 2026-10-23). All execute
-// under bun straight from the repo tree.
-const headlessVerbs = { run: "run.ts", queue: "queue.ts", idle: "idle.ts", plans: "plans.ts", autoclaw: "autoclaw.ts" };
+// tasks client), autoclaw (AutoClaw plan driver, 2026-10-23), install (fleet
+// plan-harness installer, 2.0.0 2026-10-25). All execute under bun straight
+// from the repo tree.
+const headlessVerbs = { run: "run.ts", queue: "queue.ts", idle: "idle.ts", plans: "plans.ts", autoclaw: "autoclaw.ts", install: "install.ts", usage: "usage.ts" };
 if (headlessVerbs[args[0]]) {
   const bunCandidates = [
     process.env.BUN_INSTALL && join(process.env.BUN_INSTALL, "bin", "bun"),
@@ -42,9 +43,11 @@ if (args.includes("--help") || args.includes("-h")) {
   console.log("usage: zcode-tui [--resume <sessionId>] [--model <modelId>]");
   console.log("       zcode-tui run --content-file BRIEF.md --workspace DIR [--model ID]");
   console.log("       zcode-tui queue enqueue --prompt-file F --workspace DIR --route R");
-  console.log("       zcode-tui queue list|status|serve   (fleet worker queue)");
+  console.log("       zcode-tui queue list|ls|status|serve   (fleet worker queue)");
   console.log("       zcode-tui idle list|create          (ZCode idle-time tasks)");
   console.log("       zcode-tui autoclaw <setup|proxy|credential|doctor|run>   (AutoClaw plan)");
+  console.log("       zcode-tui usage [--reset-opportunity]    (live plan windows + reset tokens)");
+  console.log("       zcode-tui install <doctor|zcode|autoclaw|autoclaw-headless>");
   console.log("requires bun (https://bun.sh) or a compiled dist/zcode-tui binary");
   process.exit(0);
 }

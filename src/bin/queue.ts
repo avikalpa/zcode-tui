@@ -827,7 +827,8 @@ export async function main() {
       if (!r.ok) process.exit(1);
       break;
     }
-    case "list": cmdList(db, Boolean(values.json)); break;
+    case "list":
+    case "ls": cmdList(db, Boolean(values.json)); break; // `ls` = the easy daily verb (owner, 2026-10-25)
     case "status": cmdStatus(db, Boolean(values.json), stateDir); break;
     case "serve": {
       // BUG-001 (measured: the transcript truncation + double dispatch): two

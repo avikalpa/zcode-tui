@@ -1,17 +1,18 @@
-// Startup auth sync — zcode-tui's auth IS the zcode machine settings.
-// The desktop (3.12.x) moved sign-in auth to ~/.zcode/v2/ (credentials.json
-// safeStorage-style enc:v1 values + a PLAINTEXT provider_config.json whose
-// zai-api key is what actually authenticates turns). Older hosts (and any
-// host whose desktop has not re-signed-in) carry a stale key in
-// ~/.zcode/cli/config.json and 401 on turns.
+// Startup auth sync — RETIRED AS THE DEFAULT in 2.0.0 (owner 2026-10-25):
+// fleet auth replication is ygg-auth's job (--harness zcode|autoclaw) with
+// provenance/lineage. This module's pull-and-heal plane survives only behind
+// ZCODE_TUI_AUTH_SYNC=1 (one-transition escape hatch). Default behavior is a
+// PASSIVE pointer: if a host genuinely lacks auth, say the ygg-auth command
+// that fixes it — never copy anything.
 //
-// Owner fleet law (2026-09-17): jojo is the auth SSOT — every host's zcode
-// settings point at jojo (read locally on jojo, over `ssh jojo` elsewhere).
-// At startup the TUI syncs the SSOT provider config, STORES it in the TUI
-// config dir, best-effort heals the local machine settings from it, and
-// hands it to the spawned backend via ZCODE_PERSONAL_PROVIDER_CONFIG_FILE
-// (honored by 3.12.x runtimes; harmless on older ones, which read the
-// healed cli config instead).
+// Historical context (why the handoff path still matters): the desktop
+// (3.12.x) moved sign-in auth to ~/.zcode/v2/ (credentials.json
+// safeStorage-style enc:v1 values + a PLAINTEXT provider_config.json whose
+// zai-api key is what actually authenticates turns). The TUI hands the
+// backend a provider config via ZCODE_PERSONAL_PROVIDER_CONFIG_FILE; in 2.0.0
+// that is the LOCAL ~/.zcode/v2/provider_config.json (which ygg-auth's zcode
+// harness replicates), with the legacy stored copy only when the legacy plane
+// is explicitly on.
 //
 // Fail-soft everywhere: a sync failure must never block the TUI boot —
 // whatever auth the machine already has still works. Secrets never reach
@@ -25,7 +26,15 @@ import { join } from "node:path";
 export const V2_PROVIDER_CONFIG = ".zcode/v2/provider_config.json";
 export const CLI_CONFIG = ".zcode/cli/config.json";
 export const AUTH_SOURCE_ENV = "ZCODE_TUI_AUTH_SOURCE";
+export const LEGACY_SYNC_ENV = "ZCODE_TUI_AUTH_SYNC";
 export const DEFAULT_AUTH_SOURCE = "jojo";
+
+/** The backend's provider-config handoff prefers the LOCAL machine settings
+ * (replicated by ygg-auth); null when this host has none. */
+export function localProviderConfigPath(home = process.env.HOME ?? ""): string | null {
+  const p = join(home, V2_PROVIDER_CONFIG);
+  return existsSync(p) ? p : null;
+}
 
 export interface AuthConfig {
   /** "local" | a host name (the SSOT holder). Fleet default: jojo. */
@@ -181,10 +190,12 @@ function healMachineSettings(home: string, ssot: string, ssotFp: string): boolea
 }
 
 /**
- * Sync the auth SSOT into the TUI config dir. Returns null when the sync
- * could not run (offline, no local settings either) — callers boot anyway.
+ * Sync the auth SSOT into the TUI config dir. 2.0.0: legacy plane — runs ONLY
+ * when ZCODE_TUI_AUTH_SYNC=1; otherwise returns null untouched (replication
+ * moved to ygg-auth). Callers boot anyway on null.
  */
 export function syncAuthAtStartup(deps: SyncDeps = {}): SyncedAuth | null {
+  if (process.env[LEGACY_SYNC_ENV] !== "1") return null;
   const home = deps.homeDir ?? process.env.HOME ?? "";
   if (!home) return null;
   const cfg = loadAuthConfig(home);
@@ -232,36 +243,44 @@ export function syncAuthAtStartup(deps: SyncDeps = {}): SyncedAuth | null {
   return { source: cfg.source, fingerprint: fp, providerConfigPath: storedPath, healedMachineSettings };
 }
 
-// Headless verbs sync the fleet auth too (owner 2026-10-23: zcode-tui must
-// be usable from any fleet host on any harness — the TUI-only sync left
-// headless seats stale). Non-blocking by design; failures never stop boot.
+// Headless verbs' auth gate. 2.0.0 (owner 2026-10-25): the automatic
+// pull-and-heal plane is retired — ygg-auth (--harness zcode|autoclaw) owns
+// fleet replication with provenance. Default behavior: a passive pointer that
+// speaks ONLY when this host is actually missing an auth file. The legacy
+// plane runs verbatim behind ZCODE_TUI_AUTH_SYNC=1 (one-transition hatch).
+// Non-blocking by design; failures never stop boot.
 export function syncAuthHeadless(): void {
+  if (process.env[LEGACY_SYNC_ENV] === "1") {
+    try {
+      const r = syncAuthAtStartup();
+      if (r) console.error(`zcode-tui: auth synced from ${r.source} (fingerprint ${r.fingerprint.slice(0, 8)})`);
+    } catch { /* never block */ }
+    try {
+      const p = syncAutoclawPlan();
+      if (p) console.error(`zcode-tui: autoclaw plan synced from ${p.source} (${p.action})`);
+    } catch { /* never block */ }
+    return;
+  }
   try {
-    const r = syncAuthAtStartup();
-    if (r) console.error(`zcode-tui: auth synced from ${r.source} (fingerprint ${r.fingerprint.slice(0, 8)})`);
-  } catch { /* never block */ }
-  try {
-    const p = syncAutoclawPlan();
-    if (p) console.error(`zcode-tui: autoclaw plan synced from ${p.source} (${p.action})`);
+    const home = process.env.HOME ?? "";
+    if (home && !existsSync(join(home, V2_PROVIDER_CONFIG)))
+      console.error("zcode-tui: no zcode auth here — replicate with `ygg-auth.py fetch <writer-host> <slug> --activate --harness zcode` (or ZCODE_TUI_AUTH_SYNC=1 for the retired startup plane)");
+    if (home && !existsSync(join(home, AUTOCLAW_PLAN_RELPATH)))
+      console.error("zcode-tui: no autoclaw plan here — `ygg-auth.py fetch <writer-host> <slug> --activate --harness autoclaw` (or `zcode-tui autoclaw setup` where the app is signed in)");
   } catch { /* never block */ }
 }
 
-// ---------------------------------------------------------------------------
-// AutoClaw plan replication (owner boundary 2026-10-23: the user's own mined
-// plan file — identity + credential — travels the same SSOT channel as the
-// zcode provider config, so every host can serve the plan without the
-// official app installed. NEWEST WINS on auth.updatedAt: a host that refreshed
-// its credential is never clobbered by a stale SSOT copy; pushing the fresher
-// copy back to the SSOT host stays a manual `zcode-tui autoclaw credential
-// refresh` there (best-effort, never automatic — one writer per credential).
-// ---------------------------------------------------------------------------
+// AutoClaw plan replication — LEGACY (2.0.0): ygg-auth --harness autoclaw
+// owns this movement now. The newest-wins pull survives only behind
+// ZCODE_TUI_AUTH_SYNC=1. Original boundary (2026-10-23): the user's own mined
 
 export const AUTOCLAW_PLAN_RELPATH = ".config/zcode-tui/autoclaw-plan.json";
 
 export interface PlanSyncResult { source: string; action: "pulled" | "local-newer" | "skipped"; reason?: string }
 
-/** Best-effort: pull the SSOT plan file when it exists and is newer than local. */
+/** Best-effort: pull the SSOT plan file when it exists and is newer than local. (legacy plane — gated) */
 export function syncAutoclawPlan(deps: SyncDeps = {}): PlanSyncResult | null {
+  if (process.env[LEGACY_SYNC_ENV] !== "1") return null;
   const home = deps.homeDir ?? process.env.HOME ?? "";
   if (!home) return null;
   const cfg = loadAuthConfig(home);

@@ -3,7 +3,7 @@
 // mock-tui-opentui staging), bun-native entry picked automatically.
 import pkg from "../../package.json";
 import { AppServer } from "../protocol/client";
-import { syncAuthAtStartup } from "../auth/sync";
+import { syncAuthAtStartup, localProviderConfigPath } from "../auth/sync";
 import { probe, initProbeDir } from "./probes";
 import { THEMES } from "./design";
 
@@ -56,15 +56,16 @@ async function main() {
       process.exit(0);
     }
   }
-  // Auth IS the zcode machine settings: sync the SSOT (fleet default jojo —
-  // local read here, `ssh jojo` elsewhere) into the TUI config, heal the
-  // local machine settings from it, and hand the stored copy to the backend.
-  // Fail-soft: no network/jojo must never block the boot.
+  // 2.0.0: replication is ygg-auth's job. The backend handoff prefers the
+  // LOCAL machine settings (~/.zcode/v2/provider_config.json, which the
+  // ygg-auth zcode harness replicates); the legacy stored copy applies only
+  // when ZCODE_TUI_AUTH_SYNC=1 ran the retired startup plane. Fail-soft.
   const auth = syncAuthAtStartup();
+  const providerConfigPath = auth?.providerConfigPath ?? localProviderConfigPath();
   if (auth) {
     probe("auth-sync", `source=${auth.source} fp=${auth.fingerprint} healed=${auth.healedMachineSettings}`);
   } else {
-    probe("auth-sync", "skipped (no source reachable)");
+    probe("auth-sync", providerConfigPath ? "legacy off — local machine settings in use" : "legacy off — no local auth (replicate with ygg-auth)");
   }
   probe("backend-spawn", "");
   const client = new AppServer({
@@ -76,7 +77,7 @@ async function main() {
         client.respond(m.id as string, {});
       }
     },
-  }, auth ? { env: { ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: auth.providerConfigPath } } : {});
+  }, providerConfigPath ? { env: { ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: providerConfigPath } } : {});
 
   const [{ createCliRenderer }, { createRoot }, { App }] = await Promise.all([
     import("@opentui/core"),
