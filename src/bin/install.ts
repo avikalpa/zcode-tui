@@ -195,7 +195,9 @@ async function cmdHeadless(v: Record<string, string | boolean | undefined>): Pro
   const unitDir = join(homedir(), ".config", "systemd", "user");
   const unitPath = join(unitDir, "ztq-autoclaw-headless.service");
   const unit = `# zcode-tui install autoclaw-headless — the official app under xvfb, CDP on loopback.
-# One app instance per profile (fleet law): stop this unit before a desktop
+# --appimage-extract-and-run: FUSE mounts are not available to service
+# contexts on the fleet (fusermount EPERM, measured 2026-10-26) — extract
+# instead of mount. One app instance per profile (fleet law): stop this unit before a desktop
 # session runs AutoClaw on the same user-data dir, and vice versa.
 [Unit]
 Description=AutoClaw desktop (official app, headless via xvfb) for the zcode-tui broker
@@ -203,7 +205,7 @@ After=network-online.target
 
 [Service]
 ExecStartPre=/usr/bin/env sh -c 'pkill -f "remote-debugging-port=${port}" 2>/dev/null; exit 0'
-ExecStart=${APPIMAGE} --remote-debugging-port=${port}
+ExecStart=${APPIMAGE} --appimage-extract-and-run --remote-debugging-port=${port}
 Restart=on-failure
 RestartSec=10
 
