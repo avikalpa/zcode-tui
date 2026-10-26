@@ -454,15 +454,19 @@ export function ToolPart(props: {
     case "glob": {
       const count = finiteNumber(metadata.count);
       const path = stringValue(input.path);
+      // The reference gates the count segment on Solid <Show> — truthy on
+      // finiteNumber — so a zero count hides it entirely.
       return inlineRow(
         "✱",
         C.subtle,
-        `Glob "${stringValue(input.pattern) ?? ""}"${path ? ` in ${path} ` : " "}${count !== undefined ? `(${count} ${count === 1 ? "match" : "matches"})` : ""}`,
+        `Glob "${stringValue(input.pattern) ?? ""}"${path ? ` in ${path} ` : " "}${count ? `(${count} ${count === 1 ? "match" : "matches"})` : ""}`,
         "Finding files…",
       );
     }
     case "read": {
-      const loaded = Array.isArray(metadata.loaded)
+      // The reference settles loaded rows on the completed status only
+      // (routes/session/index.tsx Read).
+      const loaded = m.status === "completed" && Array.isArray(metadata.loaded)
         ? metadata.loaded.filter((p): p is string => typeof p === "string")
         : [];
       return (
@@ -481,10 +485,11 @@ export function ToolPart(props: {
     case "grep": {
       const matches = finiteNumber(metadata.matches);
       const path = stringValue(input.path);
+      // Same <Show> truthy gate as Glob: zero matches hides the segment.
       return inlineRow(
         "✱",
         C.subtle,
-        `Grep "${stringValue(input.pattern) ?? ""}"${path ? ` in ${path} ` : " "}${matches !== undefined ? `(${matches} ${matches === 1 ? "match" : "matches"})` : ""}`,
+        `Grep "${stringValue(input.pattern) ?? ""}"${path ? ` in ${path} ` : " "}${matches ? `(${matches} ${matches === 1 ? "match" : "matches"})` : ""}`,
         "Searching content…",
       );
     }
@@ -531,7 +536,11 @@ export function ToolPart(props: {
               {entries.map(([key, value]) => (
                 <box key={key} style={{ flexDirection: "row", flexShrink: 0 }}>
                   <text content={`${key}: `} fg={C.subtle} />
-                  <text content={typeof value === "string" ? value : JSON.stringify(value)} fg={C.fg} wrapMode="word" />
+                  <text
+                    content={typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+                    fg={C.fg}
+                    wrapMode="word"
+                  />
                 </box>
               ))}
               {output ? (
