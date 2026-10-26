@@ -1007,3 +1007,26 @@ upstream when it releases) — continue until this file's Remaining is empty
   log /tmp/zq-ux-parity/sitting-10-red.log), green after
   (sitting-10-after.log). Full suite 323/323 across 42 files, typecheck
   exit 0, live smoke exit 0.
+
+- Unit 16 (sitting 10): resumed sessions take the reference footer
+  projection law (routes/session/rows.ts 325-351 + turnDuration 353). The
+  projection pushes an assistant-footer row for EVERY terminal assistant
+  message — finish set and not tool-calls/unknown — and the footer
+  duration is TURN-SCOPED: time.completed minus the turn input's
+  time.created (the message's own created time when no input precedes).
+  The live backend payload carries finish and time.completed on resumed
+  messages (verified against a real session/resume dump 2026-10-26:
+  per-step assistant messages with finish tool-calls on middle steps,
+  end_turn on the last, tokens {input,output,reasoning,cache}), so
+  partsToTurns extracts finish/completedAt and the new attachTurnMetrics
+  stamps the turn-scoped duration on terminal steps at resume time.
+  Throughput needs every step's time.streamed, which the payload does
+  not carry — turnTokensPerSecond returns undefined without it, so
+  resumed footers read `Build · model · <duration>` with no tok/s,
+  matching the reference. The inherited resume path derived no metrics,
+  so reopened sessions rendered no footers at all. Live turns untouched
+  (finish is never set on the live path). Four extraction/metrics tests
+  + one App frame test in resume-footer.test.tsx; module-level red
+  against parent 351e001 (missing attachTurnMetrics export; log
+  /tmp/zq-ux-parity/sitting-10-unit2-red.log), green after. Full suite
+  328/328 across 43 files, typecheck exit 0, live smoke exit 0.
