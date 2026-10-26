@@ -230,6 +230,105 @@ WantedBy=default.target
   return 0;
 }
 
+// ---------------------------------------------------------------------------
+// The dependency self-update plane (owner 2026-10-26): the fleet's installs
+// are done, so a daily service+timer keeps the zcode-tui dependency stack
+// current — zcode-tui itself (git main + unit restarts) and, when the owner
+// has supplied vendor URLs, the ZCode deb and the AutoClaw AppImage.
+// ---------------------------------------------------------------------------
+
+const REPO_DIR = process.env.ZCODE_TUI_REPO ?? join(homedir(), "gh", "zcode-tui");
+const UNITS = ["ztq-autoclaw-proxy", "ztq-serve-dev4"];
+
+async function cmdSelfUpdate(_v: Record<string, string | boolean | undefined>): Promise<number> {
+  const log = (m: string) => console.log(`dep-update: ${m}`);
+  // 1. zcode-tui itself — git main on this host's checkout.
+  const before = await sh(["git", "-C", REPO_DIR, "rev-parse", "--short", "HEAD"]);
+  await sh(["git", "-C", REPO_DIR, "fetch", "origin", "--quiet"]);
+  const pull = await sh(["git", "-C", REPO_DIR, "pull", "--ff-only", "origin", "main"]);
+  const after = await sh(["git", "-C", REPO_DIR, "rev-parse", "--short", "HEAD"]);
+  if (pull.code !== 0) log(`git pull failed (rc=${pull.code}) — ${pull.err.trim().split("\n")[0] ?? ""}`);
+  const changed = after.out.trim() !== before.out.trim();
+  log(`zcode-tui ${before.out.trim()} -> ${after.out.trim()}${changed ? " (updated)" : " (current)"}`);
+  // 2. restart repo-backed units, but never under live dispatch (the queue
+  //    serve law: a serve restarts only when idle; parked/cooldown units are safe).
+  if (changed) {
+    const dbPath = join(process.env.HOME ?? "", ".local", "state", "zcode-tui", "queue", "queue.sqlite3");
+    let running = 0;
+    try {
+      const { Database } = await import("bun:sqlite");
+      const db = new Database(dbPath, { readonly: true });
+      running = (db.query(`SELECT COUNT(*) n FROM tasks WHERE status='running'`).get() as { n: number }).n;
+      db.close();
+    } catch { /* no queue state on this host */ }
+    for (const unit of UNITS) {
+      const chk = await sh(["systemctl", "--user", "is-active", unit]);
+      if (chk.out.trim() !== "active") continue;
+      if (unit.endsWith("-dev4") && running > 0) { log(`serve ${unit}: ${running} running task(s) — restart deferred to the watcher`); continue; }
+      await sh(["systemctl", "--user", "restart", unit]);
+      log(`restarted ${unit} (code changed)`);
+    }
+  }
+  // 3. vendor artifacts — only with owner-supplied URLs; never guessed.
+  const zcUrl = process.env.ZCODE_INSTALL_URL ?? "";
+  if (zcUrl) { log("zcode: vendor URL set — running install zcode"); await cmdInstallZcode({ url: zcUrl }); }
+  else log("zcode: no ZCODE_INSTALL_URL — deb updates ride the owner's channel");
+  const acUrl = process.env.AUTOCLAW_INSTALL_URL ?? "";
+  if (acUrl) {
+    log("autoclaw: vendor URL set — refreshing the AppImage");
+    const head = await sh(["sh", "-c", `curl -fsIL ${acUrl} | grep -iE "^content-length" | tail -1 | tr -dc 0-9`]);
+    const cur = existsSync(APPIMAGE) ? String(statSync(APPIMAGE).size) : "";
+    if (head.out.trim() && head.out.trim() !== cur) await cmdInstallAutoclaw({ url: acUrl });
+    else log(`autoclaw: AppImage already current (${cur || "?"} bytes)`);
+  } else log("autoclaw: no AUTOCLAW_INSTALL_URL — AppImage updates ride the vendor updater / owner channel");
+  return 0;
+}
+
+async function cmdUpdater(v: Record<string, string | boolean | undefined>): Promise<number> {
+  const unitDir = join(homedir(), ".config", "systemd", "user");
+  const svc = join(unitDir, "ztq-dep-update.service");
+  const tim = join(unitDir, "ztq-dep-update.timer");
+  const repo = REPO_DIR;
+  const service = `# zcode-tui install updater — keep the zcode-tui dependency stack current.
+[Unit]
+Description=zcode-tui dependency stack self-update (zcode-tui main + vendor artifacts when URLs are set)
+
+[Service]
+Type=oneshot
+WorkingDirectory=${repo}
+ExecStart=${repo}/bin/zcode-tui install selfupdate
+`;
+  const timer = `# zcode-tui install updater — daily cadence, randomized to dodge load spikes.
+[Unit]
+Description=daily zcode-tui dependency stack update check
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`;
+  if (v["dry-run"]) { process.stdout.write(service + timer); return 0; }
+  if (v.off) {
+    await sh(["systemctl", "--user", "disable", "--now", "ztq-dep-update.timer"]);
+    console.log("ztq-dep-update.timer disabled (units left in place)");
+    return 0;
+  }
+  if (!existsSync(repo)) { console.error(`updater: no zcode-tui checkout at ${repo}`); return 1; }
+  mkdirSync(unitDir, { recursive: true });
+  writeFileSync(svc, service);
+  writeFileSync(tim, timer);
+  await sh(["systemctl", "--user", "daemon-reload"]);
+  const en = await sh(["systemctl", "--user", "enable", "--now", "ztq-dep-update.timer"]);
+  if (en.code !== 0) { console.error(`enable failed: ${en.err.trim().slice(0, 200)}`); return 1; }
+  console.log(`updater units written + timer enabled: ${tim}`);
+  console.log("runs daily 04:15 IST (+30m jitter); hand-run: zcode-tui install selfupdate");
+  console.log("vendor URLs opt-in: ZCODE_INSTALL_URL / AUTOCLAW_INSTALL_URL in the service env or ~/.config/zcode-tui/env");
+  return 0;
+}
+
 async function main(): Promise<number> {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
@@ -240,6 +339,7 @@ async function main(): Promise<number> {
       port: { type: "string" },
       enable: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
+      off: { type: "boolean", default: false },
     },
   });
   const sub = String(positionals[0] ?? "doctor");
@@ -248,13 +348,17 @@ async function main(): Promise<number> {
     case "zcode": return cmdInstallZcode(values as Record<string, string | boolean | undefined>);
     case "autoclaw": return cmdInstallAutoclaw(values as Record<string, string | boolean | undefined>);
     case "autoclaw-headless": return cmdHeadless(values as Record<string, string | boolean | undefined>);
+    case "selfupdate": return cmdSelfUpdate(values as Record<string, string | boolean | undefined>);
+    case "updater": return cmdUpdater(values as Record<string, string | boolean | undefined>);
     default:
-      console.error("usage: zcode-tui install <doctor|zcode|autoclaw|autoclaw-headless> [...]");
+      console.error("usage: zcode-tui install <doctor|zcode|autoclaw|autoclaw-headless|updater|selfupdate> [...]");
       console.error("  doctor                              combined fleet-readiness check (--json)");
       console.error("  zcode [--file F|--url U]            install the ZCode desktop/CLI (deb)");
       console.error("  autoclaw [--file F|--url U]         stage the official AutoClaw AppImage");
       console.error("  autoclaw-headless [--port 9223] [--enable] [--dry-run]");
       console.error("                                      xvfb unit for the broker plane (docs/fleet-2.0.md)");
+      console.error("  updater [--off] [--dry-run]         write the daily dependency-update service+timer");
+      console.error("  selfupdate                          run one update pass now (what the timer runs)");
       return 2;
   }
 }
