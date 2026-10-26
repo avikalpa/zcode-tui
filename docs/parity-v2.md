@@ -660,3 +660,15 @@ Owner directive 2026-09-17: after EVERY UX iteration, re-write the Remaining
 section to the truth (move lines to Shipped with the wave version, re-pull
 upstream when it releases) — continue until this file's Remaining is empty
 (modulo the non-parities and host-verb blocks).
+
+## 2026-10-27 ux-falsify runtime wave (tooling, lane/ux-falsify)
+
+The runtime half of parity verification now exists: `design/ux/` corpus +
+`tools/ux/falsify.py` — PTY-driven capture of both TUIs at fixed geometry,
+pyte cell-truth snapshots, cell-diff under declared masks, PNG render layer,
+planted-defect selftest (12/12). Wave-0 ran home / command palette / session
+list: all MISMATCH with located deltas (F1 composer offset +9col/+2row, F2
+footer cwd:branch missing, F6/F7 palette+list structure) — triage pending
+against the vendored v2.0.8 pin. `design/ux/findings/2026-10-27-wave0.md`
+is the ledger; future UX waves must run the falsify loop and append findings
+here.

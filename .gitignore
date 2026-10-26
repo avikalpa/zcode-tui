@@ -6,3 +6,4 @@ docs/evidence/strace-cli-50s.txt
 dist/
 .ui/
 .research/
+design/ux/runs/

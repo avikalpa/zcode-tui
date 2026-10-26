@@ -1,0 +1,48 @@
+# ux-falsify state manifest — home/idle (wave 0)
+# Contract: home layout matches the opencode reference except masked regions.
+[identity]
+component = "home"
+state = "idle"
+claim = "home screen layout+styles match reference (wordmark masked: owner keeps zcodetui logo)"
+contract_rev = 1
+
+[environment]
+geometry = [120, 40]
+
+[reference]
+app = "opencode"
+cmd = ["opencode"]
+cwd = "/tmp/ux-falsify/proj"
+readiness = "Ask anything"
+timeout = 20.0
+warmup_ms = 3000
+stable_ms = 700
+
+[[reference.drive]]
+ms = 1200
+
+[reference.sig_masks]
+composer_cycle = { rect = [13, 4, 13, 95] }   # placeholder typewriter (measured 2026-10-27)
+
+[candidate]
+app = "zcode-tui"
+cmd = ["/tmp/zcode-tui--ux/bin/zcode-tui"]
+cwd = "/tmp/ux-falsify/proj"
+readiness = "Ask anything"
+timeout = 45.0
+warmup_ms = 3000
+stable_ms = 1200
+
+[[candidate.drive]]
+ms = 1200
+
+[evaluate.masks]
+# rects measured 2026-10-27 from settled captures (oc wordmark rows 6-9, zc rows ~7-11, cols 21-60)
+wordmark = { rect = [5, 14, 12, 95], reason = "owner 2026-09-18: 'Our home screen zcodetui logo stays' — port AROUND, never over" }
+placeholder_oc = { rect = [13, 4, 13, 95], reason = "placeholder typewriter cycle — animated content; the cycler gets its own state manifest" }
+placeholder_zc = { rect = [14, 4, 15, 95], reason = "placeholder typewriter cycle (wraps 2 rows) — animated content" }
+model_line_oc = { rect = [15, 3, 15, 70], reason = "backend model identity differs by design (zcode coding plan vs opencode providers) — ledger non-parity" }
+model_line_zc = { rect = [17, 3, 17, 70], reason = "backend model identity differs by design — ledger non-parity" }
+
+[candidate.sig_masks]
+composer_cycle = { rect = [13, 3, 19, 119] }  # typewriter + ~4s cycle-boundary full redraw (measured)

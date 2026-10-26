@@ -1,0 +1,58 @@
+# ux-falsify state manifest — session list (leader l)
+[identity]
+component = "session-list"
+state = "open"
+claim = "session list opens and lists sessions like the reference"
+contract_rev = 1
+
+[environment]
+geometry = [120, 40]
+
+[reference]
+app = "opencode"
+cmd = ["opencode"]
+cwd = "/tmp/ux-falsify/proj"
+readiness = ""
+timeout = 20.0
+warmup_ms = 3000
+stable_ms = 700
+
+[[reference.drive]]
+ms = 1200
+
+[[reference.drive]]
+send = "ctrl+x"
+ms = 120
+
+[[reference.drive]]
+send = "l"
+ms = 900
+
+[reference.sig_masks]
+composer_cycle = { rect = [13, 4, 13, 95] }   # placeholder typewriter (measured 2026-10-27)
+
+[candidate]
+app = "zcode-tui"
+cmd = ["/tmp/zcode-tui--ux/bin/zcode-tui"]
+cwd = "/tmp/ux-falsify/proj"
+readiness = ""
+timeout = 45.0
+warmup_ms = 3000
+stable_ms = 1200
+
+[[candidate.drive]]
+ms = 1200
+
+[[candidate.drive]]
+send = "ctrl+x"
+ms = 120
+
+[[candidate.drive]]
+send = "l"
+ms = 900
+
+[evaluate.masks]
+wordmark = { rect = [4, 8, 12, 72], reason = "owner 2026-09-18: zcodetui logo stays" }
+
+[candidate.sig_masks]
+composer_cycle = { rect = [13, 3, 19, 119] }  # typewriter + ~4s cycle-boundary full redraw (measured)
