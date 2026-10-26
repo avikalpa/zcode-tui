@@ -14,9 +14,9 @@
 // Carry-forward law: client, never reimplementation — we speak the same
 // protocol the desktop speaks; server cooldowns and refusals surface as-is.
 import { parseArgs } from "node:util";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
 import { startHeartbeat } from "../queue/heartbeat";
@@ -303,6 +303,38 @@ async function cmdPoll(json: boolean) {
   return 0;
 }
 
+// Fleet single-flight admission (sol DD verdict 3, 2026-10-27): the local
+// claim_running only coordinates workers sharing ONE index — three hosts hold
+// three databases, and nothing server-side serializes granted tickets we can
+// see. The fleet-shared dataset gives us a portable mkdir lock: one idle exec
+// account-wide at a time, stale stamp stealable after 3h (crash tolerance).
+const FLEET_LOCK_ROOT = () =>
+  process.env.ZTQ_FLEET_LOCK_DIR ?? join(homedir(), "data", "fleet-locks");
+
+function acquireFleetExecLock(ticket: string): boolean {
+  const root = join(FLEET_LOCK_ROOT(), "ztq-idle-exec");
+  try {
+    mkdirSync(FLEET_LOCK_ROOT(), { recursive: true });
+    try {
+      mkdirSync(root); // atomic: exists => held
+    } catch {
+      try {
+        if (Date.now() - statSync(join(root, "stamp.txt")).mtimeMs < 3 * 3600_000) return false;
+        rmSync(root, { recursive: true, force: true });
+        mkdirSync(root);
+      } catch { return false; }
+    }
+    writeFileSync(join(root, "stamp.txt"), `${ticket} ${hostname()} ${process.pid} ${Date.now()}\n`);
+    return true;
+  } catch {
+    return true; // lock plane unavailable — fail open; ticket state still guards
+  }
+}
+
+function releaseFleetExecLock(): void {
+  try { rmSync(join(FLEET_LOCK_ROOT(), "ztq-idle-exec"), { recursive: true, force: true }); } catch { /* absent */ }
+}
+
 async function cmdExec(v: Record<string, string | boolean | undefined>): Promise<number> {
   adoptOrphanedTickets();
   const rows = localExecutableTasks();
@@ -331,6 +363,11 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   if (!claimLocalTask(row.offPeakTaskId)) {
     console.error(`idle exec: row ${row.offPeakTaskId} already claimed (claim_running=1) — another executor owns it`);
     return 2;
+  }
+  if (!acquireFleetExecLock(row.serverTicketId)) {
+    releaseLocalTask(row.offPeakTaskId);
+    console.error("idle exec: fleet single-flight — another host holds the exec lock; row left queued for the next tick");
+    return 3;
   }
 
   // Local admission proxy: forwards /v1/messages to the off-peak anthropic
@@ -413,7 +450,11 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
       const cap = 8 << 20;
       p.stdout.on("data", (d: Buffer) => { if (stdout.length < cap) stdout += d.toString(); });
       p.stderr.on("data", (d: Buffer) => { if (stderr.length < cap) stderr += d.toString(); });
-      const timer = setTimeout(() => p.kill("SIGKILL"), 120 * 60_000);
+      // Deadline is task-configurable (sol DD verdict 2, 2026-10-27): a
+      // fixed 120min SIGKILL is incompatible with admitting arbitrary BIG
+      // tasks. --max-minutes / ZTQ_IDLE_MAX_MINUTES, policy-bounded 5..600.
+      const maxMinutes = Math.max(5, Math.min(600, Number(v["max-minutes"] ?? process.env.ZTQ_IDLE_MAX_MINUTES ?? 120)));
+      const timer = setTimeout(() => p.kill("SIGKILL"), maxMinutes * 60_000);
       // Fail honestly on a failed spawn instead of hanging on a child that
       // never started (same zombie class as autoclaw.ts, 2026-10-23).
       let done = false;
@@ -465,6 +506,7 @@ ${note}` : stderr });
     return honestRc === 0 ? 0 : 1;
   } finally {
     proxy.stop(true);
+    releaseFleetExecLock();
   }
 }
 
@@ -520,6 +562,7 @@ export async function main(): Promise<void> {
       task: { type: "string" },
       ticket: { type: "string" },
       "poll-s": { type: "string" },
+      "max-minutes": { type: "string" },
       warmup: { type: "boolean", default: false },
       resume: { type: "string", default: "" },
       out: { type: "string" },
@@ -540,7 +583,7 @@ export async function main(): Promise<void> {
     console.error("         [--permission-mode yolo|build|edit|plan|guarded] [--json]");
     console.error("         (permission-mode defaults to yolo - full access, owner directive 2026-10-23)");
     console.error("  poll [--json]     # refresh ticket states for local rows (+ orphan adoption)");
-    console.error("  exec [--task T | --ticket N] [--model M] [--workspace W] [--out O]");
+    console.error("  exec [--task T | --ticket N] [--model M] [--workspace W] [--out O] [--max-minutes N]");
     console.error("                    # execute a READY ticket through the off-peak gateway (pi agent)");
     console.error("  serve [--poll-s N] # poll + execute loop (the desktop claim loop, on this host)");
     process.exit(2);

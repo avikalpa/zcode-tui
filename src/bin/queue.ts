@@ -121,6 +121,14 @@ export function cmdEnqueue(db: Database, v: Record<string, string | boolean | un
       t.last_error, t.last_exit, t.run_log, t.result_ref, t.expect_file);
   const pos = positionOf(db, t.id);
   console.log(`queued ${t.id} route=${route} position=${pos} attempts_cap=${t.max_attempts}${eligibleAt !== now ? ` eligible_at=${new Date(eligibleAt).toISOString()}` : ""}`);
+  // Admission honesty (sol DD verdict 4, 2026-10-27): the managed routes
+  // enforce the desktop's per-route taskTimeoutMin (zai-coding-plan = 60min,
+  // mined from its route config) — a known healthy-dream killer. Surface the
+  // cap at admission so long work is routed deliberately; the raise/override
+  // decision itself stays owner-gated in the ledger.
+  if (route === "zai-coding-plan") {
+    console.error("queue: NOTE — route 'zai-coding-plan' caps task runtime at 60min (desktop taskTimeoutMin); longer work belongs on the idle route or must be split.");
+  }
   if (v.json) console.log(JSON.stringify({ id: t.id, route, position: pos }));
 }
 
