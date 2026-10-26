@@ -169,8 +169,8 @@ describe("diff viewer helpers", () => {
     expect(diffSourceLabel("working")).toBe("Uncommitted");
   });
 
-  test("filetype derives from the extension", () => {
-    expect(filetypeOf("a/b/c.ts")).toBe("ts");
-    expect(filetypeOf("Makefile")).toBeUndefined();
+  test("filetype derives the reference grammar name from the extension", () => {
+    expect(filetypeOf("a/b/c.ts")).toBe("typescript");
+    expect(filetypeOf("Makefile")).toBe("none");
   });
 });

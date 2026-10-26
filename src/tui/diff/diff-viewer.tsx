@@ -558,8 +558,145 @@ export function DiffViewer(props: {
   );
 }
 
-export function filetypeOf(path: string): string | undefined {
-  const dot = path.lastIndexOf(".");
-  if (dot <= 0) return undefined;
-  return path.slice(dot + 1).toLowerCase();
+// Reference util/filetype.ts: extension → tree-sitter grammar name, verbatim
+// table; the javascript/jsx flavours collapse to typescript and everything
+// unmatched reads "none". Feed this to the code/diff renderables so their
+// grammar lookup sees the names the reference registers.
+export const LANGUAGE_EXTENSIONS: Record<string, string> = {
+  ".abap": "abap",
+  ".bat": "bat",
+  ".bib": "bibtex",
+  ".bibtex": "bibtex",
+  ".clj": "clojure",
+  ".cljs": "clojure",
+  ".cljc": "clojure",
+  ".edn": "clojure",
+  ".coffee": "coffeescript",
+  ".c": "c",
+  ".cpp": "cpp",
+  ".cxx": "cpp",
+  ".cc": "cpp",
+  ".c++": "cpp",
+  ".cs": "csharp",
+  ".csx": "csharp",
+  ".css": "css",
+  ".d": "d",
+  ".pas": "pascal",
+  ".pascal": "pascal",
+  ".diff": "diff",
+  ".patch": "diff",
+  ".dart": "dart",
+  ".dockerfile": "dockerfile",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".erl": "erlang",
+  ".ets": "typescript",
+  ".hrl": "erlang",
+  ".fs": "fsharp",
+  ".fsi": "fsharp",
+  ".fsx": "fsharp",
+  ".fsscript": "fsharp",
+  ".gitcommit": "git-commit",
+  ".gitrebase": "git-rebase",
+  ".go": "go",
+  ".groovy": "groovy",
+  ".gleam": "gleam",
+  ".hbs": "handlebars",
+  ".handlebars": "handlebars",
+  ".hs": "haskell",
+  ".lhs": "haskell",
+  ".html": "html",
+  ".htm": "html",
+  ".ini": "ini",
+  ".java": "java",
+  ".jl": "julia",
+  ".js": "javascript",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".jsx": "javascriptreact",
+  ".json": "json",
+  ".tex": "latex",
+  ".latex": "latex",
+  ".less": "less",
+  ".lua": "lua",
+  ".makefile": "makefile",
+  makefile: "makefile",
+  ".md": "markdown",
+  ".markdown": "markdown",
+  ".m": "objective-c",
+  ".mm": "objective-cpp",
+  ".pl": "perl",
+  ".pm": "perl",
+  ".pm6": "perl6",
+  ".php": "php",
+  ".ps1": "powershell",
+  ".psm1": "powershell",
+  ".pug": "jade",
+  ".jade": "jade",
+  ".py": "python",
+  ".r": "r",
+  ".cshtml": "razor",
+  ".razor": "razor",
+  ".rb": "ruby",
+  ".rake": "ruby",
+  ".gemspec": "ruby",
+  ".ru": "ruby",
+  ".erb": "erb",
+  ".html.erb": "erb",
+  ".js.erb": "erb",
+  ".css.erb": "erb",
+  ".json.erb": "erb",
+  ".rs": "rust",
+  ".scss": "scss",
+  ".sass": "sass",
+  ".scala": "scala",
+  ".shader": "shaderlab",
+  ".sh": "bash",
+  ".bash": "bash",
+  ".zsh": "bash",
+  ".ksh": "bash",
+  ".sql": "sql",
+  ".svelte": "svelte",
+  ".swift": "swift",
+  ".ts": "typescript",
+  ".tsx": "typescriptreact",
+  ".mts": "typescript",
+  ".cts": "typescript",
+  ".mtsx": "typescriptreact",
+  ".ctsx": "typescriptreact",
+  ".xml": "xml",
+  ".xsl": "xsl",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".vue": "vue",
+  ".zig": "zig",
+  ".zon": "zig",
+  ".astro": "astro",
+  ".ml": "ocaml",
+  ".mli": "ocaml",
+  ".tf": "terraform",
+  ".tfvars": "terraform-vars",
+  ".hcl": "hcl",
+  ".nix": "nix",
+  ".typ": "typst",
+  ".typc": "typst",
+};
+
+// node path.extname semantics on the basename: trailing dot segment, absent
+// for dot-leading names.
+function extnameOf(path: string): string {
+  const base = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return base.slice(dot);
+}
+
+export function filetypeOf(path: string): string {
+  if (!path) return "none";
+  const language = LANGUAGE_EXTENSIONS[extnameOf(path)];
+  if (language === undefined) return "none";
+  if (["typescriptreact", "javascriptreact", "javascript"].includes(language)) return "typescript";
+  return language;
 }

@@ -12,7 +12,7 @@
 // zcode tool input carries file_path rather than path.
 
 import type { ReactNode } from "react";
-import { TextAttributes } from "@opentui/core";
+import { SyntaxStyle, TextAttributes } from "@opentui/core";
 import type { ThemeTokens } from "../design";
 import { stringWidth } from "../diff/string-width";
 import { FilePath } from "../diff/file-path";
@@ -190,6 +190,33 @@ export function subagentModelLabel(value: string | undefined) {
   return `${reference}${variant ? ` (${variant})` : ""}`;
 }
 
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+// Reference parseDiagnostics (routes/session/index.tsx): the diagnostics
+// record is keyed by file path; only severity 1 with a usable range and
+// message survives, capped at 3 rows. The reference additionally normalizes
+// the lookup path per terminal platform — identity on this linux-only
+// binding (ledger adaptation).
+export function parseDiagnostics(value: unknown, filePath: string) {
+  const diagnostics = recordValue(value)?.[filePath];
+  if (!Array.isArray(diagnostics)) return [];
+  return diagnostics
+    .flatMap((item) => {
+      const diagnostic = recordValue(item);
+      const start = recordValue(recordValue(diagnostic?.range)?.start);
+      const line = finiteNumber(start?.line);
+      const character = finiteNumber(start?.character);
+      const message = stringValue(diagnostic?.message);
+      if (diagnostic?.severity !== 1 || line === undefined || character === undefined || !message) return [];
+      return [{ range: { start: { line, character } }, message }];
+    })
+    .slice(0, 3);
+}
+
 export function toolDisplay(tool: string): string {
   const known = new Set([
     "shell", "glob", "read", "grep", "webfetch", "websearch",
@@ -240,7 +267,7 @@ function inputPath(input: Record<string, unknown>): string | undefined {
 export function ToolPart(props: {
   C: ThemeTokens;
   m: ToolPartModel;
-  syntaxStyle?: unknown;
+  syntaxStyle?: SyntaxStyle;
   expanded: boolean;
   width: number;
   spinnerChar: string;
@@ -342,11 +369,33 @@ export function ToolPart(props: {
     case "write": {
       const path = inputPath(input);
       if (complete) {
+        // Reference Write completed branch: the FULL content through the
+        // line-number gutter (text.subdued, minWidth 3, paddingRight 1) and
+        // the syntax code element (conceal off, text.default, filetype of
+        // the path), then the metadata error rows.
+        const code = stringValue(input.content) ?? "";
+        const writeErrors = parseDiagnostics(metadata.diagnostics, path ?? "");
         return blockTool({
           path: { label: "# Wrote", value: path ?? "" },
-          children: stringValue(input.content) ? (
-            <text content={(stringValue(input.content) ?? "").split("\n").slice(0, 12).join("\n")} fg={C.fg} />
-          ) : null,
+          children: (
+            <>
+              <line-number fg={C.subtle} minWidth={3} paddingRight={1}>
+                <code
+                  conceal={false}
+                  fg={C.fg}
+                  filetype={filetypeOf(path ?? "")}
+                  syntaxStyle={props.syntaxStyle ?? SyntaxStyle.fromTheme([])}
+                  content={code}
+                />
+              </line-number>
+              {writeErrors.map((diagnostic) => (
+                <text
+                  content={`Error [${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}] ${diagnostic.message}`}
+                  fg={C.error}
+                />
+              ))}
+            </>
+          ),
         });
       }
       return inlineRow("←", C.subtle, `Write ${path ?? ""}`, "Preparing write…");
