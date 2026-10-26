@@ -54,10 +54,14 @@ const APPIMAGE = process.env.AUTOCLAW_APPIMAGE ?? join(homedir(), ".appimages", 
 async function cmdDoctor(json: boolean): Promise<number> {
   const checks: Record<string, unknown> = {};
   // zcode CLI (the runtime zcode-tui's TUI drives)
-  const zc = await sh(["sh", "-c", "command -v zcode && zcode --version 2>/dev/null"]);
-  const zcVersion = zc.out.split("\n").map((l) => l.trim()).find((l) => /^\d+(\.\d+)+/.test(l)) ?? null;
-  checks.zcode_cli = zc.code === 0 && zc.out.trim()
-    ? { found: true, path: zc.out.split("\n")[0], version: zcVersion }
+  // presence and version are separate probes: the desktop binary may exit
+  // nonzero on --version when headless — that must not read as MISSING.
+  const zcPath = await sh(["sh", "-c", "command -v zcode || true"]);
+  const zcVer = await sh(["sh", "-c", "zcode --version 2>/dev/null || true"]);
+  const zcVersion = zcVer.out.split("\n").map((l) => l.trim()).find((l) => /^\d+(\.\d+)+/.test(l))
+    ?? (zcVer.out.trim() ? zcVer.out.trim().split("\n").slice(-1)[0].slice(0, 60) : null);
+  checks.zcode_cli = zcPath.out.trim()
+    ? { found: true, path: zcPath.out.trim().split("\n")[0], version: zcVersion }
     : { found: false, install: "zcode-tui install zcode --url <official deb> (or --file F)" };
   // zcode auth (replicated by ygg-auth, never by us)
   const credPath = join(homedir(), ".zcode", "v2", "credentials.json");
@@ -87,7 +91,7 @@ async function cmdDoctor(json: boolean): Promise<number> {
   const prof = (h: string) => {
     const d = join(homedir(), ".yggterm", "auth", h);
     try {
-      return readdirSync(d).filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/, ""));
+      return readdirSync(d).filter((f) => f.endsWith(".json") && !f.startsWith(".")).map((f) => f.replace(/\.json$/, ""));
     } catch { return []; }
   };
   checks.ygg_auth = { zcodeProfiles: prof("zcode"), autoclawProfiles: prof("autoclaw"), note: prof("zcode").length + prof("autoclaw").length ? null : "no profiles yet — capture on the writer host" };
