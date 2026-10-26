@@ -930,3 +930,29 @@ upstream when it releases) — continue until this file's Remaining is empty
   parent at module level (missing editDiffView export; log
   /tmp/zq-ux-parity/sitting-8-unit4-red.log), green after. Full suite
   308/308 across 39 files, typecheck exit 0, live smoke exit 0.
+
+- Unit 13 (sitting 9): write blocks take the reference Write body law
+  (routes/session/index.tsx Write completed branch): the FULL content —
+  no truncation — through the reference treatment, a line-number gutter
+  (text.subdued, minWidth 3, paddingRight 1) wrapping the syntax code
+  element (conceal off, text.default, filetype of the path), then the
+  metadata diagnostics error rows. parseDiagnostics ported verbatim
+  (index.tsx 3669): the diagnostics record keyed by file path, severity 1
+  only, line+character+message required, capped at 3, rendered as
+  "Error [line:column] message" in the error colour (the per-platform
+  path normalization stays an adaptation — identity on this linux-only
+  binding). The inherited body was a plain-text 12-line slice with no
+  gutter and no diagnostics. filetypeOf now reads the reference
+  util/filetype.ts grammar table verbatim — javascript/javascriptreact/
+  typescriptreact collapse to "typescript", unmatched files read "none"
+  — so the code element's tree-sitter lookup sees the grammar names the
+  reference registers (the naive lowercase extension fed it "ts", which
+  selects no grammar). ToolPart's syntaxStyle prop is typed SyntaxStyle
+  (was unknown). One inherited diff.test literal moved to the ported
+  contract. Two frame tests + two helper tests in write-block.test.tsx;
+  red against the parent BEHAVIORALLY (both frame tests timed out — no
+  "line 30" through the 12-line slice, no diagnostics rows — plus the
+  filetypeOf literal; parseDiagnostics passed in isolation; log
+  /tmp/zq-ux-parity/sitting-9-red.log), green after (sitting-9-after.log).
+  Full suite 312/312 across 40 files, typecheck exit 0, live smoke
+  exit 0.
