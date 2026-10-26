@@ -956,3 +956,28 @@ upstream when it releases) — continue until this file's Remaining is empty
   /tmp/zq-ux-parity/sitting-9-red.log), green after (sitting-9-after.log).
   Full suite 312/312 across 40 files, typecheck exit 0, live smoke
   exit 0.
+
+- Unit 14 (sitting 9): shell blocks take the reference ShellDisplay
+  running law (routes/session/index.tsx ShellDisplay): while RUNNING
+  the command rides a bare spinner-glyph row (glyph + command, gap 1)
+  with the "$ " prefix withheld; any settled state carries "$ " again
+  (the inherited gate was `completed`, which also swallowed the
+  reference's streaming/pending "$ " marker); the collapse budget loses
+  2 columns only while running (was any loading status); expansion
+  wraps word (was char). The reference shells put the marker in
+  columns 5-6 of the block and the command text at 7 in EVERY state.
+  Fixed on the way: blockTool's title/path spinner wiring was a ternary
+  that DROPPED the glyph (spinnerPrefix ? stripped : plain) — it now
+  prepends the glyph to the "# "-stripped label like the reference
+  Spinner wrapping (index.tsx BlockToolContent), so a commandless
+  running shell reads "⠋ Writing command…" and a pending edit spins
+  its title. transcript-columns' live tool-row assertion moves to the
+  ported geometry (border 2, marker columns 5-6, command text 7): the
+  App's spinner is turn-scoped, so the synthetic frame after end_turn
+  carries an empty glyph slot — documented in the test. Three frame
+  tests in shell-block.test.tsx; red against the parent BEHAVIORALLY
+  (running-spinner row + commandless-title assertions; log
+  /tmp/zq-ux-parity/sitting-9-shell-red.log), green after. Full suite
+  315/315 across 41 files on re-run (one known cross-file
+  dialog-focus flake in the first pass — isolation + re-run clean,
+  sitting-5 unit 3 precedent), typecheck exit 0, live smoke exit 0.
