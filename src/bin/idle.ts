@@ -311,13 +311,6 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   let row = rows.find((r) => r.offPeakTaskId === taskSel || r.serverTicketId === ticketSel);
   if (!row && !taskSel && !ticketSel && rows.length > 0) row = rows[0];
   if (!row) { console.error("idle exec: no live ticket row matches (run `zcode-tui idle poll`)"); return 2; }
-  // The desktop claims its rows (atomic claim_running=1) before dispatch;
-  // we do the same so a desktop and a runner can never double-execute one
-  // row, and attempt_count tracks the retry bound (D2, 2026-10-26).
-  if (!claimLocalTask(row.offPeakTaskId)) {
-    console.error(`idle exec: row ${row.offPeakTaskId} already claimed (claim_running=1) — another executor owns it`);
-    return 2;
-  }
 
   const st = await pollTickets([row.serverTicketId]);
   const state = st.tickets[0]?.state ?? "unknown";
@@ -331,6 +324,14 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   const out = v.out ? String(v.out) : `/tmp/zt-idle-exec-${row.serverTicketId}.json`;
   const cli = autoclawPiCli();
   if (!cli) { console.error("idle exec: pi harness not found (appimage or `--vendor` install)"); return 2; }
+  // Claim only after every precondition passed (measured 2026-10-26: a claim
+  // taken before the harness check wedged the row claimed on an early bail —
+  // oc's first READY ticket stalled one tick). From here on, every exit path
+  // below either completes, fails terminally, or releases explicitly.
+  if (!claimLocalTask(row.offPeakTaskId)) {
+    console.error(`idle exec: row ${row.offPeakTaskId} already claimed (claim_running=1) — another executor owns it`);
+    return 2;
+  }
 
   // Local admission proxy: forwards /v1/messages to the off-peak anthropic
   // gateway with the ticket header; retries 429 not-ready on the gateway's
