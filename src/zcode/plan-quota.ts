@@ -29,7 +29,7 @@ const QUOTA_BASE = process.env.ZCODE_QUOTA_ORIGIN ?? "https://api.z.ai";
 const RESET_BASE = process.env.ZCODE_RESET_ORIGIN ?? "https://zcode.z.ai";
 
 export interface QuotaWindow {
-  window: "5h" | "week";
+  window: string;
   number: number;
   usage: number;
   currentValue: number;
@@ -70,15 +70,21 @@ export async function codingPlanQuota(fetchImpl: typeof fetch = fetch): Promise<
   try { doc = await res.json(); } catch { return { error: `http ${res.status} (non-JSON)` }; }
   // the quota endpoint answers code:200 (not the code:0 the reset plane uses)
   if ((doc?.code !== 0 && doc?.code !== 200) || !Array.isArray(doc?.data?.limits)) return { error: `envelope code ${doc?.code} ${String(doc?.msg ?? "").slice(0, 80)}` };
-  const windows: QuotaWindow[] = (doc.data.limits as Array<Record<string, unknown>>).map((l) => ({
-    window: Number(l.unit) === 3 ? "5h" : "week",
-    number: Number(l.number ?? 0),
-    usage: Number(l.usage ?? 0),
-    currentValue: Number(l.currentValue ?? 0),
-    remaining: Number(l.remaining ?? 0),
-    percentageUsed: Number(l.percentage ?? 0),
-    nextResetTime: Number(l.nextResetTime ?? 0),
-  }));
+  const windows: QuotaWindow[] = (doc.data.limits as Array<Record<string, unknown>>).map((l) => {
+    const unit = Number(l.unit);
+    return {
+      // z.ai grants windows erratically (owner 2026-10-26: start-plan gifts
+      // land "on any model quota as they wish") — never DROP an unknown unit
+      // type; label it so the view stays honest.
+      window: unit === 3 ? "5h" : unit === 6 ? "week" : `unit-${unit}`,
+      number: Number(l.number ?? 0),
+      usage: Number(l.usage ?? 0),
+      currentValue: Number(l.currentValue ?? 0),
+      remaining: Number(l.remaining ?? 0),
+      percentageUsed: Number(l.percentage ?? 0),
+      nextResetTime: Number(l.nextResetTime ?? 0),
+    };
+  });
   return { level: typeof doc.data.level === "string" ? doc.data.level.trim() : null, windows };
 }
 
