@@ -39,7 +39,7 @@ function findAutoClawConfigDir(home = homedir()): string | null {
 /** Synchronous-ish runner: resolve exit code + captured streams. */
 function sh(cmd: string[], input?: string): Promise<{ code: number; out: string; err: string }> {
   const p = Bun.spawn(cmd, { stdin: input !== undefined ? "pipe" : "ignore", stdout: "pipe", stderr: "pipe" });
-  if (input !== undefined) p.stdin.write(input);
+  if (input !== undefined) p.stdin?.write(input);
   p.stdin?.end();
   return Promise.all([
     p.exited,

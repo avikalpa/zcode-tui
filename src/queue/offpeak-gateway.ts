@@ -194,7 +194,13 @@ export async function registerOffPeakTask(input: {
       status: "queued",
       queued_at: now,
       registered_at: now,
-      schedulable: 1,
+      // schedulable=0 — the desktop claim loop only takes rows matching
+      // `schedulable = 1 AND claim_running = 0` (mined from out/scheduler/
+      // index.js 2026-10-26) and it dispatches rows it did not create to a
+      // phantom "Succeeded" with no session (jojo idle-final, owner-confirmed
+      // 2026-10-26). OUR idle serve/exec is the executor; the local claim
+      // below marks the row in-flight the same way the desktop does.
+      schedulable: 0,
       queue_position: null,
       claim_running: 0,
       attempt_count: 0,
@@ -204,7 +210,7 @@ export async function registerOffPeakTask(input: {
     const present = Object.keys(desired).filter((c) => cols.has(c));
     db.query(
       `INSERT INTO off_peak_tasks (${present.join(", ")}) VALUES (${present.map(() => "?").join(", ")})`,
-    ).run(...present.map((c) => desired[c]));
+    ).run(...(present.map((c) => desired[c]) as (string | number | null)[]));
   } catch (e) {
     db.close();
     return { ok: false, error: `local row insert failed: ${e instanceof Error ? e.message : String(e)}` };
@@ -302,19 +308,19 @@ export async function handleOffPeakAsk(method: string, params: Record<string, un
 // THIS host with no desktop (owner goal 2026-10-23).
 // ---------------------------------------------------------------------------
 
-export interface LocalTicketRow { offPeakTaskId: string; serverTicketId: string; title: string; prompt: string; status: string; model: string; workspacePath: string }
+export interface LocalTicketRow { offPeakTaskId: string; serverTicketId: string; title: string; prompt: string; status: string; model: string; workspacePath: string; attemptCount: number }
 
 /** Local rows that hold a server ticket and are not terminal — repair candidates included. */
 export function localExecutableTasks(): LocalTicketRow[] {
   const db = new Database(TASKS_INDEX(), { readonly: true });
   try {
-    const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, title, prompt, status, model_selection, workspace_path
+    const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, title, prompt, status, model_selection, workspace_path, COALESCE(attempt_count,0) AS attempt_count
       FROM off_peak_tasks
       WHERE server_ticket_id IS NOT NULL AND status IN ('queued','running')`).all() as any[];
     return rows.map((r) => {
       let model = "GLM-5.3-Flash";
       try { model = String(JSON.parse(r.model_selection ?? "{}").modelId ?? model); } catch { /* default */ }
-      return { offPeakTaskId: r.off_peak_task_id, serverTicketId: String(r.server_ticket_id), title: r.title ?? "", prompt: r.prompt ?? "", status: r.status, model, workspacePath: r.workspace_path ?? process.cwd() };
+      return { offPeakTaskId: r.off_peak_task_id, serverTicketId: String(r.server_ticket_id), title: r.title ?? "", prompt: r.prompt ?? "", status: r.status, model, workspacePath: r.workspace_path ?? process.cwd(), attemptCount: Number(r.attempt_count ?? 0) };
     });
   } finally { db.close(); }
 }
@@ -491,4 +497,31 @@ export function setLocalTaskState(offPeakTaskId: string, status: string, patch: 
         failure_reason=COALESCE(?, failure_reason), queue_position=COALESCE(?, queue_position), updated_at=? WHERE off_peak_task_id=?`)
       .run(status, patch.startedAt ?? null, patch.endedAt ?? null, patch.failureReason ?? null, patch.queuePosition ?? null, Date.now(), offPeakTaskId);
   } finally { db.close(); }
+}
+
+/**
+ * Local claim — the step the desktop performs before dispatch (mined from
+ * out/scheduler/index.js 2026-10-26: one atomic UPDATE setting
+ * claim_running=1; the server has no claim endpoint — a ticket left without
+ * a messages call expires server-side as failed/unclaimed, which is what
+ * killed dev's granted night ticket). 0 changes = another executor owns the
+ * row or it went terminal. Very old index vintages may lack the columns;
+ * a probe failure proceeds unclaimed rather than wedging the runner.
+ */
+export function claimLocalTask(offPeakTaskId: string): boolean {
+  const db = new Database(TASKS_INDEX());
+  try {
+    return db.query(`UPDATE off_peak_tasks SET claim_running=1, attempt_count=COALESCE(attempt_count,0)+1, updated_at=?
+      WHERE off_peak_task_id=? AND COALESCE(claim_running,0)=0`).run(Date.now(), offPeakTaskId).changes === 1;
+  } catch {
+    return true; // column-less vintage — proceed; ticket state still guards
+  } finally { db.close(); }
+}
+
+/** Release a claim so the serve loop can retry the row. */
+export function releaseLocalTask(offPeakTaskId: string): void {
+  const db = new Database(TASKS_INDEX());
+  try {
+    db.query(`UPDATE off_peak_tasks SET claim_running=0, updated_at=? WHERE off_peak_task_id=?`).run(Date.now(), offPeakTaskId);
+  } catch { /* column-less vintage — nothing to release */ } finally { db.close(); }
 }

@@ -159,7 +159,7 @@ async function main() {
 
   console.log("=== Idle-time (off-peak) ===");
   console.log(`  index: ${JSON.stringify(idleIndex)}`);
-  console.log(`  gateway: ${idleAvail ? (idleAvail.canCreateNow ? "CAN CREATE NOW" : idleAvail.nextTakeAt ? `cooldown — unlocks ${new Date(idleAvail.nextTakeAt).toLocaleTimeString()} (in ${Math.max(0, Math.round((idleAvail.nextTakeAt - Date.now()) / 60000))}m)` : `unavailable ${idleAvail.error ?? ""}`) : "availability unreachable"}`);
+  console.log(`  gateway: ${idleAvail ? (((idleAvail as { canCreateNow?: boolean }).canCreateNow === true) ? "CAN CREATE NOW" : idleAvail.nextTakeAt ? `cooldown — unlocks ${new Date(idleAvail.nextTakeAt).toLocaleTimeString()} (in ${Math.max(0, Math.round((idleAvail.nextTakeAt - Date.now()) / 60000))}m)` : `unavailable ${idleAvail.error ?? ""}`) : "availability unreachable"}`);
 }
 
 if (import.meta.main) await main();

@@ -28,6 +28,8 @@ import { handleOffPeakAsk, ticketAvailability,
   offPeakMessages,
   settleTicket,
   setLocalTaskState,
+  claimLocalTask,
+  releaseLocalTask,
   registerOffPeakTask} from "../queue/offpeak-gateway";
 import { autoclawPiCli, UNATTENDED_PREAMBLE, piEventStreamHasError } from "./autoclaw";
 import { syncAuthHeadless } from "../auth/sync";
@@ -309,6 +311,13 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   let row = rows.find((r) => r.offPeakTaskId === taskSel || r.serverTicketId === ticketSel);
   if (!row && !taskSel && !ticketSel && rows.length > 0) row = rows[0];
   if (!row) { console.error("idle exec: no live ticket row matches (run `zcode-tui idle poll`)"); return 2; }
+  // The desktop claims its rows (atomic claim_running=1) before dispatch;
+  // we do the same so a desktop and a runner can never double-execute one
+  // row, and attempt_count tracks the retry bound (D2, 2026-10-26).
+  if (!claimLocalTask(row.offPeakTaskId)) {
+    console.error(`idle exec: row ${row.offPeakTaskId} already claimed (claim_running=1) — another executor owns it`);
+    return 2;
+  }
 
   const st = await pollTickets([row.serverTicketId]);
   const state = st.tickets[0]?.state ?? "unknown";
@@ -433,8 +442,25 @@ ${note}` : stderr });
       ? { ok: false, detail: "skipped (provider error — ticket left unsettled)" }
       : await settleTicket(row.serverTicketId);
     const honestRc = providerError ? 1 : result.code;
-    setLocalTaskState(row.offPeakTaskId, honestRc === 0 ? "completed" : "failed", { endedAt: Date.now(), failureReason: honestRc === 0 ? undefined : providerError ? `provider error: ${errMatch?.[1] ?? "unknown"}` : `pi rc=${result.code}` });
-    console.log(`idle exec: rc=${honestRc}${providerError ? " (provider error inside pi stream)" : ""} in ${Math.round((Date.now() - t0) / 1000)}s, settle=${settle.ok ? "ok" : settle.detail} -> ${out}`);
+    // Failure classification (D2 rework 2026-10-26): a dead ticket (3102
+    // passes through by contract; 3104 = bogus/expired — both measured that
+    // night) is terminal, everything else is retryable — the ticket is
+    // still granted server-side and a fresh messages call may simply pass
+    // (the Bun-TLS 3012 class). Bound: attempt_count reaches 3 -> failed.
+    const deadTicket = wire.some((w) => /\b310[24]\b/.test(w.respHead))
+      || /"code"\s*:\s*310[24]/.test(errMatch?.[1] ?? "");
+    if (honestRc === 0) {
+      setLocalTaskState(row.offPeakTaskId, "completed", { endedAt: Date.now() });
+    } else if (deadTicket || row.attemptCount >= 3) {
+      const why = deadTicket ? `dead ticket (${wire.map((w) => w.status).join(",") || "pi stream"})` : `attempts exhausted (${row.attemptCount + 1})`;
+      setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `${why}${providerError ? ` provider error: ${errMatch?.[1] ?? "unknown"}` : ` pi rc=${result.code}`}`.slice(0, 200) });
+    } else {
+      // Retryable: back to queued, release the claim, keep started_at/ended_at
+      // untouched — the serve loop re-claims on its next tick.
+      setLocalTaskState(row.offPeakTaskId, "queued", { failureReason: `attempt ${row.attemptCount + 1} retryable${providerError ? `: ${errMatch?.[1] ?? "unknown"}` : ` pi rc=${result.code}`}`.slice(0, 200) });
+      releaseLocalTask(row.offPeakTaskId);
+    }
+    console.log(`idle exec: rc=${honestRc}${providerError ? " (provider error inside pi stream)" : ""} attempt=${row.attemptCount + 1}${honestRc !== 0 ? (deadTicket ? " dead-ticket" : row.attemptCount >= 3 ? " attempts-exhausted" : " retryable(requeued)") : ""} in ${Math.round((Date.now() - t0) / 1000)}s, settle=${settle.ok ? "ok" : settle.detail} -> ${out}`);
     return honestRc === 0 ? 0 : 1;
   } finally {
     proxy.stop(true);
