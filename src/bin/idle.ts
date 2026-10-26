@@ -414,7 +414,7 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
           continue;
         }
         if (res.status !== 200) {
-          wire.push({ at: Date.now(), status: res.status, bodyHead: payload.slice(0, 300), respHead: (await res.clone().text()).slice(0, 400) });
+          wire.push({ at: Date.now(), status: res.status, bodyHead: payload.slice(0, 4000), respHead: (await res.clone().text()).slice(0, 400) });
         }
         return new Response(res.body, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
       }
