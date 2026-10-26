@@ -38,5 +38,13 @@ python3 tools/ux/falsify.py selftest design/ux/runs/$RUN/opencode.idle.cells.jso
 - Animated regions (placeholder typewriter, cursor blink) are declared in
   `sig_masks` (settle) and `evaluate.masks` (diff) with reasons — never
   discovered masks.
-- Verdicts: MATCH / MISMATCH / UNVERIFIED per the skill; the selftest must
-  stay 12/12 or the differ is not trustworthy.
+- Verdicts: this tool returns comparison verdicts CLEAN / MISMATCH
+  (UNVERIFIED when a capture didn't settle); the STATE verdict MATCH is
+  granted only by the full loop contract (two clean passes from independent
+  resets, transitions, visual acceptance) — never by one comparison.
+- The selftest must pass 12/12 (plants on both-unmasked cells, resolved-style
+  mutations) or every verdict is suspended.
+- Evidence: every cells.json is hashed and retained under
+  `~/.local/share/ux-falsify-evidence/` (override with UX_FALSIFY_EVIDENCE).
+- Masks are per-subject (`both` / `reference` / `candidate`) and every mask
+  revision bumps `contract_rev`; corrections carry their measurement date.

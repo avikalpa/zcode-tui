@@ -3,7 +3,7 @@
 component = "command-palette"
 state = "open"
 claim = "command palette opens and lists commands like the reference"
-contract_rev = 1
+contract_rev = 3  # rev3: rects re-measured at TRUE 120x40 winsize (rev2 fix exposed rev0.1 mis-sized renders)
 
 [environment]
 geometry = [120, 40]
@@ -25,11 +25,12 @@ send = "ctrl+p"
 ms = 900
 
 [reference.sig_masks]
-composer_cycle = { rect = [13, 4, 13, 95] }   # placeholder typewriter (measured 2026-10-27)
+composer_cycle = { rect = [21, 3, 21, 95] }   # placeholder typewriter row @ true size (measured 2026-10-27 rev3)
+
 
 [candidate]
 app = "zcode-tui"
-cmd = ["/tmp/zcode-tui--ux/bin/zcode-tui"]
+cmd = ["/tmp/zcode-tui--ux2/bin/zcode-tui"]
 cwd = "/tmp/ux-falsify/proj"
 readiness = ""
 timeout = 45.0
@@ -43,8 +44,8 @@ ms = 1200
 send = "ctrl+p"
 ms = 900
 
-[evaluate.masks]
-wordmark = { rect = [4, 8, 12, 72], reason = "owner 2026-09-18: zcodetui logo stays" }
+[evaluate.masks.both]
+wordmark = { rect = [13, 38, 20, 95], reason = "owner 2026-09-18: zcodetui logo stays (rect rev3, true size)" }
 
 [candidate.sig_masks]
-composer_cycle = { rect = [13, 3, 19, 119] }  # typewriter + ~4s cycle-boundary full redraw (measured)
+composer_cycle = { rect = [20, 3, 27, 119] }  # typewriter row 22 + cycle-boundary redraw @ true size (measured rev3)
