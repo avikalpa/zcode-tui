@@ -294,7 +294,16 @@ async function cmdPoll(json: boolean) {
     const t = byTicket.get(r.serverTicketId);
     const state = t?.state ?? "unknown";
     if (state === "running") setLocalTaskState(r.offPeakTaskId, "running", { startedAt: Date.now() });
-    if (state === "completed" || state === "settled") setLocalTaskState(r.offPeakTaskId, "completed", { endedAt: Date.now() });
+    // Honesty (measured 2026-10-27): the server settles tickets on its own —
+    // expiry after failed usage, deadline paths — and "settled" does NOT mean
+    // the work succeeded. Map settled->completed only when the row carries no
+    // failure; otherwise keep the failure visible.
+    if (state === "completed" || state === "settled") {
+      const db2 = new Database(TASKS_INDEX(), { readonly: true });
+      const fr = (db2.query(`SELECT failure_reason FROM off_peak_tasks WHERE off_peak_task_id=?`).get(r.offPeakTaskId) as { failure_reason: string | null } | null)?.failure_reason ?? null;
+      db2.close();
+      setLocalTaskState(r.offPeakTaskId, fr ? "failed" : "completed", { endedAt: Date.now(), ...(fr ? { failureReason: `ticket settled server-side after failure: ${fr.slice(0, 120)}` } : {}) });
+    }
     if (typeof t?.position === "number") setLocalTaskState(r.offPeakTaskId, r.status === "running" ? "running" : "queued", { queuePosition: t.position });
     out.push({ task: r.offPeakTaskId, ticket: r.serverTicketId, title: r.title.slice(0, 60), state, ...(t?.position != null ? { position: t.position } : {}) });
   }
