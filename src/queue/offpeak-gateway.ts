@@ -22,7 +22,7 @@
 // local task row is written to the desktop's own off_peak_tasks table with
 // schedulable=1, exactly as the desktop's registration does, so the host's
 // own claim loop executes it.
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
@@ -147,10 +147,28 @@ export function listLocalOffPeakTasks(): OffPeakTaskSummary[] {
  * local row (schedulable) -> POST ticket -> store the ticket id.
  * Returns the task summary the runtime tool expects, or a refusal.
  */
+/**
+ * Point-in-time check for the fleet single-flight exec lock (idle.ts holds
+ * the same path). Measured 2026-10-27 morning: a ticket created while another
+ * host's exec runs either 3001s (concurrent use) or sits lock-blocked until
+ * the server expires it — either way the allowance is wasted. Refuse the
+ * create instead; the exec lock itself remains the atomic gate.
+ */
+export function fleetExecLockHeld(): boolean {
+  const root = process.env.ZTQ_FLEET_LOCK_DIR
+    ?? join(homedir(), "data", "fleet-locks");
+  try {
+    return Date.now() - statSync(join(root, "ztq-idle-exec", "stamp.txt")).mtimeMs < 3 * 3600_000;
+  } catch { return false; }
+}
+
 export async function registerOffPeakTask(input: {
   title: string; prompt: string; permissionMode?: string; model?: string; boundSessionId?: string;
   workspacePath: string;
 }): Promise<{ ok: true; task: OffPeakTaskSummary; message: string } | { ok: false; refusal?: string; cooldownMs?: number; error: string }> {
+  if (fleetExecLockHeld()) {
+    return { ok: false, refusal: "Another host's idle task is executing (fleet single-flight) — a ticket created now would 3001 or expire in its shadow. Retry after it settles.", error: "fleet single-flight: exec lock held" };
+  }
   const avail = await ticketAvailability();
   if (!avail.canTake) {
     const cooldownMs = avail.nextTakeAt ? Math.max(60_000, avail.nextTakeAt - Date.now() + 60_000) : undefined;
