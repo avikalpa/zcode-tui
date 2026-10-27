@@ -69,25 +69,66 @@ export function modelRefShapes(ref: ModelRef): Record<string, unknown>[] {
  *  preferred) to a concrete {providerId, modelId}. The fleet's runtimes
  *  disagree on provider ids too (jojo: zai-api, dev: zai — measured), so the
  *  error text is the portable source of truth. */
-export function matchAvailableModel(errText: string, modelId: string): ModelRef | null {
+export function matchAvailableModel(errText: string, modelId: string, preferredProvider?: string): ModelRef | null {
   const m = errText.match(/Available models:\s*([^\n]+)/);
   if (!m) return null;
   const entries = m[1].split(",").map((s) => s.trim().replace(/[.,;]+$/, "")).filter((s) => s.includes("/"));
   const want = modelId.toLowerCase();
   const exact = entries.find((e) => e.split("/")[1] === modelId);
   const ci = entries.find((e) => e.split("/")[1]?.toLowerCase() === want);
-  const hit = exact ?? ci;
+  const preferred = entries.find((e) => e.split("/")[0] === preferredProvider && e.split("/")[1]?.toLowerCase() === want);
+  const hit = preferred ?? exact ?? ci;
   if (!hit) return null;
   const [providerId, resolved] = hit.split("/");
   return { modelId: resolved, providerId, options: { reasoningLevel: "max" } };
 }
 
+export class ProviderIdentityError extends Error {
+  readonly code = "PROVIDER_IDENTITY_MISMATCH";
+  constructor(readonly requested: string, readonly effective: string | null) {
+    super(`PROVIDER_IDENTITY_MISMATCH: requested_provider=${requested} effective_provider=${effective ?? "unknown"}; refusing billable send (ZCODE_TUI_ALLOW_PROVIDER_FALLBACK=1 permits a known fallback)`);
+    this.name = "ProviderIdentityError";
+  }
+}
+export function assertProviderIdentity(requested: string | null, effective: string | null, env = process.env): void {
+  if (requested && (!effective || (requested !== effective && env.ZCODE_TUI_ALLOW_PROVIDER_FALLBACK !== "1"))) {
+    throw new ProviderIdentityError(requested, effective);
+  }
+}
+
+type RuntimeClient = Pick<AppServer, "request">;
+export function sessionModel(value: Record<string, unknown>): ModelRef | null {
+  const session = (value.session ?? value) as Record<string, unknown>;
+  const model = session.modelRef ?? session.model;
+  if (model && typeof model === "object") {
+    const m = model as ModelRef;
+    if (typeof m.providerId === "string" && typeof m.modelId === "string") return m;
+  }
+  if (typeof model === "string" && model.includes("/")) {
+    const [providerId, modelId] = model.split("/");
+    if (providerId && modelId) return { providerId, modelId };
+  }
+  return null;
+}
+
+/** Re-read immediately before EVERY billable send, including continuation.
+ * Missing identity stays unknown and blocks an explicitly funded request. */
+export async function sendWithProvider(sv: RuntimeClient, sessionId: string, content: string,
+  requested: string | null, observe: (model: ModelRef | null) => void): Promise<unknown> {
+  const snapshot = await sv.request("session/read", { sessionId }) as Record<string, unknown>;
+  const actual = sessionModel(snapshot);
+  observe(actual);
+  assertProviderIdentity(requested, actual?.providerId ?? null);
+  return sv.request("session/send", { sessionId, content });
+}
+
 /** Create the session trying every model-ref shape the fleet's runtimes
  *  speak (see modelRefShapes). With no ref, one bare attempt. */
-async function createSession(
-  sv: AppServer,
+export async function createSession(
+  sv: RuntimeClient,
   createParams: Record<string, unknown>,
   ref: ModelRef | null,
+  requestedProvider: string | null = ref?.providerId ?? null,
 ): Promise<Record<string, unknown>> {
   if (!ref) return (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
   let wanted = ref;
@@ -96,13 +137,16 @@ async function createSession(
     let handled = false;
     for (const shape of modelRefShapes(wanted)) {
       try {
-        return (await sv.request("session/create", { ...createParams, model: shape }, 30000)) as Record<string, unknown>;
+        assertProviderIdentity(requestedProvider, wanted.providerId);
+        const created = await sv.request("session/create", { ...createParams, model: shape }, 30000) as Record<string, unknown>;
+        return { ...created, negotiated_model: wanted };
       } catch (e) {
         lastErr = e;
         const msg = String(e instanceof Error ? e.message : e);
         if (/Unsupported model/i.test(msg)) {
-          const alt = matchAvailableModel(msg, wanted.modelId);
+          const alt = matchAvailableModel(msg, wanted.modelId, wanted.providerId);
           if (alt) {
+            assertProviderIdentity(requestedProvider, alt.providerId);
             console.log(`zt-run: model ref re-pointed by registry: ${wanted.providerId}/${wanted.modelId} -> ${alt.providerId}/${alt.modelId}`);
             wanted = alt;
             handled = true;
@@ -163,6 +207,14 @@ let lastErrorText = "";
 let toolInFlight = 0;
 let stopHb: (() => void) | null = null;
 let ref: ModelRef | null = null;
+let requestedProvider: string | null = null;
+let effectiveProvider: string | null = null;
+let providerPinned = false;
+const observeProvider = (actual: ModelRef | null) => {
+  effectiveProvider = actual?.providerId ?? null;
+  if (actual) ref = actual;
+};
+let sv: AppServer;
 const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
 const TRANSPORT_DROP = /fetch failed|socket hang up|econnreset|econnrefused|terminated|aborted|connection (closed|error|dropped)|network|timeout/i;
 const deadlineMs = Number(values["max-run-min"]) > 0
@@ -170,7 +222,8 @@ const deadlineMs = Number(values["max-run-min"]) > 0
   : 0;
 const backoffMs = (n: number) => (30 * 2 ** n + Math.floor(Math.random() * 10)) * 1000;
 
-const sv = new AppServer({
+function makeServer(): AppServer {
+  return new AppServer({
   onNotification: (m: Record<string, unknown>) => {
     const method = String(m.method);
     let kind = "";
@@ -237,15 +290,24 @@ const sv = new AppServer({
       transportError = c.trim().slice(-200);
     }
   },
-});
+  });
+}
+
+export function providerIdentityRecord(requested: string | null, effective: string | null) {
+  return { requested_provider: requested, effective_provider: effective };
+}
+
+export function writeRunOutcome(outPath: string, outcome: Record<string, unknown>, requested: string | null, effective: string | null): void {
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, JSON.stringify({ ...outcome, ...providerIdentityRecord(requested, effective) }, null, 1));
+}
 
 function writeTranscript(outcome: string) {
   stopHb?.();
   stopHb = null;
   const elapsedSec = Number(((Date.now() - t0) / 1000).toFixed(1));
   const outPath = String(values.out ?? "");
-  mkdirSync(dirname(outPath), { recursive: true }); // --out parent may not exist on a fresh host
-  writeFileSync(outPath, JSON.stringify({
+  writeRunOutcome(outPath, {
     sessionId,
     model: ref ? `${ref.providerId}/${ref.modelId}@${ref.options?.reasoningLevel}` : "(config default)",
     outcome,
@@ -254,18 +316,22 @@ function writeTranscript(outcome: string) {
     elapsedSec,
     eventCount: events.length,
     events,
-  }, null, 1));
+  }, requestedProvider, effectiveProvider);
   console.log(`zt-run: ${outcome} - ${events.length} events in ${elapsedSec}s, continues=${continuesUsed} -> ${outPath}`);
 }
 
 async function main() {
   syncAuthHeadless();
+  sv = makeServer();
   // Owner law: MAX thinking on every zcode-tui session. The model ref is
   // {providerId, modelId, options:{reasoningLevel}} — reasoningLevel is
   // REQUIRED by the registry for zai-api models. NOTE: no top-level
   // `options` key on session/create — the schema is strict and rejects it
   // ("Unrecognized key: options" killed every 82a1b43 dispatch instantly).
   ref = values.model ? buildModelRef(String(values.model), String(values.provider)) : null;
+  requestedProvider = ref?.providerId ?? (process.argv.some((a) => a === "--provider" || a.startsWith("--provider=")) ? String(values.provider) : null);
+  providerPinned = process.argv.some((a) => a === "--provider" || a.startsWith("--provider="));
+  try { providerPinned ||= typeof JSON.parse(String(values.model)).providerId === "string"; } catch { /* plain model name */ }
   const createParams: Record<string, unknown> = {
     workspace: { workspacePath: values.workspace, workspaceKey: values.workspace },
     mode: "build",
@@ -273,7 +339,7 @@ async function main() {
   };
   let created: Record<string, unknown>;
   try {
-    created = await createSession(sv, createParams, ref);
+    created = await createSession(sv, createParams, ref, providerPinned ? requestedProvider : null);
   } catch (e) {
     const errText = String(e instanceof Error ? e.message : e);
     // GLM-5.3 full is start-plan-only: a plan-bucket refusal falls over to
@@ -283,8 +349,9 @@ async function main() {
     if (!alt) throw e;
     console.log(`zt-run: plan refusal on ${ref!.modelId} — auto-switching to ${alt.modelId} (max): ${errText.slice(0, 120)}`);
     ref = alt;
-    created = await createSession(sv, createParams, alt);
+    created = await createSession(sv, createParams, alt, providerPinned ? requestedProvider : null);
   }
+  ref = created.negotiated_model as ModelRef ?? ref;
   const sAny = (created.session ?? created) as unknown;
   sessionId = typeof sAny === "string"
     ? sAny
@@ -295,7 +362,7 @@ async function main() {
   // Liveness for the queue's stall sweeper (BUG-001): touch <out>.hb every 60s.
   stopHb = startHeartbeat(`${String(values.out ?? "")}.hb`);
   await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true });
-  await sv.request("session/send", { sessionId, content });
+  await sendWithProvider(sv, sessionId, content, providerPinned ? requestedProvider : null, observeProvider);
 
   const maxMs = Number(values["collect-ms"]);
   const quietMs = Number(values["quiet-sec"]) * 1000;
@@ -322,7 +389,7 @@ async function main() {
       const drop = TRANSPORT_DROP.test(`${transportError} ${lastErrorText}`);
       console.log(`zt-run: ${drop ? "resilient " : ""}continue-steer #${continuesUsed + 1} after ${Math.round(wait / 1000)}s (lastError=${lastErrorKind || "silence"}${drop ? " transport drop" : ""})`);
       await new Promise((r) => setTimeout(r, wait));
-      await sv.request("session/send", { sessionId, content: "Continue from where you stopped. Complete the task fully." });
+      await sendWithProvider(sv, sessionId, "Continue from where you stopped. Complete the task fully.", providerPinned ? requestedProvider : null, observeProvider);
       continuesUsed++;
       lastEvent = Date.now();
       continue;
@@ -352,9 +419,8 @@ async function main() {
 
 if (import.meta.main) main().catch(async (e) => {
   console.error(`FATAL: ${e instanceof Error ? e.message : e}`);
-  stopHb?.();
-  stopHb = null;
+  writeTranscript(e instanceof ProviderIdentityError ? e.code : "failed");
   try { if (sessionId) await sv.request("session/stop", { sessionId }); } catch { /* noop */ }
-  await sv.close();
+  await sv?.close();
   process.exit(1);
 });

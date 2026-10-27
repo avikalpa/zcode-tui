@@ -13,6 +13,7 @@
 //
 // Route policy (peak window Mon-Fri 11:30-15:30 IST blocks zai-coding-plan
 // and autoclaw) mirrors tools/zai_peak_window.py — see src/queue/core.ts.
+import { assertIdleTargetAllowed } from "../queue/idle-host";
 import { parseArgs } from "node:util";
 import { mkdirSync, appendFileSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -259,7 +260,7 @@ function writePromptFile(stateDir: string, task: TaskRow): string {
   return f;
 }
 
-/** Build the dispatch command for a task. Remote routes ride ssh (dev→jojo). */
+/** Build the dispatch command for a task. Remote routes ride SSH to the configured fleet server. */
 export function buildCommand(
   task: TaskRow,
   ctx: { repo: string; stateDir: string; promptFile: string; runLog: string; budgetMin: number },
@@ -283,8 +284,9 @@ export function buildCommand(
       return { cmd, cwd: ctx.repo };
     }
     case "zai-offpeak": {
-      // Runs against jojo (ticket + row land in jojo's task index; jojo's
-      // desktop/runtime executes queued tickets). Prompt rides stdin.
+      const target = ROUTES["zai-offpeak"].remoteHost ?? "dev";
+      assertIdleTargetAllowed(target);
+      // Ticket and row land on the configured server. Prompt rides stdin.
       // Keepalives: a bare rc=255 (dropped ssh) killed a live attempt once.
       const inner = [
         `cd ${ctx.repo} && ${bun} run src/bin/idle.ts create`,
@@ -302,7 +304,7 @@ export function buildCommand(
         "-o", "ServerAliveInterval=15",
         "-o", "ServerAliveCountMax=4",
         "-o", "ConnectTimeout=10",
-        ROUTES["zai-offpeak"].remoteHost!,
+        target,
         inner.join(" "),
       ];
       return { cmd, cwd: ctx.repo, stdin: task.prompt };

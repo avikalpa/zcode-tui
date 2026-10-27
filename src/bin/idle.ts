@@ -14,11 +14,13 @@
 // Carry-forward law: client, never reimplementation — we speak the same
 // protocol the desktop speaks; server cooldowns and refusals surface as-is.
 import { parseArgs } from "node:util";
-import { readFileSync, writeFileSync, mkdirSync, statSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
+import { assertIdleHostAllowed } from "../queue/idle-host";
+import { IdleExecLock } from "../queue/idle-lock";
 import { startHeartbeat } from "../queue/heartbeat";
 import { parseCooldownMs } from "../queue/core";
 import { handleOffPeakAsk, ticketAvailability,
@@ -72,7 +74,8 @@ function cmdList(json: boolean) {
 // create — drive the runtime's OffPeakCreate tool in a fresh session
 // ---------------------------------------------------------------------------
 
-async function cmdCreate(v: Record<string, string | boolean | undefined>) {
+export async function cmdCreate(v: Record<string, string | boolean | undefined>) {
+  assertIdleHostAllowed();
   syncAuthHeadless();
   const pf = String(v["prompt-file"] ?? "");
   if (!pf) { console.error("idle create: --prompt-file is required (- reads stdin)"); process.exit(2); }
@@ -282,7 +285,8 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
 
 // ---------------------------------------------------------------------------
 
-async function cmdPoll(json: boolean) {
+export async function cmdPoll(json: boolean) {
+  assertIdleHostAllowed();
   const adopted = adoptOrphanedTickets();
   for (const a of adopted) console.error(`idle poll: adopted orphaned registration ${a.task} -> ticket ${a.ticket}`);
   const rows = localExecutableTasks();
@@ -312,39 +316,12 @@ async function cmdPoll(json: boolean) {
   return 0;
 }
 
-// Fleet single-flight admission (sol DD verdict 3, 2026-10-27): the local
-// claim_running only coordinates workers sharing ONE index — three hosts hold
-// three databases, and nothing server-side serializes granted tickets we can
-// see. The fleet-shared dataset gives us a portable mkdir lock: one idle exec
-// account-wide at a time, stale stamp stealable after 3h (crash tolerance).
+// H4: unavailable or uncertain ownership holds execution for the next poll.
 const FLEET_LOCK_ROOT = () =>
   process.env.ZTQ_FLEET_LOCK_DIR ?? join(homedir(), "data", "fleet-locks");
 
-function acquireFleetExecLock(ticket: string): boolean {
-  const root = join(FLEET_LOCK_ROOT(), "ztq-idle-exec");
-  try {
-    mkdirSync(FLEET_LOCK_ROOT(), { recursive: true });
-    try {
-      mkdirSync(root); // atomic: exists => held
-    } catch {
-      try {
-        if (Date.now() - statSync(join(root, "stamp.txt")).mtimeMs < 3 * 3600_000) return false;
-        rmSync(root, { recursive: true, force: true });
-        mkdirSync(root);
-      } catch { return false; }
-    }
-    writeFileSync(join(root, "stamp.txt"), `${ticket} ${hostname()} ${process.pid} ${Date.now()}\n`);
-    return true;
-  } catch {
-    return true; // lock plane unavailable — fail open; ticket state still guards
-  }
-}
-
-function releaseFleetExecLock(): void {
-  try { rmSync(join(FLEET_LOCK_ROOT(), "ztq-idle-exec"), { recursive: true, force: true }); } catch { /* absent */ }
-}
-
-async function cmdExec(v: Record<string, string | boolean | undefined>): Promise<number> {
+export async function cmdExec(v: Record<string, string | boolean | undefined>): Promise<number> {
+  assertIdleHostAllowed();
   adoptOrphanedTickets();
   const rows = localExecutableTasks();
   const taskSel = v.task ? String(v.task) : "";
@@ -373,7 +350,8 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
     console.error(`idle exec: row ${row.offPeakTaskId} already claimed (claim_running=1) — another executor owns it`);
     return 2;
   }
-  if (!acquireFleetExecLock(row.serverTicketId)) {
+  const execLock = new IdleExecLock(FLEET_LOCK_ROOT());
+  if (!execLock.acquire()) {
     releaseLocalTask(row.offPeakTaskId);
     console.error("idle exec: fleet single-flight — another host holds the exec lock; row left queued for the next tick");
     return 3;
@@ -384,7 +362,18 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   // own retry-after up to a bound; 3102 passes through (dead ticket).
   const target = row;
   const wire: Array<{ at: number; status: number; bodyHead: string; respHead: string; repaired?: boolean }> = [];
-  const proxy = Bun.serve({
+  let leaseHealthy = true;
+  let stopChild: (() => void) | undefined;
+  const renewal = setInterval(() => {
+    if (!execLock.renew()) {
+      leaseHealthy = false;
+      stopChild?.();
+      console.error("IDLE_LOCK_LOST: renewal failed; execution held");
+    }
+  }, Math.min(30_000, Math.max(1000, Number(v["lease-renew-ms"] ?? 15_000))));
+  let proxy: ReturnType<typeof Bun.serve> | undefined;
+  try {
+    proxy = Bun.serve({
     hostname: "127.0.0.1", port: 0, idleTimeout: 255,
     async fetch(req): Promise<Response> {
       const url = new URL(req.url);
@@ -403,6 +392,7 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
           doc.output_config ??= { effort: "max" }; // owner law: MAX thinking on all plans
           payload = JSON.stringify(doc);
         } catch { /* non-JSON body — forward as-is */ }
+        if (!leaseHealthy) return Response.json({ error: "IDLE_LOCK_LOST" }, { status: 503 });
         let res = await offPeakMessages(target.serverTicketId, payload);
         // Gateway 3001 "parameter error": one repair attempt with a normalized
         // body (lowercased model id, no stream field) — the canary falsifier
@@ -414,6 +404,7 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
             delete doc.stream;
             payload = JSON.stringify(doc);
             wire.push({ at: Date.now(), status: 400, bodyHead: payload.slice(0, 300), respHead: "3001 -> repair retry", repaired: true });
+            if (!leaseHealthy) return Response.json({ error: "IDLE_LOCK_LOST" }, { status: 503 });
             res = await offPeakMessages(target.serverTicketId, payload);
           } catch { /* unparseable body — pass the original through */ }
         }
@@ -431,7 +422,6 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
     },
   });
 
-  try {
     const dir = join(process.env.HOME ?? homedir(), ".local", "state", "zcode-tui", "idle-agent");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "models.json"), JSON.stringify({
@@ -463,6 +453,8 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
       "--append-system-prompt", UNATTENDED_PREAMBLE, row.prompt];
     const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
       const p = spawn(jsRuntime, args, { cwd: workspace, env: { ...process.env, PI_CODING_AGENT_DIR: dir }, stdio: ["ignore", "pipe", "pipe"] });
+      stopChild = () => p.kill("SIGTERM");
+      if (!leaseHealthy) stopChild();
       let stdout = "", stderr = "";
       const cap = 8 << 20;
       p.stdout.on("data", (d: Buffer) => { if (stdout.length < cap) stdout += d.toString(); });
@@ -491,16 +483,16 @@ ${note}` : stderr });
     // home as completed, and the settle below must not mask it.
     const providerError = result.code === 0 && piEventStreamHasError(result.stdout);
     const errMatch = result.stdout.match(/"errorMessage":"([^"]{0,300})"/);
-    writeFileSync(out, JSON.stringify({ ticket: row.serverTicketId, task: row.offPeakTaskId, model, workspace, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, providerError, providerErrorMessage: providerError ? errMatch?.[1] : undefined, wire, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
+    writeFileSync(out, JSON.stringify({ ticket: row.serverTicketId, task: row.offPeakTaskId, model, workspace, elapsedSec: (Date.now() - t0) / 1000, rc: result.code, providerError, lockLost: !leaseHealthy, providerErrorMessage: providerError ? errMatch?.[1] : undefined, wire, stdout: result.stdout.slice(-200_000), stderr: result.stderr.slice(-20_000) }, null, 1));
     // Honesty: do NOT settle a provider-errored turn immediately — the
     // settle releases the slot and the desktop marks it Succeeded (settled
     // semantics), and it burned a bisect slot mid-experiment. Settle only on
     // honest success or a dead ticket; provider errors leave the ticket for
     // the deadline/expire path so the failure stays inspectable.
-    const settle = providerError
-      ? { ok: false, detail: "skipped (provider error — ticket left unsettled)" }
+    const settle = providerError || !leaseHealthy
+      ? { ok: false, detail: "skipped (provider error or lock lost — ticket left unsettled)" }
       : await settleTicket(row.serverTicketId);
-    const honestRc = providerError ? 1 : result.code;
+    const honestRc = providerError || !leaseHealthy ? 1 : result.code;
     // Failure classification (D2 rework 2026-10-26): a dead ticket (3102
     // passes through by contract; 3104 = bogus/expired — both measured that
     // night) is terminal, everything else is retryable — the ticket is
@@ -522,12 +514,14 @@ ${note}` : stderr });
     console.log(`idle exec: rc=${honestRc}${providerError ? " (provider error inside pi stream)" : ""} attempt=${row.attemptCount + 1}${honestRc !== 0 ? (deadTicket ? " dead-ticket" : row.attemptCount >= 3 ? " attempts-exhausted" : " retryable(requeued)") : ""} in ${Math.round((Date.now() - t0) / 1000)}s, settle=${settle.ok ? "ok" : settle.detail} -> ${out}`);
     return honestRc === 0 ? 0 : 1;
   } finally {
-    proxy.stop(true);
-    releaseFleetExecLock();
+    clearInterval(renewal);
+    proxy?.stop(true);
+    execLock.release();
   }
 }
 
-async function cmdServe(v: Record<string, string | boolean | undefined>): Promise<number> {
+export async function cmdServe(v: Record<string, string | boolean | undefined>): Promise<number> {
+  assertIdleHostAllowed();
   const pollS = Math.max(30, Number(v["poll-s"] ?? 120));
   console.log(`idle serve: polling every ${pollS}s (ctrl-c to stop)`);
   for (;;) {
@@ -608,5 +602,8 @@ export async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  void main();
+  void main().catch((e) => {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+  });
 }

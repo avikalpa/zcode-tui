@@ -286,7 +286,7 @@ export interface RouteDef {
   unavailableReason?: string;
   defaultModel?: string;
   /** Idle-ticket creation must land where a polling runtime executes them. */
-  remoteHost?: "jojo";
+  remoteHost?: string;
   /** Hard dispatch timeout, minutes (route default; serve may override). */
   taskTimeoutMin: number;
   /** run.ts budget-stop exit (4) semantics apply. */
@@ -307,7 +307,7 @@ export const ROUTES: Record<RouteName, RouteDef> = {
     desc: "ZCode idle-time tasks via the OffPeakCreate tool (free off-peak privilege; server-scheduled)",
     peakGated: false, // zero plan-quota cost; the server owns the schedule
     available: true,
-    remoteHost: "jojo", // jojo's task index + desktop execute queued tickets
+    remoteHost: "dev", // H3: idle execution belongs on a fleet server
     // Measured fault (audit ztq-a1c071d4): a task dispatched with model=""
     // (e.g. after rerouteTask cleared it) made the child session fall back to
     // its own config default — silently breaking the route model law. The

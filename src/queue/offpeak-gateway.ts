@@ -1,3 +1,4 @@
+import { assertIdleHostAllowed } from "./idle-host";
 // Off-peak gateway client + the offPeak/* ask server (0.7.5 polish).
 //
 // MEASURED (app.asar + live ask capture, 2026-10-23): in app-server mode the
@@ -157,15 +158,26 @@ export function listLocalOffPeakTasks(): OffPeakTaskSummary[] {
 export function fleetExecLockHeld(): boolean {
   const root = process.env.ZTQ_FLEET_LOCK_DIR
     ?? join(homedir(), "data", "fleet-locks");
+  try { if (!statSync(root).isDirectory()) return true; } catch { return true; }
   try {
-    return Date.now() - statSync(join(root, "ztq-idle-exec", "stamp.txt")).mtimeMs < 3 * 3600_000;
-  } catch { return false; }
+    statSync(join(root, "ztq-idle-exec", ".guard"));
+    return true;
+  } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") return true; }
+  try {
+    statSync(join(root, "ztq-idle-exec", "owner.json"));
+    return true;
+  } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") return true; }
+  try {
+    statSync(join(root, "ztq-idle-exec", "stamp.txt"));
+    return true;
+  } catch (e) { return (e as NodeJS.ErrnoException).code !== "ENOENT"; }
 }
 
 export async function registerOffPeakTask(input: {
   title: string; prompt: string; permissionMode?: string; model?: string; boundSessionId?: string;
   workspacePath: string;
 }): Promise<{ ok: true; task: OffPeakTaskSummary; message: string } | { ok: false; refusal?: string; cooldownMs?: number; error: string }> {
+  assertIdleHostAllowed();
   if (fleetExecLockHeld()) {
     return { ok: false, refusal: "Another host's idle task is executing (fleet single-flight) — a ticket created now would 3001 or expire in its shadow. Retry after it settles.", error: "fleet single-flight: exec lock held" };
   }
@@ -394,6 +406,7 @@ export function localExecutableTasks(): LocalTicketRow[] {
  * 628). Returns the adopted ticket ids.
  */
 export function adoptOrphanedTickets(): { task: string; ticket: string }[] {
+  assertIdleHostAllowed();
   const db = new Database(TASKS_INDEX());
   const adopted: { task: string; ticket: string }[] = [];
   try {

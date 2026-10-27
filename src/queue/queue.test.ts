@@ -265,13 +265,13 @@ describe("buildCommand", () => {
     expect(cmd.cmd.join(" ")).toContain("--max-run-min 145");
     expect(cmd.cmd.join(" ")).toContain("run.ts");
   });
-  test("zai-offpeak rides ssh to jojo with prompt on stdin", () => {
+  test("zai-offpeak rides ssh to dev with prompt on stdin", () => {
     const built = buildCommand(
       { route: "zai-offpeak", title: "hello", workspace: "/tmp", model: "", prompt: "do the thing" } as never,
       { repo: "/repo", stateDir: "/st", promptFile: "/st/p.md", runLog: "/st/r.json", budgetMin: 0 },
     );
     expect(built.cmd[0]).toBe("ssh");
-    expect(built.cmd).toContain("jojo"); // host after the keepalive options
+    expect(built.cmd).toContain("dev"); // host after the keepalive options
     expect(built.cmd.join(" ")).toContain("ServerAliveInterval=15");
     expect(built.cmd.join(" ")).toContain("idle.ts create");
     expect(built.stdin).toBe("do the thing");
