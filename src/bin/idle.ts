@@ -14,7 +14,7 @@
 // Carry-forward law: client, never reimplementation — we speak the same
 // protocol the desktop speaks; server cooldowns and refusals surface as-is.
 import { parseArgs } from "node:util";
-import { readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, statSync, rmSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir, hostname } from "node:os";
 import { Database } from "bun:sqlite";
@@ -450,11 +450,19 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
     }, null, 2) + "\n");
     setLocalTaskState(row.offPeakTaskId, "running", { startedAt: Date.now() });
     const { spawn } = await import("node:child_process");
+    // Runtime pin (measured 2026-10-27): when the serve runs from a compiled
+    // binary, process.execPath is THAT binary — after a mv-deploy it reads
+    // "(deleted)" and every spawn dies ENOENT in 0.04s while polling keeps
+    // working (the phantom-completed class, jojo). The stable JS runtime is
+    // the host's own bun; fall back to self only when it is absent.
+    const selfBin = process.execPath;
+    const stableBun = join(homedir(), ".bun", "bin", "bun");
+    const jsRuntime = existsSync(stableBun) && !selfBin.endsWith("/bun") ? stableBun : selfBin;
     const t0 = Date.now();
     const args = [cli, "--print", "--mode", "json", "--provider", "offpeak", "--model", model,
       "--append-system-prompt", UNATTENDED_PREAMBLE, row.prompt];
     const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-      const p = spawn(process.execPath, args, { cwd: workspace, env: { ...process.env, PI_CODING_AGENT_DIR: dir }, stdio: ["ignore", "pipe", "pipe"] });
+      const p = spawn(jsRuntime, args, { cwd: workspace, env: { ...process.env, PI_CODING_AGENT_DIR: dir }, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "", stderr = "";
       const cap = 8 << 20;
       p.stdout.on("data", (d: Buffer) => { if (stdout.length < cap) stdout += d.toString(); });
