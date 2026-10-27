@@ -44,7 +44,7 @@ const TASKS_INDEX = () =>
  * desktop session holds the write lock and a bare open throws
  * "database is locked" mid-registration). Every open waits up to 5s. */
 export function openTasksIndex(readonly = false) {
-  const db = new Database(TASKS_INDEX(), readonly ? { readonly: true } : {});
+  const db = readonly ? new Database(TASKS_INDEX(), { readonly: true }) : new Database(TASKS_INDEX());
   db.exec("PRAGMA busy_timeout = 5000");
   return db;
 }
