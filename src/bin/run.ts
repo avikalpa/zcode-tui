@@ -99,16 +99,29 @@ export function assertProviderIdentity(requested: string | null, effective: stri
 type RuntimeClient = Pick<AppServer, "request">;
 export function sessionModel(value: Record<string, unknown>): ModelRef | null {
   const session = (value.session ?? value) as Record<string, unknown>;
-  const model = session.modelRef ?? session.model;
-  if (model && typeof model === "object") {
-    const m = model as ModelRef;
-    if (typeof m.providerId === "string" && typeof m.modelId === "string") return m;
-  }
-  if (typeof model === "string" && model.includes("/")) {
-    const [providerId, modelId] = model.split("/");
-    if (providerId && modelId) return { providerId, modelId };
-  }
-  return null;
+  const decode = (raw: unknown): ModelRef | null => {
+    if (raw && typeof raw === "object") {
+      const m = raw as ModelRef;
+      return typeof m.providerId === "string" && m.providerId.trim() !== ""
+        && typeof m.modelId === "string" && m.modelId.trim() !== "" ? m : null;
+    }
+    if (typeof raw === "string") {
+      const parts = raw.split("/");
+      if (parts.length === 2 && parts.every((p) => p.trim() !== "")) {
+        return { providerId: parts[0], modelId: parts[1] };
+      }
+    }
+    return null;
+  };
+  // C1 (review 2026-10-28): two authoritative decodable fields must AGREE.
+  // A conflicting session.modelRef vs session.model used to take the first
+  // silently — that is funding ambiguity, and ambiguity never sends. A plain
+  // display string without a provider stays non-authoritative.
+  const models = [decode(session.modelRef), decode(session.model)]
+    .filter((m): m is ModelRef => m !== null);
+  if (!models.length || models.some((m) =>
+    m.providerId !== models[0].providerId || m.modelId !== models[0].modelId)) return null;
+  return models[0];
 }
 
 /** Re-read immediately before EVERY billable send, including continuation.

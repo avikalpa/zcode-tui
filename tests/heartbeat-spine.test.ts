@@ -8,7 +8,7 @@ import { cmdCreate, cmdPoll, cmdServe, cmdExec } from "../src/bin/idle";
 import { buildCommand } from "../src/bin/queue";
 import { ROUTES, type TaskRow } from "../src/queue/core";
 import { adoptOrphanedTickets, registerOffPeakTask } from "../src/queue/offpeak-gateway";
-import { createSession, sendWithProvider, writeRunOutcome, buildModelRef } from "../src/bin/run";
+import { createSession, sendWithProvider, writeRunOutcome, buildModelRef, sessionModel } from "../src/bin/run";
 
 const dirs: string[] = [];
 const temp = () => { const d = mkdtempSync(join(tmpdir(), "hb-test-")); dirs.push(d); return d; };
@@ -126,5 +126,37 @@ describe("F3 H6 funding identity", () => {
       await expect(sendWithProvider(sv as any, "s", "Continue", "start", () => {})).rejects.toThrow("PROVIDER_IDENTITY_MISMATCH");
     }
     expect(sent).toBe(0);
+  });
+});
+
+describe("C1 conflicting decodable providers", () => {
+  test("conflicting session.modelRef and session.model never resolve (override or not)", async () => {
+    const conflicting = { session: { modelRef: { providerId: "start", modelId: "Flash" }, model: { providerId: "coding", modelId: "Flash" } } };
+    expect(sessionModel(conflicting as any)).toBeNull();
+    expect(sessionModel({ modelRef: { providerId: "start", modelId: "Flash" }, model: { providerId: "coding", modelId: "Flash" } } as any)).toBeNull();
+    // Ambiguity never sends, with or without the fallback override.
+    for (const override of [undefined, "1"]) {
+      const old = process.env.ZCODE_TUI_ALLOW_PROVIDER_FALLBACK;
+      if (override === undefined) delete process.env.ZCODE_TUI_ALLOW_PROVIDER_FALLBACK;
+      else process.env.ZCODE_TUI_ALLOW_PROVIDER_FALLBACK = override;
+      try {
+        let sent = 0;
+        const sv = { request: async (method: string) => { if (method === "session/send") sent++; return conflicting; } };
+        await expect(sendWithProvider(sv as any, "s", "brief", "start", () => {})).rejects.toThrow("PROVIDER_IDENTITY_MISMATCH");
+        expect(sent).toBe(0);
+      } finally {
+        if (old === undefined) delete process.env.ZCODE_TUI_ALLOW_PROVIDER_FALLBACK;
+        else process.env.ZCODE_TUI_ALLOW_PROVIDER_FALLBACK = old;
+      }
+    }
+  });
+  test("agreeing fields resolve; display-only string without provider stays non-authoritative", () => {
+    const agree = { session: { modelRef: { providerId: "start", modelId: "GLM-5.3-Flash" }, model: { providerId: "start", modelId: "GLM-5.3-Flash" } } };
+    expect(sessionModel(agree as any)?.providerId).toBe("start");
+    // "provider/model" string form is authoritative when alone.
+    expect(sessionModel({ model: "start/GLM-5.3-Flash" } as any)?.modelId).toBe("GLM-5.3-Flash");
+    // A bare display name decodes to nothing authoritative on its own;
+    // paired with a conflicting ref it must not mask the conflict.
+    expect(sessionModel({ modelRef: { providerId: "start", modelId: "A" }, model: "just-a-display-name" } as any)?.providerId).toBe("start");
   });
 });
