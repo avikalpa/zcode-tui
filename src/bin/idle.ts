@@ -344,6 +344,10 @@ function releaseFleetExecLock(): void {
   try { rmSync(join(FLEET_LOCK_ROOT(), "ztq-idle-exec"), { recursive: true, force: true }); } catch { /* absent */ }
 }
 
+function honestRc0(code: number | null, providerError: boolean): boolean {
+  return code === 0 && !providerError;
+}
+
 async function cmdExec(v: Record<string, string | boolean | undefined>): Promise<number> {
   adoptOrphanedTickets();
   const rows = localExecutableTasks();
@@ -497,22 +501,36 @@ ${note}` : stderr });
     // semantics), and it burned a bisect slot mid-experiment. Settle only on
     // honest success or a dead ticket; provider errors leave the ticket for
     // the deadline/expire path so the failure stays inspectable.
-    const settle = providerError
-      ? { ok: false, detail: "skipped (provider error — ticket left unsettled)" }
-      : await settleTicket(row.serverTicketId);
-    const honestRc = providerError ? 1 : result.code;
+    // sol xhigh v6 (2026-10-27): settlement proves nothing beyond its
+    // demonstrated contract — settling a killed run invents completion.
+    // Settle ONLY on honest rc=0; interruptions record cleanup_pending and
+    // leave the ticket for its documented expiry/cancel path.
+    const killed = result.code === null;
+    const settle = honestRc0(result.code, providerError)
+      ? await settleTicket(row.serverTicketId)
+      : { ok: false, detail: killed ? "skipped (killed — cleanup_pending)" : "skipped (failed run — ticket left unsettled)" };
+    const honestRc = providerError ? 1 : (result.code ?? 1);
     // Failure classification (D2 rework 2026-10-26): a dead ticket (3102
     // passes through by contract; 3104 = bogus/expired — both measured that
     // night) is terminal, everything else is retryable — the ticket is
     // still granted server-side and a fresh messages call may simply pass
     // (the Bun-TLS 3012 class). Bound: attempt_count reaches 3 -> failed.
-    const deadTicket = wire.some((w) => /\b310[24]\b/.test(w.respHead))
-      || /"code"\s*:\s*310[24]/.test(errMatch?.[1] ?? "");
+    // sol xhigh v1: 3102 "wrong off-peak ticket" must not auto-mean "expired"
+    // — record ticket_rejected and stop the attempt; only 3104 (bogus/unknown
+    // ticket) is authoritative enough to end the lifecycle locally, and even
+    // then the reason names the code. Rejected admission is preserved.
+    const rejected3102 = wire.some((w) => /\b3102\b/.test(w.respHead)) || /"code"\s*:\s*3102/.test(errMatch?.[1] ?? "");
+    const deadTicket = wire.some((w) => /\b3104\b/.test(w.respHead)) || /"code"\s*:\s*3104/.test(errMatch?.[1] ?? "");
     if (honestRc === 0) {
       setLocalTaskState(row.offPeakTaskId, "completed", { endedAt: Date.now() });
     } else if (deadTicket || row.attemptCount >= 3) {
-      const why = deadTicket ? `dead ticket (${wire.map((w) => w.status).join(",") || "pi stream"})` : `attempts exhausted (${row.attemptCount + 1})`;
-      setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `${why}${providerError ? ` provider error: ${errMatch?.[1] ?? "unknown"}` : ` pi rc=${result.code}`}`.slice(0, 200) });
+      const why = deadTicket ? "ticket_rejected: 3104 unknown ticket" : `attempts exhausted (${row.attemptCount + 1})`;
+      setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `${why}${rejected3102 ? " [+3102 rejected: not interpreted as expiry]" : ""}${providerError ? ` provider error: ${errMatch?.[1] ?? "unknown"}` : ` pi rc=${result.code}`}`.slice(0, 200) });
+    } else if (killed) {
+      // cleanup_pending: the ticket's remote state is unknown — reconcile
+      // before re-admitting; never requeue blindly into a possible live run.
+      setLocalTaskState(row.offPeakTaskId, "cleanup_pending", { failureReason: `killed at cap (rc=null) — remote cleanup unconfirmed; reconcile before re-exec` });
+      releaseLocalTask(row.offPeakTaskId);
     } else {
       // Retryable: back to queued, release the claim, keep started_at/ended_at
       // untouched — the serve loop re-claims on its next tick.
