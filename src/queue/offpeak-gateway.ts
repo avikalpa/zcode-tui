@@ -40,6 +40,15 @@ export interface OffPeakTaskSummary {
 const TASKS_INDEX = () =>
   process.env.ZCODE_TASKS_INDEX ?? join(homedir(), ".zcode", "v2", "tasks-index.sqlite");
 
+/** The desktop writes this index concurrently (measured 2026-10-27: a live
+ * desktop session holds the write lock and a bare open throws
+ * "database is locked" mid-registration). Every open waits up to 5s. */
+export function openTasksIndex(readonly = false) {
+  const db = new Database(TASKS_INDEX(), readonly ? { readonly: true } : {});
+  db.exec("PRAGMA busy_timeout = 5000");
+  return db;
+}
+
 export function extractApiKey(raw: string): string | null {
   try {
     const cfg = JSON.parse(raw);
@@ -127,7 +136,7 @@ export async function ticketStatus(ticketIds: string[]): Promise<{ nextPollAfter
 
 /** Read-only list from the desktop's own index (drives offPeak/list asks). */
 export function listLocalOffPeakTasks(): OffPeakTaskSummary[] {
-  const db = new Database(TASKS_INDEX(), { readonly: true });
+  const db = openTasksIndex(true);
   try {
     return db.query(`SELECT off_peak_task_id, title, status, queue_position, session_id, queued_at
       FROM off_peak_tasks ORDER BY COALESCE(queued_at, 0) DESC LIMIT 500`).all()
@@ -178,7 +187,7 @@ export async function registerOffPeakTask(input: {
 
   const offPeakTaskId = "offpeak-" + crypto.randomUUID();
   const now = Date.now();
-  const db = new Database(TASKS_INDEX());
+  const db = openTasksIndex();
   try {
     // fleet hosts run different desktop vintages: dev's 3.11 tasks-index
     // lacks several newer columns (model_selection, project_id, …; measured
@@ -289,7 +298,7 @@ export async function registerOffPeakTask(input: {
       const nextTakeAt = Number(body?.data?.next_take_at ?? 0);
       const cooldownMs = nextTakeAt ? Math.max(60_000, nextTakeAt - Date.now() + 60_000) : undefined;
       // mark the row failed-registration (desktop convention on refusal)
-      const db2 = new Database(TASKS_INDEX());
+      const db2 = openTasksIndex();
       db2.query(`UPDATE off_peak_tasks SET status='failed', failure_reason=?, updated_at=? WHERE off_peak_task_id=?`)
         .run(`free tier limit reached (next_take_at=${body?.data?.next_take_at ?? "?"})`, Date.now(), offPeakTaskId);
       db2.close();
@@ -300,14 +309,14 @@ export async function registerOffPeakTask(input: {
       const detail = status === 401
         ? "gateway 401 (stale zcodejwttoken — use the ZCode desktop once to rotate ~/.zcode/v2/credentials.json, then re-enqueue; the task row stays queued for retry)"
         : `ticket registration ${status}: ${JSON.stringify(body)?.slice(0, 200)}`;
-      const db2 = new Database(TASKS_INDEX());
+      const db2 = openTasksIndex();
       db2.query(`UPDATE off_peak_tasks SET status='failed', failure_reason=?, updated_at=? WHERE off_peak_task_id=?`)
         .run(detail.slice(0, 200), Date.now(), offPeakTaskId);
       db2.close();
       return { ok: false, refusal: status === 401 ? detail : undefined, error: detail };
     }
     const position = typeof reg.position === "number" ? reg.position : undefined;
-    const db2 = new Database(TASKS_INDEX());
+    const db2 = openTasksIndex();
     db2.query(`UPDATE off_peak_tasks SET server_ticket_id=?, queue_position=?, updated_at=? WHERE off_peak_task_id=?`)
       .run(String(reg.ticket_id), position ?? null, Date.now(), offPeakTaskId);
     db2.close();
@@ -374,7 +383,7 @@ export interface LocalTicketRow { offPeakTaskId: string; serverTicketId: string;
 
 /** Local rows that hold a server ticket and are not terminal — repair candidates included. */
 export function localExecutableTasks(): LocalTicketRow[] {
-  const db = new Database(TASKS_INDEX(), { readonly: true });
+  const db = openTasksIndex(true);
   try {
     const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, title, prompt, status, model_selection, workspace_path, COALESCE(attempt_count,0) AS attempt_count
       FROM off_peak_tasks
@@ -394,7 +403,7 @@ export function localExecutableTasks(): LocalTicketRow[] {
  * 628). Returns the adopted ticket ids.
  */
 export function adoptOrphanedTickets(): { task: string; ticket: string }[] {
-  const db = new Database(TASKS_INDEX());
+  const db = openTasksIndex();
   const adopted: { task: string; ticket: string }[] = [];
   try {
     const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, failure_reason FROM off_peak_tasks
@@ -553,7 +562,7 @@ export async function settleTicket(ticketId: string): Promise<{ ok: boolean; det
 
 /** Mark the local row running/completed/failed (desktop row conventions). */
 export function setLocalTaskState(offPeakTaskId: string, status: string, patch: { startedAt?: number; endedAt?: number; failureReason?: string; queuePosition?: number | null } = {}): void {
-  const db = new Database(TASKS_INDEX());
+  const db = openTasksIndex();
   try {
     db.query(`UPDATE off_peak_tasks SET status=?, started_at=COALESCE(?, started_at), ended_at=COALESCE(?, ended_at),
         failure_reason=COALESCE(?, failure_reason), queue_position=COALESCE(?, queue_position), updated_at=? WHERE off_peak_task_id=?`)
@@ -571,7 +580,7 @@ export function setLocalTaskState(offPeakTaskId: string, status: string, patch: 
  * a probe failure proceeds unclaimed rather than wedging the runner.
  */
 export function claimLocalTask(offPeakTaskId: string): boolean {
-  const db = new Database(TASKS_INDEX());
+  const db = openTasksIndex();
   try {
     return db.query(`UPDATE off_peak_tasks SET claim_running=1, attempt_count=COALESCE(attempt_count,0)+1, updated_at=?
       WHERE off_peak_task_id=? AND COALESCE(claim_running,0)=0`).run(Date.now(), offPeakTaskId).changes === 1;
@@ -582,7 +591,7 @@ export function claimLocalTask(offPeakTaskId: string): boolean {
 
 /** Release a claim so the serve loop can retry the row. */
 export function releaseLocalTask(offPeakTaskId: string): void {
-  const db = new Database(TASKS_INDEX());
+  const db = openTasksIndex();
   try {
     db.query(`UPDATE off_peak_tasks SET claim_running=0, updated_at=? WHERE off_peak_task_id=?`).run(Date.now(), offPeakTaskId);
   } catch { /* column-less vintage — nothing to release */ } finally { db.close(); }

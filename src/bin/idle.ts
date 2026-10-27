@@ -17,7 +17,6 @@ import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync, mkdirSync, statSync, rmSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir, hostname } from "node:os";
-import { Database } from "bun:sqlite";
 import { AppServer } from "../protocol/client";
 import { startHeartbeat } from "../queue/heartbeat";
 import { parseCooldownMs } from "../queue/core";
@@ -30,7 +29,8 @@ import { handleOffPeakAsk, ticketAvailability,
   setLocalTaskState,
   claimLocalTask,
   releaseLocalTask,
-  registerOffPeakTask} from "../queue/offpeak-gateway";
+  registerOffPeakTask,
+  openTasksIndex} from "../queue/offpeak-gateway";
 import { autoclawPiCli, UNATTENDED_PREAMBLE, piEventStreamHasError } from "./autoclaw";
 import { syncAuthHeadless } from "../auth/sync";
 
@@ -50,7 +50,7 @@ interface OffPeakRow {
 }
 
 function cmdList(json: boolean) {
-  const db = new Database(TASKS_INDEX(), { readonly: true });
+  const db = openTasksIndex(true);
   const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, title, session_id, prompt, status,
     queued_at, started_at, ended_at, queue_position, failure_reason, attempt_count, model_selection
     FROM off_peak_tasks ORDER BY COALESCE(queued_at, 0) DESC`).all() as unknown as OffPeakRow[];
@@ -245,7 +245,7 @@ async function cmdCreate(v: Record<string, string | boolean | undefined>) {
       let ticket: string | null = null;
       for (let i = 0; i < 6 && !ticket; i++) {
         try {
-          const db = new Database(TASKS_INDEX(), { readonly: true });
+          const db = openTasksIndex(true);
           const row = db.query(`SELECT server_ticket_id FROM off_peak_tasks WHERE off_peak_task_id=?`).get(offPeakTaskId) as { server_ticket_id: string | null } | null;
           db.close();
           ticket = row?.server_ticket_id ?? null;
@@ -299,7 +299,7 @@ async function cmdPoll(json: boolean) {
     // the work succeeded. Map settled->completed only when the row carries no
     // failure; otherwise keep the failure visible.
     if (state === "completed" || state === "settled") {
-      const db2 = new Database(TASKS_INDEX(), { readonly: true });
+      const db2 = openTasksIndex(true);
       const fr = (db2.query(`SELECT failure_reason FROM off_peak_tasks WHERE off_peak_task_id=?`).get(r.offPeakTaskId) as { failure_reason: string | null } | null)?.failure_reason ?? null;
       db2.close();
       setLocalTaskState(r.offPeakTaskId, fr ? "failed" : "completed", { endedAt: Date.now(), ...(fr ? { failureReason: `ticket settled server-side after failure: ${fr.slice(0, 120)}` } : {}) });
