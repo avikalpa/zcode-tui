@@ -311,13 +311,18 @@ async function cmdPoll(json: boolean) {
     // forever (1110+ polls of one expired id, measured 2026-10-27/28) and
     // hid that the WORK is still pending. The failure reason says both.
     const phase = t ? admissionPhase(t, Date.now()) : "stand-down";
-    if (state === "expired" || phase === "window-missed") {
+    const wentTerminal = state === "expired" || phase === "window-missed";
+    if (wentTerminal) {
       const why = state === "expired"
         ? "ticket expired server-side — allowance consumed, work NOT done (pending)"
         : `grant window missed (ready_deadline ${t?.readyDeadline != null ? new Date(t.readyDeadline).toISOString() : "?"} +60s grace) — allowance consumed, work NOT done (pending)`;
       setLocalTaskState(r.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: why });
     }
-    if (typeof t?.position === "number") setLocalTaskState(r.offPeakTaskId, r.status === "running" ? "running" : "queued", { queuePosition: t.position });
+    // Terminal wins in the same iteration: a past-window ticket can still
+    // carry a queue position (ready/active rows historically did), and the
+    // update below would resurrect the failed row to queued — re-arming the
+    // zombie poll this terminal marking exists to stop.
+    if (!wentTerminal && typeof t?.position === "number") setLocalTaskState(r.offPeakTaskId, r.status === "running" ? "running" : "queued", { queuePosition: t.position });
     out.push({ task: r.offPeakTaskId, ticket: r.serverTicketId, title: r.title.slice(0, 60), state, ...(t?.position != null ? { position: t.position } : {}), ...(t?.readyDeadline != null ? { readyDeadline: t.readyDeadline } : {}) });
   }
   if (json) console.log(JSON.stringify({ tickets: out, error: res.error }, null, 1));
