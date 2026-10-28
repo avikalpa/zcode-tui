@@ -391,7 +391,7 @@ describe("cut-midtool exit protocol (BUG: exit-4 conflation)", () => {
 // active. These tests pin the phase decisions and the wire passthrough.
 // ---------------------------------------------------------------------------
 
-import { admissionPhase, urgentReadyFirst, READY_GRACE_MS, ticketStatus, type PolledTicket } from "./offpeak-gateway";
+import { admissionPhase, urgentReadyFirst, ticketStatus, type PolledTicket } from "./offpeak-gateway";
 
 describe("off-peak admission phases (sol Q4)", () => {
   // T-038's measured values (created 2026-10-27T18:35:31Z).
@@ -399,35 +399,39 @@ describe("off-peak admission phases (sol Q4)", () => {
   const rd = t0 + 356_258;            // ready_deadline = create + 5m56s
   const ad = rd + 10_599_678;         // active_deadline ≈ +2h57m more
 
-  test("grace constant is the measured 60s", () => {
-    expect(READY_GRACE_MS).toBe(60_000);
-  });
-
-  test("ready inside the window admits; past it is window-missed (the 3104 source)", () => {
+  test("ready inside the window admits; the deadline itself is the hard cutoff (no positive grace)", () => {
     expect(admissionPhase({ state: "ready", readyDeadline: rd }, t0 + 60_000)).toBe("admit");
     expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd - 1000)).toBe("admit");
-    expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd + 1000)).toBe("admit"); // inside grace
-    expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd + READY_GRACE_MS + 1)).toBe("window-missed");
+    expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd)).toBe("admit");
+    // T-038 is the only measured post-deadline datum: admission there was
+    // 3104. Nothing measured says admission succeeds after the deadline.
+    expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd + 1000)).toBe("window-missed");
   });
 
-  test("expired settles terminal; queued is poll-only", () => {
+  test("expired is terminal; settled is its own honest phase (the ticket RAN); queued is poll-only", () => {
     expect(admissionPhase({ state: "expired", readyDeadline: rd }, rd + 1000)).toBe("expired");
-    expect(admissionPhase({ state: "completed" }, t0)).toBe("expired");
-    expect(admissionPhase({ state: "settled" }, t0)).toBe("expired");
+    expect(admissionPhase({ state: "completed" }, t0)).toBe("settled");
+    expect(admissionPhase({ state: "settled" }, t0)).toBe("settled");
     expect(admissionPhase({ state: "queued" }, t0)).toBe("poll-only");
   });
 
-  test("activated tickets admit until active_deadline (cleanup/reconcile path)", () => {
-    expect(admissionPhase({ state: "active", readyDeadline: rd, activeDeadline: ad }, rd + 300_000)).toBe("admit");
+  test("status/active_deadline never override an expired window (T-038: active for ~3h, admission 3104'd)", () => {
+    // T-038's exact shape: activation with a future active_deadline past the
+    // ready window is the lie admission disproved — never admit.
+    expect(admissionPhase({ state: "active", readyDeadline: rd, activeDeadline: ad }, rd + 300_000)).toBe("window-missed");
     expect(admissionPhase({ state: "active", readyDeadline: rd, activeDeadline: ad }, ad + 1)).toBe("window-missed");
-    // active WITHOUT an active_deadline is not trusted past the ready window
-    // (T-038 showed active past deadline yet 3104'd at admission)
-    expect(admissionPhase({ state: "active", readyDeadline: rd }, rd + READY_GRACE_MS + 1)).toBe("window-missed");
+    expect(admissionPhase({ state: "active", readyDeadline: rd }, rd + 1000)).toBe("window-missed");
+    // in-window active still admits
+    expect(admissionPhase({ state: "active", readyDeadline: rd, activeDeadline: ad }, rd - 1000)).toBe("admit");
   });
 
-  test("deadline-less responses fall back to state-only semantics (server shape drift cannot wedge admissions)", () => {
+  test("deadline-less responses fall back to state-only semantics, except a known-expired activation", () => {
     expect(admissionPhase({ state: "ready" }, t0)).toBe("admit");
     expect(admissionPhase({ state: "active" }, t0)).toBe("admit");
+    // partially-deadline'd: an active_deadline already past is known death
+    // even with the ready_deadline missing
+    expect(admissionPhase({ state: "active", activeDeadline: t0 - 1 }, t0)).toBe("window-missed");
+    expect(admissionPhase({ state: "active", activeDeadline: t0 + 60_000 }, t0)).toBe("admit");
   });
 
   test("urgentReadyFirst: closest deadline first, deadline-less last, stable", () => {

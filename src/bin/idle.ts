@@ -311,17 +311,18 @@ async function cmdPoll(json: boolean) {
     // forever (1110+ polls of one expired id, measured 2026-10-27/28) and
     // hid that the WORK is still pending. The failure reason says both.
     const phase = t ? admissionPhase(t, Date.now()) : "stand-down";
-    const wentTerminal = state === "expired" || phase === "window-missed";
-    if (wentTerminal) {
+    if (state === "expired" || phase === "window-missed") {
       const why = state === "expired"
         ? "ticket expired server-side — allowance consumed, work NOT done (pending)"
-        : `grant window missed (ready_deadline ${t?.readyDeadline != null ? new Date(t.readyDeadline).toISOString() : "?"} +60s grace) — allowance consumed, work NOT done (pending)`;
+        : `grant window missed (ready_deadline ${t?.readyDeadline != null ? new Date(t.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)`;
       setLocalTaskState(r.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: why });
     }
     // Terminal wins in the same iteration: a past-window ticket can still
     // carry a queue position (ready/active rows historically did), and the
-    // update below would resurrect the failed row to queued — re-arming the
-    // zombie poll this terminal marking exists to stop.
+    // update below would resurrect the just-terminal row — re-arming the
+    // zombie poll this terminal handling exists to stop. Settled rows were
+    // reconciled above (completed, or the failure kept); terminal is final.
+    const wentTerminal = phase === "expired" || phase === "settled" || phase === "window-missed";
     if (!wentTerminal && typeof t?.position === "number") setLocalTaskState(r.offPeakTaskId, r.status === "running" ? "running" : "queued", { queuePosition: t.position });
     out.push({ task: r.offPeakTaskId, ticket: r.serverTicketId, title: r.title.slice(0, 60), state, ...(t?.position != null ? { position: t.position } : {}), ...(t?.readyDeadline != null ? { readyDeadline: t.readyDeadline } : {}) });
   }
@@ -379,7 +380,7 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   // came back empty/unknown — 6 of 7 pre-checks on 2026-10-27 raced a
   // transient read flap (unknown rate ~1.4% on quiet polls) and stood down
   // while a REAL grant expired. After that, the server's own deadlines
-  // decide: admission past ready_deadline+grace is the measured 3104 source
+  // decide: admission past ready_deadline is the measured 3104 source
   // (T-038 admitted +8m44s against a +5m56s window) and is refused here.
   let st = await pollTickets([row.serverTicketId]);
   let pt = st.tickets[0];
@@ -395,8 +396,19 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
     console.log(`idle exec: ticket ${row.serverTicketId} expired — allowance consumed, work left pending`);
     return 4;
   }
+  if (phase === "settled") {
+    // The server settled this ticket — it RAN. Reconcile like `idle poll`
+    // does: completed unless the row already carries a failure, never
+    // "work NOT done".
+    const db = openTasksIndex(true);
+    const fr = (db.query(`SELECT failure_reason FROM off_peak_tasks WHERE off_peak_task_id=?`).get(row.offPeakTaskId) as { failure_reason: string | null } | null)?.failure_reason ?? null;
+    db.close();
+    setLocalTaskState(row.offPeakTaskId, fr ? "failed" : "completed", { endedAt: Date.now(), ...(fr ? { failureReason: `ticket settled server-side after failure: ${fr.slice(0, 120)}` } : {}) });
+    console.log(`idle exec: ticket ${row.serverTicketId} already settled server-side (${fr ? "failure recorded, work pending" : "work completed"}) — nothing to admit`);
+    return 0;
+  }
   if (phase === "window-missed") {
-    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `grant window missed (ready_deadline ${pt?.readyDeadline != null ? new Date(pt.readyDeadline).toISOString() : "?"} +60s grace) — allowance consumed, work NOT done (pending)` });
+    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `grant window missed (ready_deadline ${pt?.readyDeadline != null ? new Date(pt.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)` });
     console.log(`idle exec: ticket ${row.serverTicketId} state=${state} past its ready window — admission here is the 3104 source; work left pending`);
     return 4;
   }

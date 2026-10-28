@@ -461,34 +461,34 @@ export async function pollTickets(ticketIds: string[]): Promise<{ tickets: Polle
 // the deadline is the 3104 source, so the runner phases on the deadline.
 // ---------------------------------------------------------------------------
 
-/** Grace past ready_deadline: oc #25 was admitted at +5m01s against a 313s
- *  (5m13s) window, so the boundary is tight — 60s of grace for poll jitter. */
-export const READY_GRACE_MS = 60_000;
-
 export type AdmissionPhase =
-  | "admit"           // granted and inside the ready window (or activated) — go
-  | "window-missed"   // granted, but ready_deadline + grace has passed — never admit (3104); record and leave the work pending
+  | "admit"           // granted and inside the ready window — go
+  | "window-missed"   // granted, but its window is provably gone — never admit (3104); record and leave the work pending
   | "stand-down"      // transient unknown/absent read (flap racing a state transition) — retry once, then wait
   | "poll-only"       // queued — the ticket holds no grant; executing it is what burns slots
-  | "expired";        // terminal server-side — record allowance-consumed, stop polling
+  | "expired"         // terminal server-side — record allowance-consumed, stop polling
+  | "settled";        // terminal server-side — the ticket RAN; reconcile honestly (completed unless a failure is recorded)
 
-/** Phase decision for one ticket against the wall clock. Deadlines absent
- *  (older responses) fall back to state-only semantics — admit on
- *  ready/active exactly as the pre-deadline runner did, so a server change
- *  that drops the fields cannot wedge admissions. */
+/** Phase decision for one ticket against the wall clock. The cutoff is the
+ *  ready_deadline itself, with no positive grace: the only measured
+ *  post-deadline datum is a 3104 (T-038, +3min past) and nothing measured
+ *  says admission succeeds after it, so the runner does not bet a grant on
+ *  that bet either way. Status lies after the window (T-038 showed active
+ *  for ~3h while admission 3104'd), so state/active_deadline NEVER override
+ *  an expired window. Fully deadline-less responses (server shape drift)
+ *  fall back to state-only semantics — admit on ready/active as the
+ *  pre-deadline runner did — except when an active_deadline is present and
+ *  already past, which is known death regardless of the missing field. */
 export function admissionPhase(
   t: { state: string; readyDeadline?: number; activeDeadline?: number },
   now: number,
 ): AdmissionPhase {
-  if (t.state === "expired" || t.state === "completed" || t.state === "settled") return "expired";
+  if (t.state === "expired") return "expired";
+  if (t.state === "completed" || t.state === "settled") return "settled";
   if (t.state !== "ready" && t.state !== "active") return "poll-only";
+  if (t.activeDeadline != null && now > t.activeDeadline) return "window-missed";
   if (t.readyDeadline == null) return "admit";
-  if (now <= t.readyDeadline + READY_GRACE_MS) return "admit";
-  // active_deadline present means the server moved the ticket to active —
-  // treat an activated ticket as live until its own deadline (measured
-  // once: T-038 showed active past the ready deadline yet 3104'd; the grace
-  // below trusts activation only when the state came with an active_deadline).
-  if (t.state === "active" && t.activeDeadline != null && now <= t.activeDeadline) return "admit";
+  if (now <= t.readyDeadline) return "admit";
   return "window-missed";
 }
 
