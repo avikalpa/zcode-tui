@@ -179,13 +179,33 @@ export async function configureSession(sv: RunClient, sessionId: string, created
 }
 
 export type RunOutcome = "settled" | "budget" | "collection-limit" | "event-limit" | "cut-midtool" | "no-events" | "error";
+export interface TurnProgress { pending: string[]; replyComplete: boolean; textSeen: boolean }
+export function observeTurn(state: TurnProgress, p: Record<string, unknown>): TurnProgress {
+  const kind = String(p.type ?? p.kind ?? "");
+  if (kind === "text_delta" && state.pending.length && typeof p.delta === "string" && p.delta.length) {
+    return { ...state, textSeen: true };
+  }
+  const model = p.model as { role?: string } | undefined;
+  if (model?.role !== "main" || p.querySource !== "main_turn" || typeof p.requestId !== "string") return state;
+  if (kind === "model_request_started") {
+    return { pending: [...new Set([...state.pending, p.requestId])], replyComplete: false, textSeen: false };
+  }
+  if (kind === "model_request_completed" && state.pending.includes(p.requestId)) {
+    return { pending: state.pending.filter(id => id !== p.requestId), textSeen: state.textSeen,
+      replyComplete: state.textSeen && ["stop", "end_turn"].includes(String(p.finishReason)) };
+  }
+  return state;
+}
 export function collectionDecision(s: { now: number; started: number; deadline: number; maxMs: number;
   count: number; maxEvents: number; lastEvent: number; quietMs: number; toolQuietMs: number;
-  toolInFlight: boolean; error: boolean }): RunOutcome | null {
+  toolInFlight: boolean; modelInFlight: boolean; replyComplete: boolean; error: boolean }): RunOutcome | null {
   if (s.error) return "error";
   if (s.deadline && s.now >= s.deadline) return "budget";
   if (s.now - s.started >= s.maxMs) return s.count ? "collection-limit" : "no-events";
   if (s.count >= s.maxEvents) return "event-limit";
+  // Silence after request start or an intermediate tool-call response is
+  // not a completed model reply. A canary exposed the old zero-exit path.
+  if (s.modelInFlight || (!s.toolInFlight && !s.replyComplete)) return null;
   if (s.count && s.now - s.lastEvent > (s.toolInFlight ? s.toolQuietMs : s.quietMs)) {
     return s.toolInFlight ? "cut-midtool" : "settled";
   }
@@ -240,6 +260,7 @@ let toolInFlight = 0;
 let stopHb: (() => void) | null = null;
 let ref: ModelRef | null = null;
 let selected: ModelRef | null = null;
+let turnProgress: TurnProgress = { pending: [], replyComplete: false, textSeen: false };
 const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
 const deadlineMs = Number(values["max-run-min"]) > 0
   ? t0 + Number(values["max-run-min"]) * 60_000
@@ -266,6 +287,7 @@ const sv = new AppServer({
     // and does NOT count toward the cap.
     lastEvent = Date.now();
     if (method !== "session/event") return;
+    turnProgress = observeTurn(turnProgress, ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>);
     events.push({ method, kind, ms: Date.now() - t0, summary });
     // Tool-in-flight tracking (trial finding #5, T-036): a long tool call
     // (measured: a 300s `timeout 300 tb mail fetch`) streams nothing and the
@@ -326,6 +348,8 @@ function writeTranscript(outcome: RunOutcome) {
     requestedModel: ref,
     selectedModel: selected,
     completionVerified: false, // quiet is transport settlement, not editor/task acceptance
+    nativeReplyComplete: turnProgress.replyComplete,
+    nativeRequestsPending: turnProgress.pending.length,
     processLiveness: "unverified", // closing this app-server does not prove a surviving worker
     transportError,
     outcome,
@@ -375,11 +399,19 @@ async function main() {
   const maxContinues = Number(values["continues"]);
   const decision = () => collectionDecision({ now: Date.now(), started: t0, deadline: deadlineMs,
     maxMs, count: events.length, maxEvents, lastEvent, quietMs, toolQuietMs,
-    toolInFlight: toolInFlight > 0, error: !!transportError });
+    toolInFlight: toolInFlight > 0, modelInFlight: turnProgress.pending.length > 0,
+    replyComplete: turnProgress.replyComplete, error: !!transportError });
   let outcome: RunOutcome;
   while (true) {
     const stop = decision();
     if (!stop) { await new Promise((r) => setTimeout(r, 5000)); continue; }
+    if (stop === "settled") {
+      // Confirm the owning runtime is idle; closing the client during an
+      // active generation or tool is not successful transport settlement.
+      const snapshot = await sv.request("session/read", { sessionId }, 10000) as Snapshot;
+      const status = (snapshot as { session?: { status?: string } }).session?.status;
+      if (status !== "idle") { await new Promise((r) => setTimeout(r, 5000)); continue; }
+    }
     if ((stop === "settled" || stop === "cut-midtool") && continuesUsed < maxContinues) {
       const wait = backoffMs(continuesUsed);
       console.log(`zt-run: continue-steer #${continuesUsed + 1} after ${Math.round(wait / 1000)}s (lastError=${lastErrorKind || "silence"})`);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertFundingRoute, chooseEffort, collectionDecision, configureSession,
-  createSession, matchAvailableModel, outcomeExitCode, type ModelRef, type RunClient,
+  createSession, matchAvailableModel, observeTurn, outcomeExitCode, type ModelRef, type RunClient,
 } from "./run";
 
 const wanted: ModelRef = { providerId: "zai-api", modelId: "GLM-5.3-Flash", options: { reasoningLevel: "max" } };
@@ -80,9 +80,27 @@ describe("native model and effort verification", () => {
 
 const collecting = {
   now: 1000, started: 0, deadline: 0, maxMs: 1000, count: 12, maxEvents: 100,
-  lastEvent: 999, quietMs: 100, toolQuietMs: 500, toolInFlight: false, error: false,
+  lastEvent: 999, quietMs: 100, toolQuietMs: 500, toolInFlight: false,
+  modelInFlight: false, replyComplete: true, error: false,
 };
 describe("collection termination is not completion", () => {
+  test("the canary request-start silence never settles", () => {
+    expect(collectionDecision({ ...collecting, maxMs: 2000, lastEvent: 1,
+      modelInFlight: true, replyComplete: false })).toBeNull();
+    expect(collectionDecision({ ...collecting, maxMs: 2000, lastEvent: 1,
+      replyComplete: false })).toBeNull();
+  });
+  test("native final reply is distinct from tool calls and empty completions", () => {
+    const start = { type: "model_request_started", requestId: "req-fixture",
+      model: { role: "main" }, querySource: "main_turn" };
+    const initial = { pending: [], replyComplete: false, textSeen: false };
+    const active = observeTurn(initial, start);
+    const text = observeTurn(active, { kind: "text_delta", delta: "42" });
+    expect(observeTurn(text, { ...start, type: "model_request_completed", finishReason: "tool-calls" }).replyComplete).toBe(false);
+    expect(observeTurn(active, { ...start, type: "model_request_completed", finishReason: "stop" }).replyComplete).toBe(false);
+    expect(observeTurn(text, { ...start, type: "model_request_completed", finishReason: "stop" }).replyComplete).toBe(true);
+    expect(observeTurn(active, { ...start, type: "model_request_completed", model: { role: "classifier" }, finishReason: "stop" }).pending).toEqual(["req-fixture"]);
+  });
   test("active text at the collection boundary is incomplete", () => {
     expect(collectionDecision(collecting)).toBe("collection-limit");
     expect(outcomeExitCode("collection-limit")).not.toBe(0);
