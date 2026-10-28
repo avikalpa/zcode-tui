@@ -30,7 +30,9 @@ import { handleOffPeakAsk, ticketAvailability,
   claimLocalTask,
   releaseLocalTask,
   registerOffPeakTask,
-  openTasksIndex} from "../queue/offpeak-gateway";
+  openTasksIndex,
+  admissionPhase,
+  urgentReadyFirst} from "../queue/offpeak-gateway";
 import { autoclawPiCli, UNATTENDED_PREAMBLE, piEventStreamHasError } from "./autoclaw";
 import { syncAuthHeadless } from "../auth/sync";
 
@@ -304,11 +306,22 @@ async function cmdPoll(json: boolean) {
       db2.close();
       setLocalTaskState(r.offPeakTaskId, fr ? "failed" : "completed", { endedAt: Date.now(), ...(fr ? { failureReason: `ticket settled server-side after failure: ${fr.slice(0, 120)}` } : {}) });
     }
+    // Expired / window-missed rows are terminal locally too (allowance
+    // consumed) — leaving them queued made the serve poll dead tickets
+    // forever (1110+ polls of one expired id, measured 2026-10-27/28) and
+    // hid that the WORK is still pending. The failure reason says both.
+    const phase = t ? admissionPhase(t, Date.now()) : "stand-down";
+    if (state === "expired" || phase === "window-missed") {
+      const why = state === "expired"
+        ? "ticket expired server-side — allowance consumed, work NOT done (pending)"
+        : `grant window missed (ready_deadline ${t?.readyDeadline != null ? new Date(t.readyDeadline).toISOString() : "?"} +60s grace) — allowance consumed, work NOT done (pending)`;
+      setLocalTaskState(r.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: why });
+    }
     if (typeof t?.position === "number") setLocalTaskState(r.offPeakTaskId, r.status === "running" ? "running" : "queued", { queuePosition: t.position });
-    out.push({ task: r.offPeakTaskId, ticket: r.serverTicketId, title: r.title.slice(0, 60), state, ...(t?.position != null ? { position: t.position } : {}) });
+    out.push({ task: r.offPeakTaskId, ticket: r.serverTicketId, title: r.title.slice(0, 60), state, ...(t?.position != null ? { position: t.position } : {}), ...(t?.readyDeadline != null ? { readyDeadline: t.readyDeadline } : {}) });
   }
   if (json) console.log(JSON.stringify({ tickets: out, error: res.error }, null, 1));
-  else for (const o of out) console.log(`idle poll: ${o.ticket} ${o.state}${o.position != null ? ` #${o.position}` : ""} — ${o.title}`);
+  else for (const o of out) console.log(`idle poll: ${o.ticket} ${o.state}${o.position != null ? ` #${o.position}` : ""}${o.readyDeadline != null ? ` rd=${new Date(Number(o.readyDeadline)).toISOString()}` : ""} — ${o.title}`);
   return 0;
 }
 
@@ -357,10 +370,33 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   if (!row && !taskSel && !ticketSel && rows.length > 0) row = rows[0];
   if (!row) { console.error("idle exec: no live ticket row matches (run `zcode-tui idle poll`)"); return 2; }
 
-  const st = await pollTickets([row.serverTicketId]);
-  const state = st.tickets[0]?.state ?? "unknown";
-  if (state !== "ready" && state !== "active") {
-    console.log(`idle exec: ticket ${row.serverTicketId} state=${state}${st.tickets[0]?.position != null ? ` #${st.tickets[0].position}` : ""} (not ready; poll again later)`);
+  // Phase-aware pre-check (sol Q4): one poll, then ONE retry when the read
+  // came back empty/unknown — 6 of 7 pre-checks on 2026-10-27 raced a
+  // transient read flap (unknown rate ~1.4% on quiet polls) and stood down
+  // while a REAL grant expired. After that, the server's own deadlines
+  // decide: admission past ready_deadline+grace is the measured 3104 source
+  // (T-038 admitted +8m44s against a +5m56s window) and is refused here.
+  let st = await pollTickets([row.serverTicketId]);
+  let pt = st.tickets[0];
+  if (!pt) {
+    await new Promise((r) => setTimeout(r, 4000));
+    st = await pollTickets([row.serverTicketId]);
+    pt = st.tickets[0];
+  }
+  const state = pt?.state ?? "unknown";
+  const phase = pt ? admissionPhase(pt, Date.now()) : "stand-down";
+  if (phase === "expired") {
+    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: "ticket expired server-side — allowance consumed, work NOT done (pending)" });
+    console.log(`idle exec: ticket ${row.serverTicketId} expired — allowance consumed, work left pending`);
+    return 4;
+  }
+  if (phase === "window-missed") {
+    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `grant window missed (ready_deadline ${pt?.readyDeadline != null ? new Date(pt.readyDeadline).toISOString() : "?"} +60s grace) — allowance consumed, work NOT done (pending)` });
+    console.log(`idle exec: ticket ${row.serverTicketId} state=${state} past its ready window — admission here is the 3104 source; work left pending`);
+    return 4;
+  }
+  if (phase !== "admit") {
+    console.log(`idle exec: ticket ${row.serverTicketId} state=${state}${pt?.position != null ? ` #${pt.position}` : ""} (phase=${phase}; poll again later)`);
     return 3;
   }
 
@@ -554,7 +590,13 @@ async function cmdServe(v: Record<string, string | boolean | undefined>): Promis
       const live = localExecutableTasks();
       if (live.length > 0) {
         const st = await pollTickets(live.map((r) => r.serverTicketId));
-        const readyTicket = st.tickets.find((t) => t.state === "ready" || t.state === "active");
+        // Single-flight stays (one exec account-wide), but the PICK is
+        // urgent-first: the ready ticket closest to losing its grant goes
+        // now. First-ready-only starves siblings — T-039's grant expired
+        // behind T-038's failing retries (measured 2026-10-27).
+        const readyTicket = st.tickets
+          .filter((t) => admissionPhase(t, Date.now()) === "admit")
+          .sort(urgentReadyFirst)[0];
         if (readyTicket) {
           console.log(`idle serve: ticket ${readyTicket.ticketId} is ${readyTicket.state} — executing`);
           await cmdExec({ ticket: readyTicket.ticketId });

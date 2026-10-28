@@ -383,3 +383,77 @@ describe("cut-midtool exit protocol (BUG: exit-4 conflation)", () => {
     expect(row.next_eligible_at).toBeGreaterThanOrEqual(1_700_000_000_000 + 44 * 60_000);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Off-peak grant phases (sol Q4, measured 2026-10-28): the status wire
+// carries ready_deadline ≈ create+5.5min and active_deadline ≈ +3h, and
+// admission past the ready window answers 3104 while status still says
+// active. These tests pin the phase decisions and the wire passthrough.
+// ---------------------------------------------------------------------------
+
+import { admissionPhase, urgentReadyFirst, READY_GRACE_MS, ticketStatus, type PolledTicket } from "./offpeak-gateway";
+
+describe("off-peak admission phases (sol Q4)", () => {
+  // T-038's measured values (created 2026-10-27T18:35:31Z).
+  const t0 = 1_793_126_131_824;
+  const rd = t0 + 356_258;            // ready_deadline = create + 5m56s
+  const ad = rd + 10_599_678;         // active_deadline ≈ +2h57m more
+
+  test("grace constant is the measured 60s", () => {
+    expect(READY_GRACE_MS).toBe(60_000);
+  });
+
+  test("ready inside the window admits; past it is window-missed (the 3104 source)", () => {
+    expect(admissionPhase({ state: "ready", readyDeadline: rd }, t0 + 60_000)).toBe("admit");
+    expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd - 1000)).toBe("admit");
+    expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd + 1000)).toBe("admit"); // inside grace
+    expect(admissionPhase({ state: "ready", readyDeadline: rd }, rd + READY_GRACE_MS + 1)).toBe("window-missed");
+  });
+
+  test("expired settles terminal; queued is poll-only", () => {
+    expect(admissionPhase({ state: "expired", readyDeadline: rd }, rd + 1000)).toBe("expired");
+    expect(admissionPhase({ state: "completed" }, t0)).toBe("expired");
+    expect(admissionPhase({ state: "settled" }, t0)).toBe("expired");
+    expect(admissionPhase({ state: "queued" }, t0)).toBe("poll-only");
+  });
+
+  test("activated tickets admit until active_deadline (cleanup/reconcile path)", () => {
+    expect(admissionPhase({ state: "active", readyDeadline: rd, activeDeadline: ad }, rd + 300_000)).toBe("admit");
+    expect(admissionPhase({ state: "active", readyDeadline: rd, activeDeadline: ad }, ad + 1)).toBe("window-missed");
+    // active WITHOUT an active_deadline is not trusted past the ready window
+    // (T-038 showed active past deadline yet 3104'd at admission)
+    expect(admissionPhase({ state: "active", readyDeadline: rd }, rd + READY_GRACE_MS + 1)).toBe("window-missed");
+  });
+
+  test("deadline-less responses fall back to state-only semantics (server shape drift cannot wedge admissions)", () => {
+    expect(admissionPhase({ state: "ready" }, t0)).toBe("admit");
+    expect(admissionPhase({ state: "active" }, t0)).toBe("admit");
+  });
+
+  test("urgentReadyFirst: closest deadline first, deadline-less last, stable", () => {
+    const a = { ticketId: "a", state: "ready", readyDeadline: 300 } as PolledTicket;
+    const b = { ticketId: "b", state: "ready", readyDeadline: 100 } as PolledTicket;
+    const c = { ticketId: "c", state: "ready" } as PolledTicket;
+    const d = { ticketId: "d", state: "ready", readyDeadline: 200 } as PolledTicket;
+    expect([a, b, c, d].sort(urgentReadyFirst).map((t) => t.ticketId)).toEqual(["b", "d", "a", "c"]);
+  });
+
+  test("status wire passthrough: enveloped payload with deadlines parses", async () => {
+    const body = {
+      code: 0, msg: "success",
+      data: { next_poll_after: 90, tickets: [{ ticket_id: "1", task_id: "t", state: "ready", position: 9, queued_at: t0, ready_deadline: rd, active_deadline: ad }] },
+    };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    try {
+      const res = await ticketStatus(["1"]);
+      expect(res.error).toBeUndefined();
+      expect(res.nextPollAfter).toBe(90);
+      expect(res.tickets[0].state).toBe("ready");
+      expect(res.tickets[0].ready_deadline).toBe(rd);
+      expect(res.tickets[0].active_deadline).toBe(ad);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});

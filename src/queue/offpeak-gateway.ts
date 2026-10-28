@@ -120,7 +120,9 @@ export async function ticketAvailability(): Promise<{ canTake: boolean; nextTake
   }
 }
 
-export async function ticketStatus(ticketIds: string[]): Promise<{ nextPollAfter?: number; tickets: { ticket_id: string; task_id?: string; state: string; position?: number | null }[]; error?: string }> {
+export interface TicketStatusEntry { ticket_id: string; task_id?: string; state: string; position?: number | null; queued_at?: number; ready_deadline?: number; active_deadline?: number }
+
+export async function ticketStatus(ticketIds: string[]): Promise<{ nextPollAfter?: number; tickets: TicketStatusEntry[]; error?: string }> {
   if (ticketIds.length === 0) return { tickets: [] };
   try {
     const { status, body } = await gatewayFetch("/api/v1/off-peak/ticket/status", {
@@ -429,16 +431,75 @@ export function adoptOrphanedTickets(): { task: string; ticket: string }[] {
   return adopted;
 }
 
-export interface PolledTicket { ticketId: string; state: string; position?: number | null; nextPollAfter?: number }
+export interface PolledTicket {
+  ticketId: string; state: string; position?: number | null; nextPollAfter?: number;
+  queuedAt?: number; readyDeadline?: number; activeDeadline?: number;
+}
 
 /** Poll the gateway for the given ticket ids (batch). */
 export async function pollTickets(ticketIds: string[]): Promise<{ tickets: PolledTicket[]; nextPollAfter?: number; error?: string }> {
   const res = await ticketStatus(ticketIds);
   return {
-    tickets: res.tickets.map((t) => ({ ticketId: t.ticket_id, state: t.state, position: t.position ?? null, nextPollAfter: res.nextPollAfter })),
+    tickets: res.tickets.map((t) => ({
+      ticketId: t.ticket_id, state: t.state, position: t.position ?? null, nextPollAfter: res.nextPollAfter,
+      ...(t.queued_at != null ? { queuedAt: Number(t.queued_at) } : {}),
+      ...(t.ready_deadline != null ? { readyDeadline: Number(t.ready_deadline) } : {}),
+      ...(t.active_deadline != null ? { activeDeadline: Number(t.active_deadline) } : {}),
+    })),
     nextPollAfter: res.nextPollAfter,
     error: res.error,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Phase-aware admission (sol Q4, measured 2026-10-28): the server grants a
+// ticket with a hard ready_deadline ≈ creation + 5.2–5.9 min (five tickets
+// measured: 313s/341s/347s/356s/356s). Status keeps reporting ready/active
+// for up to active_deadline (≈ +3h) AFTER the ready window closes, but
+// admission answers 3104 "off-peak ticket is invalid" — measured on T-038
+// (admitted at +8m44s against a +5m56s deadline). Attempting admission past
+// the deadline is the 3104 source, so the runner phases on the deadline.
+// ---------------------------------------------------------------------------
+
+/** Grace past ready_deadline: oc #25 was admitted at +5m01s against a 313s
+ *  (5m13s) window, so the boundary is tight — 60s of grace for poll jitter. */
+export const READY_GRACE_MS = 60_000;
+
+export type AdmissionPhase =
+  | "admit"           // granted and inside the ready window (or activated) — go
+  | "window-missed"   // granted, but ready_deadline + grace has passed — never admit (3104); record and leave the work pending
+  | "stand-down"      // transient unknown/absent read (flap racing a state transition) — retry once, then wait
+  | "poll-only"       // queued — the ticket holds no grant; executing it is what burns slots
+  | "expired";        // terminal server-side — record allowance-consumed, stop polling
+
+/** Phase decision for one ticket against the wall clock. Deadlines absent
+ *  (older responses) fall back to state-only semantics — admit on
+ *  ready/active exactly as the pre-deadline runner did, so a server change
+ *  that drops the fields cannot wedge admissions. */
+export function admissionPhase(
+  t: { state: string; readyDeadline?: number; activeDeadline?: number },
+  now: number,
+): AdmissionPhase {
+  if (t.state === "expired" || t.state === "completed" || t.state === "settled") return "expired";
+  if (t.state !== "ready" && t.state !== "active") return "poll-only";
+  if (t.readyDeadline == null) return "admit";
+  if (now <= t.readyDeadline + READY_GRACE_MS) return "admit";
+  // active_deadline present means the server moved the ticket to active —
+  // treat an activated ticket as live until its own deadline (measured
+  // once: T-038 showed active past the ready deadline yet 3104'd; the grace
+  // below trusts activation only when the state came with an active_deadline).
+  if (t.state === "active" && t.activeDeadline != null && now <= t.activeDeadline) return "admit";
+  return "window-missed";
+}
+
+/** Urgency order for the serve loop's single-flight exec pick: the ready
+ *  ticket closest to losing its grant goes first (T-039 starved to expiry
+ *  behind T-038's failing retries on 2026-10-27). Tickets without a
+ *  deadline sort last, stable. */
+export function urgentReadyFirst(a: PolledTicket, b: PolledTicket): number {
+  const da = a.readyDeadline ?? Number.MAX_SAFE_INTEGER;
+  const db = b.readyDeadline ?? Number.MAX_SAFE_INTEGER;
+  return da - db;
 }
 
 /**
