@@ -391,7 +391,7 @@ describe("cut-midtool exit protocol (BUG: exit-4 conflation)", () => {
 // active. These tests pin the phase decisions and the wire passthrough.
 // ---------------------------------------------------------------------------
 
-import { admissionPhase, urgentReadyFirst, ticketStatus, type PolledTicket } from "./offpeak-gateway";
+import { admissionPhase, urgentReadyFirst, ticketStatus, expiredFailureReason, type PolledTicket } from "./offpeak-gateway";
 
 describe("off-peak admission phases (sol Q4)", () => {
   // T-038's measured values (created 2026-10-27T18:35:31Z).
@@ -459,5 +459,32 @@ describe("off-peak admission phases (sol Q4)", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Honest expiry ledger (zq-delegate-b, 2026-10-28): `expired` on the wire
+// does not say whether the work ran. oc #25 ran 2h and settled ok; the first
+// deployed-lane poll stamped it "work NOT done" because older runners left
+// the row live with no failure and no settled_at. The reason must match the
+// row's own run evidence, and a recorded failure is never overwritten.
+// ---------------------------------------------------------------------------
+
+describe("expiredFailureReason (honest expiry ledger)", () => {
+  test("a recorded failure is kept — expiry never overwrites it", () => {
+    expect(expiredFailureReason({ startedAt: 1, failureReason: "ticket_rejected: 3104 unknown ticket" }, "2114")).toBeNull();
+  });
+
+  test("a local run with no failure = ran, outcome unverified (oc #25's shape)", () => {
+    const m = expiredFailureReason({ startedAt: 1_793_038_816_847, failureReason: null }, "2114782928047001600");
+    expect(m).toContain("after a local run");
+    expect(m).toContain("/tmp/zt-idle-exec-2114782928047001600.json");
+    expect(m).not.toContain("NOT done");
+  });
+
+  test("never started = allowance consumed, work pending (the honest default)", () => {
+    const m = expiredFailureReason({ startedAt: null, failureReason: null }, "42");
+    expect(m).toContain("NOT done (pending)");
+    expect(m).not.toContain("after a local run");
   });
 });

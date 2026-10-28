@@ -32,7 +32,8 @@ import { handleOffPeakAsk, ticketAvailability,
   registerOffPeakTask,
   openTasksIndex,
   admissionPhase,
-  urgentReadyFirst} from "../queue/offpeak-gateway";
+  urgentReadyFirst,
+  expiredFailureReason} from "../queue/offpeak-gateway";
 import { autoclawPiCli, UNATTENDED_PREAMBLE, piEventStreamHasError } from "./autoclaw";
 import { syncAuthHeadless } from "../auth/sync";
 
@@ -309,13 +310,19 @@ async function cmdPoll(json: boolean) {
     // Expired / window-missed rows are terminal locally too (allowance
     // consumed) — leaving them queued made the serve poll dead tickets
     // forever (1110+ polls of one expired id, measured 2026-10-27/28) and
-    // hid that the WORK is still pending. The failure reason says both.
+    // hid that the WORK is still pending. The failure reason says both —
+    // but only when it is true: a row that already ran (pre-deadline
+    // runners left it live with no failure) must not be stamped "NOT done"
+    // (oc #25, measured 2026-10-28), and a recorded failure is kept.
     const phase = t ? admissionPhase(t, Date.now()) : "stand-down";
     if (state === "expired" || phase === "window-missed") {
+      const db2 = openTasksIndex(true);
+      const prev = (db2.query(`SELECT started_at, failure_reason FROM off_peak_tasks WHERE off_peak_task_id=?`).get(r.offPeakTaskId) as { started_at: number | null; failure_reason: string | null } | null) ?? { started_at: null, failure_reason: null };
+      db2.close();
       const why = state === "expired"
-        ? "ticket expired server-side — allowance consumed, work NOT done (pending)"
-        : `grant window missed (ready_deadline ${t?.readyDeadline != null ? new Date(t.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)`;
-      setLocalTaskState(r.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: why });
+        ? expiredFailureReason({ startedAt: prev.started_at, failureReason: prev.failure_reason }, r.serverTicketId)
+        : (prev.failure_reason ? null : `grant window missed (ready_deadline ${t?.readyDeadline != null ? new Date(t.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)`);
+      setLocalTaskState(r.offPeakTaskId, "failed", { endedAt: Date.now(), ...(why ? { failureReason: why } : {}) });
     }
     // Terminal wins in the same iteration: a past-window ticket can still
     // carry a queue position (ready/active rows historically did), and the
@@ -392,8 +399,12 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
   const state = pt?.state ?? "unknown";
   const phase = pt ? admissionPhase(pt, Date.now()) : "stand-down";
   if (phase === "expired") {
-    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: "ticket expired server-side — allowance consumed, work NOT done (pending)" });
-    console.log(`idle exec: ticket ${row.serverTicketId} expired — allowance consumed, work left pending`);
+    const dbx = openTasksIndex(true);
+    const prev = (dbx.query(`SELECT started_at, failure_reason FROM off_peak_tasks WHERE off_peak_task_id=?`).get(row.offPeakTaskId) as { started_at: number | null; failure_reason: string | null } | null) ?? { started_at: null, failure_reason: null };
+    dbx.close();
+    const why = expiredFailureReason({ startedAt: prev.started_at, failureReason: prev.failure_reason }, row.serverTicketId);
+    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), ...(why ? { failureReason: why } : {}) });
+    console.log(`idle exec: ticket ${row.serverTicketId} expired — ${why ?? (prev.failure_reason ?? "work left pending")}`);
     return 4;
   }
   if (phase === "settled") {

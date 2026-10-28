@@ -632,6 +632,26 @@ export function setLocalTaskState(offPeakTaskId: string, status: string, patch: 
 }
 
 /**
+ * Honest expiry ledger: `expired` on the status wire does NOT say whether
+ * the work ran. Rows settled by pre-deadline runners carry a local run
+ * (started_at) with no recorded failure and no settled_at — stamping those
+ * "work NOT done" lied about oc #25 (2h of successful messages, then the
+ * first deployed-lane poll called it pending; measured 2026-10-28). A
+ * recorded failure is returned as null so callers keep it — expiry only
+ * lands the terminal state, never overwrites the reason.
+ */
+export function expiredFailureReason(
+  r: { startedAt: number | null; failureReason: string | null },
+  serverTicketId: string,
+): string | null {
+  if (r.failureReason) return null;
+  if (r.startedAt != null) {
+    return `ticket expired server-side after a local run — outcome unverified by this index (pre-deadline runners recorded no settle); artifact if any: /tmp/zt-idle-exec-${serverTicketId}.json`;
+  }
+  return "ticket expired server-side — allowance consumed, work NOT done (pending)";
+}
+
+/**
  * Local claim — the step the desktop performs before dispatch (mined from
  * out/scheduler/index.js 2026-10-26: one atomic UPDATE setting
  * claim_running=1; the server has no claim endpoint — a ticket left without
