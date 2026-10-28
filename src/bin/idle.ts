@@ -408,9 +408,19 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
     return 0;
   }
   if (phase === "window-missed") {
-    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `grant window missed (ready_deadline ${pt?.readyDeadline != null ? new Date(pt.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)` });
-    console.log(`idle exec: ticket ${row.serverTicketId} state=${state} past its ready window — admission here is the 3104 source; work left pending`);
-    return 4;
+    // Boundary-race guard (measured 2026-10-29 00:0xZ: T-039's exec lost its
+    // window by seconds between the serve's admit poll and this re-poll).
+    // When the SERVE observed admit within the last 20s, trust that
+    // observation and attempt admission anyway — a server 3104 is
+    // authoritative and terminal, but a mechanical re-poll loss should not
+    // burn a live grant.
+    const observedMsAgo = Number(v["observed-admit-ms"] ?? Infinity);
+    if (!(observedMsAgo <= 20_000)) {
+      setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `grant window missed (ready_deadline ${pt?.readyDeadline != null ? new Date(pt.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)` });
+      console.log(`idle exec: ticket ${row.serverTicketId} state=${state} past its ready window — admission here is the 3104 source; work left pending`);
+      return 4;
+    }
+    console.log(`idle exec: ticket ${row.serverTicketId} window-missed on re-poll but serve observed admit ${Math.round(observedMsAgo / 1000)}s ago — attempting admission on the fresh observation`);
   }
   if (phase !== "admit") {
     console.log(`idle exec: ticket ${row.serverTicketId} state=${state}${pt?.position != null ? ` #${pt.position}` : ""} (phase=${phase}; poll again later)`);
@@ -616,7 +626,7 @@ async function cmdServe(v: Record<string, string | boolean | undefined>): Promis
           .sort(urgentReadyFirst)[0];
         if (readyTicket) {
           console.log(`idle serve: ticket ${readyTicket.ticketId} is ${readyTicket.state} — executing`);
-          await cmdExec({ ticket: readyTicket.ticketId });
+          await cmdExec({ ticket: readyTicket.ticketId, "observed-admit-ms": "0" });
         }
       }
     } catch (e) {
