@@ -339,10 +339,12 @@ async function cmdPoll(json: boolean) {
 }
 
 // Fleet single-flight admission (sol DD verdict 3, 2026-10-27): the local
-// claim_running only coordinates workers sharing ONE index — three hosts hold
-// three databases, and nothing server-side serializes granted tickets we can
-// see. The fleet-shared dataset gives us a portable mkdir lock: one idle exec
-// account-wide at a time, stale stamp stealable after 3h (crash tolerance).
+// claim_running only coordinates workers sharing ONE index — jojo and dev
+// share a single index file (same inode; oc holds its own — two databases,
+// measured 2026-10-28), and nothing server-side serializes granted tickets we
+// can see. The fleet-shared dataset gives us a portable mkdir lock: one idle
+// exec account-wide at a time, stale stamp stealable after 3h (crash
+// tolerance).
 const FLEET_LOCK_ROOT = () =>
   process.env.ZTQ_FLEET_LOCK_DIR ?? join(homedir(), "data", "fleet-locks");
 
