@@ -419,7 +419,12 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
     return 0;
   }
   if (phase === "window-missed") {
-    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), failureReason: `grant window missed (ready_deadline ${pt?.readyDeadline != null ? new Date(pt.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)` });
+    const dbw = openTasksIndex(true);
+    const prev = (dbw.query(`SELECT failure_reason FROM off_peak_tasks WHERE off_peak_task_id=?`).get(row.offPeakTaskId) as { failure_reason: string | null } | null)?.failure_reason ?? null;
+    dbw.close();
+    // A recorded failure stays the reason (expiry/lateness only lands the
+    // terminal state) — same rule as cmdPoll's terminal stamping.
+    setLocalTaskState(row.offPeakTaskId, "failed", { endedAt: Date.now(), ...(prev ? {} : { failureReason: `grant window missed (ready_deadline ${pt?.readyDeadline != null ? new Date(pt.readyDeadline).toISOString() : "?"}) — allowance consumed, work NOT done (pending)` }) });
     console.log(`idle exec: ticket ${row.serverTicketId} state=${state} past its ready window — admission here is the 3104 source; work left pending`);
     return 4;
   }
