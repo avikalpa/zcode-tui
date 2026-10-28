@@ -83,8 +83,8 @@ export function matchAvailableModel(errText: string, modelId: string, providerId
   const ci = entries.find((e) => e.split("/")[1]?.toLowerCase() === want);
   const hit = exact ?? ci;
   if (!hit) return null;
-  const [providerId, resolved] = hit.split("/");
-  return { modelId: resolved, providerId, options: { reasoningLevel: "max" } };
+  const [resolvedProvider, resolved] = hit.split("/");
+  return { modelId: resolved, providerId: resolvedProvider, options: { reasoningLevel: "max" } };
 }
 
 /** Create the session trying every model-ref shape the fleet's runtimes
