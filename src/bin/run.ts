@@ -242,7 +242,7 @@ let ref: ModelRef | null = null;
 let selected: ModelRef | null = null;
 const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
 const deadlineMs = Number(values["max-run-min"]) > 0
-  ? Date.now() + Number(values["max-run-min"]) * 60_000
+  ? t0 + Number(values["max-run-min"]) * 60_000
   : 0;
 const backoffMs = (n: number) => (30 * 2 ** n + Math.floor(Math.random() * 10)) * 1000;
 
