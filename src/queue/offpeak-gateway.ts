@@ -318,9 +318,14 @@ export async function registerOffPeakTask(input: {
       return { ok: false, refusal: status === 401 ? detail : undefined, error: detail };
     }
     const position = typeof reg.position === "number" ? reg.position : undefined;
+    // The create response names the admission schedule (measured 2026-10-30):
+    // next_poll_after is when the ticket's grant WINDOW opens — status
+    // visibility of ready/active LAGS this boundary, so poll-gated admission
+    // loses every window. Persist it; the serve time-triggers on it.
+    const npa = Number(reg.next_poll_after ?? reg.nextPollAfter ?? 0) || null;
     const db2 = openTasksIndex();
-    db2.query(`UPDATE off_peak_tasks SET server_ticket_id=?, queue_position=?, updated_at=? WHERE off_peak_task_id=?`)
-      .run(String(reg.ticket_id), position ?? null, Date.now(), offPeakTaskId);
+    db2.query(`UPDATE off_peak_tasks SET server_ticket_id=?, queue_position=?, next_poll_after=?, updated_at=? WHERE off_peak_task_id=?`)
+      .run(String(reg.ticket_id), position ?? null, npa, Date.now(), offPeakTaskId);
     db2.close();
     return {
       ok: true,
@@ -381,19 +386,19 @@ export async function handleOffPeakAsk(method: string, params: Record<string, un
 // THIS host with no desktop (owner goal 2026-10-23).
 // ---------------------------------------------------------------------------
 
-export interface LocalTicketRow { offPeakTaskId: string; serverTicketId: string; title: string; prompt: string; status: string; model: string; workspacePath: string; attemptCount: number }
+export interface LocalTicketRow { offPeakTaskId: string; serverTicketId: string; title: string; prompt: string; status: string; model: string; workspacePath: string; attemptCount: number; nextPollAfter: number | null }
 
 /** Local rows that hold a server ticket and are not terminal — repair candidates included. */
 export function localExecutableTasks(): LocalTicketRow[] {
   const db = openTasksIndex(true);
   try {
-    const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, title, prompt, status, model_selection, workspace_path, COALESCE(attempt_count,0) AS attempt_count
+    const rows = db.query(`SELECT off_peak_task_id, server_ticket_id, title, prompt, status, model_selection, workspace_path, COALESCE(attempt_count,0) AS attempt_count, next_poll_after
       FROM off_peak_tasks
-      WHERE server_ticket_id IS NOT NULL AND status IN ('queued','running')`).all() as any[];
+      WHERE server_ticket_id IS NOT NULL AND status IN ('queued','running','armed')`).all() as any[];
     return rows.map((r) => {
       let model = "GLM-5.3-Flash";
       try { model = String(JSON.parse(r.model_selection ?? "{}").modelId ?? model); } catch { /* default */ }
-      return { offPeakTaskId: r.off_peak_task_id, serverTicketId: String(r.server_ticket_id), title: r.title ?? "", prompt: r.prompt ?? "", status: r.status, model, workspacePath: r.workspace_path ?? process.cwd(), attemptCount: Number(r.attempt_count ?? 0) };
+      return { offPeakTaskId: r.off_peak_task_id, serverTicketId: String(r.server_ticket_id), title: r.title ?? "", prompt: r.prompt ?? "", status: r.status, model, workspacePath: r.workspace_path ?? process.cwd(), attemptCount: Number(r.attempt_count ?? 0), nextPollAfter: r.next_poll_after != null ? Number(r.next_poll_after) : null };
     });
   } finally { db.close(); }
 }

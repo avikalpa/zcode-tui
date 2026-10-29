@@ -616,17 +616,36 @@ async function cmdServe(v: Record<string, string | boolean | undefined>): Promis
       await cmdPoll(false);
       const live = localExecutableTasks();
       if (live.length > 0) {
-        const st = await pollTickets(live.map((r) => r.serverTicketId));
-        // Single-flight stays (one exec account-wide), but the PICK is
-        // urgent-first: the ready ticket closest to losing its grant goes
-        // now. First-ready-only starves siblings — T-039's grant expired
-        // behind T-038's failing retries (measured 2026-10-27).
-        const readyTicket = st.tickets
-          .filter((t) => admissionPhase(t, Date.now()) === "admit")
-          .sort(urgentReadyFirst)[0];
-        if (readyTicket) {
-          console.log(`idle serve: ticket ${readyTicket.ticketId} is ${readyTicket.state} — executing`);
-          await cmdExec({ ticket: readyTicket.ticketId, "observed-admit-ms": "0" });
+        // TIME-TRIGGER first (measured 2026-10-30: status visibility of
+        // ready/active LAGS the grant window — poll-gated admission loses
+        // every window). The create response's next_poll_after names when
+        // the window opens; at that moment, exec WITHOUT a status gate. A
+        // server 3104 stays authoritative and terminal.
+        const now = Date.now();
+        const timed = live
+          .filter((r) => r.nextPollAfter != null && r.nextPollAfter - now < 90_000)
+          .sort((a, b) => (a.nextPollAfter ?? 0) - (b.nextPollAfter ?? 0))[0];
+        if (timed) {
+          const waitMs = Math.max(0, (timed.nextPollAfter ?? now) - now);
+          if (waitMs > 0) {
+            console.log(`idle serve: time-trigger armed — ticket ${timed.serverTicketId} window opens in ${Math.round(waitMs / 1000)}s`);
+            await new Promise((r) => setTimeout(r, waitMs));
+          }
+          console.log(`idle serve: window open (next_poll_after reached) — executing ticket ${timed.serverTicketId} on the time trigger`);
+          await cmdExec({ ticket: timed.serverTicketId, "observed-admit-ms": "0" });
+        } else {
+          const st = await pollTickets(live.map((r) => r.serverTicketId));
+          // Status-gated fallback: single-flight stays (one exec
+          // account-wide), but the PICK is urgent-first — the ready ticket
+          // closest to losing its grant goes now. First-ready-only starves
+          // siblings (T-039 behind T-038, measured 2026-10-27).
+          const readyTicket = st.tickets
+            .filter((t) => admissionPhase(t, Date.now()) === "admit")
+            .sort(urgentReadyFirst)[0];
+          if (readyTicket) {
+            console.log(`idle serve: ticket ${readyTicket.ticketId} is ${readyTicket.state} — executing`);
+            await cmdExec({ ticket: readyTicket.ticketId, "observed-admit-ms": "0" });
+          }
         }
       }
     } catch (e) {
