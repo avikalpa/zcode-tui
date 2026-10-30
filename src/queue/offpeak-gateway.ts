@@ -324,6 +324,12 @@ export async function registerOffPeakTask(input: {
     // loses every window. Persist it; the serve time-triggers on it.
     const npa = Number(reg.next_poll_after ?? reg.nextPollAfter ?? 0) || null;
     const db2 = openTasksIndex();
+    // Self-heal the column (measured 2026-10-31: older desktop indexes lack
+    // next_poll_after — the unconditional UPDATE threw "no such column"
+    // AFTER the server ticket was created, orphaning it and burning the
+    // allowance). Additive ALTER is desktop-tolerated.
+    const hasNpa = (db2.query(`PRAGMA table_info(off_peak_tasks)`).all() as Array<{ name: string }>).some((c) => c.name === "next_poll_after");
+    if (!hasNpa) db2.exec(`ALTER TABLE off_peak_tasks ADD COLUMN next_poll_after INTEGER`);
     db2.query(`UPDATE off_peak_tasks SET server_ticket_id=?, queue_position=?, next_poll_after=?, updated_at=? WHERE off_peak_task_id=?`)
       .run(String(reg.ticket_id), position ?? null, npa, Date.now(), offPeakTaskId);
     db2.close();
