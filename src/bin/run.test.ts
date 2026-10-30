@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   assertFundingRoute, chooseEffort, collectionDecision, configureSession,
   createSession, matchAvailableModel, observeTurn, outcomeExitCode,
-  isSessionActivity, needsRecoveryContinue, classifyRuntimeError, type ModelRef, type RunClient,
+  isSessionActivity, needsRecoveryContinue, classifyRuntimeError, isToolFailure, type ModelRef, type RunClient,
 } from "./run";
 
 const wanted: ModelRef = { providerId: "zai-api", modelId: "GLM-5.3-Flash", options: { reasoningLevel: "max" } };
@@ -85,6 +85,16 @@ const collecting = {
   modelInFlight: false, replyComplete: true, error: false,
 };
 describe("collection termination is not completion", () => {
+  test("ordinary tool failures are separate from provider stop errors", () => {
+    expect(isToolFailure('tool_error')).toBe(true);
+    expect(isToolFailure('tool_failed')).toBe(true);
+    expect(isToolFailure('model_error')).toBe(false);
+    expect(isToolFailure('error')).toBe(false);
+    expect(isToolFailure('error', { toolCallId: 'fixture', error: { type: 'tool_execution_failed' } })).toBe(true);
+    expect(isToolFailure('error', { toolCallId: 'fixture', error: { type: 'quota_exceeded' } })).toBe(false);
+    expect(isToolFailure('error', { error: { type: 'tool_execution_failed' } })).toBe(false);
+    expect(isToolFailure('model_error', { toolCallId: 'fixture', error: { type: 'tool_execution_failed' } })).toBe(false);
+  });
   test("error classification reads full fields and holds unknown failures", () => {
     expect(classifyRuntimeError({ type: "error", details: "padding".repeat(50),
       message: "quota exhausted; permission denied" })).toBe("stop");
