@@ -31,6 +31,17 @@ async function replay(scenario: string) {
     push({...requestEvent('model_request_completed'),finishReason:'stop'});
     if(scenario.startsWith('backoff-') && sends===1)push({type:'model_error',message:'ECONNRESET'});
     if(scenario==='quota-tail' && sends===1)push({type:'model_error',requestId:'r1',details:'metadata '.repeat(22),message:'quota exhausted; permission denied'});
+    if(scenario==='tool-error-repaired' && sends===1) {
+     push(requestEvent('model_request_started','tool-turn'));
+     push({...requestEvent('model_request_completed','tool-turn'),finishReason:'tool-calls'});
+     push({type:'tool_start',toolCallId:'invented-failing-check'});
+     push({type:'error',toolCallId:'invented-failing-check',
+       error:{type:'tool_execution_failed',message:'invented check exited 7'}});
+     push({type:'tool_error',toolCallId:'invented-failing-check',message:'invented check exited 7'});
+     push(requestEvent('model_request_started','repair-turn'));
+     push({type:'text_delta',delta:'Expected failure inspected; artifact repaired.'});
+     push({...requestEvent('model_request_completed','repair-turn'),finishReason:'stop'});
+    }
    }
    return {};
   }
@@ -69,6 +80,15 @@ test("late-field quota failure cannot authorize a second turn", async () => {
  const result=await replay('quota-tail');
  expect(result.exitCode).toBe(1); expect(result.outcome).toBe('error');
  expect(result.sends).toBe(1);
+});
+
+test("the model can inspect a failed tool and finish without a new parent turn", async () => {
+ const result=await replay('tool-error-repaired');
+ expect(result.exitCode).toBe(0);
+ expect(result.outcome).toBe('settled');
+ expect(result.sends).toBe(1);
+ expect(result.pending).toBe(0);
+ expect(result.transportError).toBe('');
 });
 
 test("progress or a stop during backoff revokes continuation eligibility", async () => {

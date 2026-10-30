@@ -236,6 +236,15 @@ export function classifyRuntimeError(payload: Record<string, unknown>): "stop" |
   return "stop"; // An unknown failure never authorizes another billable turn.
 }
 
+export function isToolFailure(kind: string, payload: Record<string, unknown> = {}): boolean {
+  if (/^tool(?:_|-)error$|^tool(?:_|-)failed$/.test(kind.toLowerCase())) return true;
+  const error = payload.error as { type?: unknown } | null | undefined;
+  // The packaged runtime emits this typed error before its tool_error frame.
+  // It is not an unknown provider failure just because its outer kind is error.
+  return kind.toLowerCase() === "error" && typeof payload.toolCallId === "string"
+    && payload.toolCallId.length > 0 && error?.type === "tool_execution_failed";
+}
+
 const { values } = parseArgs({
   strict: false, // imported as a module by other verbs: foreign argv must not throw
   options: {
@@ -319,13 +328,18 @@ if (import.meta.main) sv = new AppServer({
     // the runtime's actual end kinds the flag stuck through the next model
     // turn, turning a settled session into a phantom cut-midtool.
     const kindLow = kind.toLowerCase();
-    if (summary.includes("toolCallId") && kindLow.includes("tool") && !kindLow.includes("result")) {
+    const payload = ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>;
+    const toolFailure = isToolFailure(kindLow, payload);
+    if (toolFailure) {
+      toolInFlight = 0;
+    } else if (summary.includes("toolCallId") && kindLow.includes("tool") && !kindLow.includes("result")) {
       toolInFlight = Date.now();
     } else if (/end|stop|complete|idle/.test(kindLow)) {
       toolInFlight = 0;
     }
-    if (kindLow.includes("error")) {
-      const payload = ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>;
+    // Ordinary tool errors are evidence for the model to repair. They are
+    // distinct from the runtime/provider errors that govern stop or recovery.
+    if (kindLow.includes("error") && !toolFailure) {
       if (classifyRuntimeError(payload) === "stop") {
         transportError = "stop-or-unclassified:" + kind;
       } else {
