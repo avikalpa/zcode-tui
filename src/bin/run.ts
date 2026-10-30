@@ -446,6 +446,19 @@ async function main() {
       const afterWait = decision();
       if (afterWait && afterWait !== "settled" && afterWait !== "cut-midtool") { outcome = afterWait; break; }
       if (!afterWait) continue; // progress arrived while waiting
+      if (!needsRecoveryContinue(afterWait, lastErrorKind, sawProgressAfterLastError,
+                                 continuesUsed, maxContinues)) continue;
+      // The idle observation made before the backoff is no longer current.
+      const recoveryEpoch = activityEpoch;
+      const current = await sv.request("session/read", { sessionId }, 10000) as Snapshot;
+      const currentDecision = decision();
+      if (currentDecision && currentDecision !== "settled" && currentDecision !== "cut-midtool") {
+        outcome = currentDecision; break;
+      }
+      if (!currentDecision || activityEpoch !== recoveryEpoch
+          || (current as { session?: { status?: string } }).session?.status !== "idle"
+          || !needsRecoveryContinue(currentDecision, lastErrorKind,
+                                    sawProgressAfterLastError, continuesUsed, maxContinues)) continue;
       await sv.request("session/send", { sessionId, content: "Continue from where you stopped. Complete the task fully." });
       continuesUsed++;
       lastEvent = Date.now();
