@@ -48,8 +48,17 @@ export function openDb(stateDir: string): Database {
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec(SCHEMA_SQL);
   // Forward migrations for DBs created before a column existed.
-  const cols = new Set((db.query(`PRAGMA table_info(tasks)`).all() as { name: string }[]).map((c) => c.name));
-  if (!cols.has("expect_file")) db.exec(`ALTER TABLE tasks ADD COLUMN expect_file TEXT NOT NULL DEFAULT ''`);
+  const columns = () => new Set((db.query(`PRAGMA table_info(tasks)`).all() as { name: string }[]).map((c) => c.name));
+  const cols = columns();
+  if (!cols.has("expect_file") || !cols.has("dispatch_id")) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = columns(); // another CLI may have migrated while we waited
+      if (!current.has("expect_file")) db.exec(`ALTER TABLE tasks ADD COLUMN expect_file TEXT NOT NULL DEFAULT ''`);
+      if (!current.has("dispatch_id")) db.exec(`ALTER TABLE tasks ADD COLUMN dispatch_id TEXT NOT NULL DEFAULT ''`);
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
+  }
   return db;
 }
 
@@ -385,6 +394,7 @@ export class QueueServer {
   private log: (line: string) => void;
   private active = new Set<string>(); // route names with an in-memory dispatch
   private spawnKills = new Map<string, Map<string, () => void>>(); // taskId -> (attemptId -> kill)
+  private dispatchIds = new Map<string, string>();
   private lastSweep = 0;
   private peakLogged = new Map<string, boolean>(); // throttle peak-block logs
   private stopping = false;
@@ -422,9 +432,11 @@ export class QueueServer {
 
   /** Adopt a finished orphan: read the newest transcript's terminal outcome
    *  and map it to row status. Null when still running/unknown. */
-  private adoptOrphanOutcome(taskId: string): string | null {
+  private adoptOrphanOutcome(taskId: string, dispatchId = ""): string | null {
     try {
-      const files = readdirSync(join(this.opts.stateDir, "runs")).filter((f) => f.startsWith(taskId) && f.endsWith(".json.log"));
+      const files = readdirSync(join(this.opts.stateDir, "runs")).filter((f) =>
+        f.startsWith(taskId) && f.endsWith(".json.log")
+        && (!dispatchId || f.includes(`-${dispatchId}.`)));
       let newestPath = "", newestMs = 0;
       for (const f of files) {
         const st = statSync(join(this.opts.stateDir, "runs", f));
@@ -450,14 +462,13 @@ export class QueueServer {
       }
       const attempts = t.attempts;
       const final = attempts >= t.max_attempts;
-      const outcome = this.adoptOrphanOutcome(t.id);
+      const outcome = this.adoptOrphanOutcome(t.id, t.dispatch_id);
       if (outcome === "settled" || outcome === "budget" || outcome === "cut-midtool") {
-        this.retainOrphan(t.id, outcome);
+        this.retainOrphan(t, outcome);
         continue;
       }
-      this.db.query(`UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`)
-        .run(final ? "failed" : "queued",
-          `reclaimed after serve crash (attempt ${attempts} had started)`, this.now(), t.id);
+      if (!this.updateRunning(t, `UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`,
+        [final ? "failed" : "queued", `reclaimed after serve crash (attempt ${attempts} had started)`, this.now(), t.id])) continue;
       this.log(`reclaim ${t.id}: ${final ? "failed (cap)" : "requeued"} after crash`);
     }
   }
@@ -494,14 +505,13 @@ export class QueueServer {
       if (this.hbFresh(t.id)) continue; // detached survivor — hb-stale rule governs it later
       const attempts = t.attempts;
       const final = attempts >= t.max_attempts;
-      const outcome = this.adoptOrphanOutcome(t.id);
+      const outcome = this.adoptOrphanOutcome(t.id, t.dispatch_id);
       if (outcome === "settled" || outcome === "budget" || outcome === "cut-midtool") {
-        this.retainOrphan(t.id, outcome);
+        this.retainOrphan(t, outcome);
         continue;
       }
-      this.db.query(`UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`)
-        .run(final ? "failed" : "queued",
-          `reclaimed: 'running' row with no live dispatch (serve crash or lost spawn)`, this.now(), t.id);
+      if (!this.updateRunning(t, `UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`,
+        [final ? "failed" : "queued", `reclaimed: 'running' row with no live dispatch (serve crash or lost spawn)`, this.now(), t.id])) continue;
       this.log(`reclaim ${t.id}: ${final ? "failed (cap)" : "requeued"} — orphaned running row`);
     }
     for (const [taskId, killFns] of this.spawnKills) {
@@ -583,12 +593,18 @@ export class QueueServer {
   private async dispatch(task: TaskRow, budgetMin: number, pos: number) {
     const n0 = this.now();
     const attempts = task.attempts + 1;
-    this.db.query(`UPDATE tasks SET status='running', attempts=?, started_at=COALESCE(started_at,?), updated_at=? WHERE id=?`)
-      .run(attempts, n0, n0, task.id);
-    this.metric({ ev: "dispatch", id: task.id, route: task.route, pos, attempt: attempts });
+    const dispatchId = crypto.randomUUID();
+    const claim = this.db.query(`UPDATE tasks SET status='running', attempts=?, started_at=COALESCE(started_at,?), updated_at=?, dispatch_id=?
+      WHERE id=? AND route=? AND attempts=? AND status IN ('queued','retry_wait','cooldown_wait') AND next_eligible_at<=?`)
+      .run(attempts, n0, n0, dispatchId, task.id, task.route, task.attempts, n0);
+    if (claim.changes !== 1) { this.log(`dispatch ${task.id}: claim changed; retained current owner state`); return; }
+    task = { ...task, dispatch_id: dispatchId };
+    this.dispatchIds.set(task.id, dispatchId);
+    this.metric({ ev: "dispatch", event_id: dispatchId, dispatch_id: dispatchId,
+      id: task.id, route: task.route, pos, attempt: attempts });
     this.log(`dispatch ${task.id} route=${task.route} pos=${pos} attempt=${attempts}${budgetMin ? ` budget=${budgetMin}m` : ""}`);
 
-    const runLog = join(this.opts.stateDir, "runs", `${task.id}-a${attempts}.json.log`);
+    const runLog = join(this.opts.stateDir, "runs", `${task.id}-a${attempts}-${dispatchId}.json.log`);
     mkdirSync(dirname(runLog), { recursive: true });
     const promptFile = writePromptFile(this.opts.stateDir, { ...task, attempts: attempts - 1 });
     const killFns = new Map<string, () => void>();
@@ -598,7 +614,8 @@ export class QueueServer {
       ({ cmd, cwd, stdin } = buildCommand(task, { repo: REPO, stateDir: this.opts.stateDir, promptFile, runLog, budgetMin }));
     } catch (e) {
       this.spawnKills.delete(task.id);
-      this.finish(task.id, attempts, "failed", null, String(e), "", runLog);
+      this.dispatchIds.delete(task.id);
+      this.finish(task, attempts, "failed", null, String(e), "", runLog);
       return;
     }
     const def = ROUTES[task.route];
@@ -606,13 +623,14 @@ export class QueueServer {
     let res: Awaited<ReturnType<SpawnFn>>;
     try {
       res = await this.spawnFn(cmd, {
-        cwd, stdin, timeoutMs, logFile: join(this.opts.stateDir, "runs", `${task.id}-a${attempts}.out`),
+        cwd, stdin, timeoutMs, logFile: join(this.opts.stateDir, "runs", `${task.id}-a${attempts}-${dispatchId}.out`),
         onSpawn: (kill) => killFns.set(task.id, kill),
       });
     } catch (e) {
       res = { code: null, signal: null, stdout: "", stderr: String(e), timedOut: false };
     }
     this.spawnKills.delete(task.id);
+    this.dispatchIds.delete(task.id);
     const durMs = this.now() - n0;
     const tail = `${res.stdout}\n${res.stderr}`.slice(-8192);
 
@@ -622,12 +640,12 @@ export class QueueServer {
     if (res.timedOut || res.signal === "SIGTERM" || res.signal === "SIGKILL") {
       const final = attempts >= task.max_attempts;
       if (final) {
-        this.finish(task.id, attempts, "failed", res.code, `stalled: killed after timeout (attempt ${attempts}/${task.max_attempts})`, "", runLog);
+        if (!this.finish(task, attempts, "failed", res.code, `stalled: killed after timeout (attempt ${attempts}/${task.max_attempts})`, "", runLog)) return;
         this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "failed-stalled", dur_ms: durMs });
         this.log(`fail ${task.id}: stalled past timeout at attempt cap`);
       } else {
-        this.db.query(`UPDATE tasks SET status='retry_wait', next_eligible_at=?, last_error='stalled: killed after timeout (will resume)', last_exit=?, updated_at=? WHERE id=?`)
-          .run(this.now() + 60_000, res.code, this.now(), task.id);
+        if (!this.updateRunning(task, `UPDATE tasks SET status='retry_wait', next_eligible_at=?, last_error='stalled: killed after timeout (will resume)', last_exit=?, updated_at=? WHERE id=?`,
+          [this.now() + 60_000, res.code, this.now(), task.id])) return;
         this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "stalled-requeue", dur_ms: durMs });
         this.log(`stall ${task.id}: killed after timeout — requeued (attempt ${attempts}/${task.max_attempts})`);
       }
@@ -654,9 +672,9 @@ export class QueueServer {
     const expectOk = !task.expect_file || existsSync(task.expect_file);
     if (res.code === 0 && (task.route === "zai-offpeak" ? !!resultRef : expectOk)) {
       const state = task.route === "zai-offpeak" ? "submitted" : "review_pending";
-      this.finish(task.id, attempts, state, res.code,
+      if (!this.finish(task, attempts, state, res.code,
         state === "submitted" ? "remote ticket accepted; work outcome and independent acceptance unknown"
-          : "transport yielded; independent current-subject acceptance required", resultRef, runLog);
+          : "transport yielded; independent current-subject acceptance required", resultRef, runLog)) return;
       this.metric({ ev: "done", phase: "transport_yield", work_accepted: false,
         id: task.id, route: task.route, rc: res.code, outcome: state, dur_ms: durMs });
       this.log(`yield ${task.id} ${state} in ${Math.round(durMs / 1000)}s${resultRef ? ` (${resultRef})` : ""}`);
@@ -668,8 +686,8 @@ export class QueueServer {
     // re-dispatch would start a fresh session and redo the work (measured:
     // the exit-4 conflation cycled big dreams every 5 minutes).
     if (res.code === 5) {
-      this.db.query(`UPDATE tasks SET status='retry_wait', attempts=attempts-1, next_eligible_at=?, last_error='cut-midtool: session left resumable; fresh attempt deferred', last_exit=?, updated_at=? WHERE id=?`)
-        .run(this.now() + 45 * 60_000, res.code, this.now(), task.id);
+      if (!this.updateRunning(task, `UPDATE tasks SET status='retry_wait', attempts=attempts-1, next_eligible_at=?, last_error='cut-midtool: session left resumable; fresh attempt deferred', last_exit=?, updated_at=? WHERE id=?`,
+        [this.now() + 45 * 60_000, res.code, this.now(), task.id])) return;
       this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "cut-midtool-defer", dur_ms: durMs });
       this.log(`defer ${task.id}: cut mid-tool; fresh attempt eligible in 45m`);
       return;
@@ -679,8 +697,8 @@ export class QueueServer {
     // designed: defer to after peak, do not burn an attempt.
     if (res.code === def.budgetStopExit) {
       const afterPeak = (this.now() + (minutesToPeakEnd(new Date(this.now())) * 60_000)) + 5 * 60_000;
-      this.db.query(`UPDATE tasks SET status='retry_wait', attempts=attempts-1, next_eligible_at=?, last_error='budget stop at peak boundary', last_exit=?, updated_at=? WHERE id=?`)
-        .run(afterPeak, res.code, this.now(), task.id);
+      if (!this.updateRunning(task, `UPDATE tasks SET status='retry_wait', attempts=attempts-1, next_eligible_at=?, last_error='budget stop at peak boundary', last_exit=?, updated_at=? WHERE id=?`,
+        [afterPeak, res.code, this.now(), task.id])) return;
       this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "budget-defer", dur_ms: durMs });
       this.log(`defer ${task.id}: peak budget stop; eligible after ${new Date(afterPeak).toISOString()}`);
       return;
@@ -688,44 +706,57 @@ export class QueueServer {
 
     const plan = classifyFailure(tail, attempts, task.max_attempts, this.now());
     if (plan.kind === "cooldown" && plan.cooldownMs) {
-      this.db.query(`INSERT INTO route_state (route,cooldown_until,cooldown_reason) VALUES (?,?,?)
-        ON CONFLICT(route) DO UPDATE SET cooldown_until=excluded.cooldown_until, cooldown_reason=excluded.cooldown_reason`)
-        .run(task.route, this.now() + plan.cooldownMs + 60_000, tail.slice(-200).replace(/\s+/g, " "));
-      this.db.query(`UPDATE tasks SET status='cooldown_wait', attempts=attempts-1, next_eligible_at=?, last_error=?, last_exit=?, updated_at=? WHERE id=?`)
-        .run(plan.next_eligible_at ?? this.now(), `cooldown: ${tail.slice(-300).replace(/\s+/g, " ")}`, res.code, this.now(), task.id);
+      const applied = this.db.transaction(() => {
+        if (!this.updateRunning(task, `UPDATE tasks SET status='cooldown_wait', attempts=attempts-1, next_eligible_at=?, last_error=?, last_exit=?, updated_at=? WHERE id=?`,
+          [plan.next_eligible_at ?? this.now(), `cooldown: ${tail.slice(-300).replace(/\s+/g, " ")}`, res.code, this.now(), task.id])) return false;
+        this.db.query(`INSERT INTO route_state (route,cooldown_until,cooldown_reason) VALUES (?,?,?)
+          ON CONFLICT(route) DO UPDATE SET cooldown_until=excluded.cooldown_until, cooldown_reason=excluded.cooldown_reason`)
+          .run(task.route, this.now() + plan.cooldownMs! + 60_000, tail.slice(-200).replace(/\s+/g, " "));
+        return true;
+      })();
+      if (!applied) return;
       this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "cooldown", dur_ms: durMs, cooldown_ms: plan.cooldownMs });
       this.log(`cooldown ${task.id}: refusal parsed (+${Math.round(plan.cooldownMs / 60000)}m), route ${task.route} parked until ${new Date(this.now() + plan.cooldownMs + 60_000).toISOString()}`);
       return;
     }
     if (plan.kind === "auth") {
-      this.finish(task.id, attempts, "failed", res.code, `auth/config (terminal): ${tail.slice(-400).replace(/\s+/g, " ")}`, "", runLog);
+      if (!this.finish(task, attempts, "failed", res.code, `auth/config (terminal): ${tail.slice(-400).replace(/\s+/g, " ")}`, "", runLog)) return;
       this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "failed-auth", dur_ms: durMs });
       this.log(`fail ${task.id}: deterministic auth/config error — terminal`);
       return;
     }
     if (plan.kind === "terminal-cap") {
-      this.finish(task.id, attempts, "failed", res.code, `attempt cap reached: ${tail.slice(-400).replace(/\s+/g, " ")}`, resultRef, runLog);
+      if (!this.finish(task, attempts, "failed", res.code, `attempt cap reached: ${tail.slice(-400).replace(/\s+/g, " ")}`, resultRef, runLog)) return;
       this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "failed-cap", dur_ms: durMs });
       this.log(`fail ${task.id}: attempt cap ${task.max_attempts} — terminal`);
       return;
     }
     // retry ladder
-    this.db.query(`UPDATE tasks SET status='retry_wait', next_eligible_at=?, last_error=?, last_exit=?, updated_at=? WHERE id=?`)
-      .run(plan.next_eligible_at ?? this.now(), tail.slice(-300).replace(/\s+/g, " "), res.code, this.now(), task.id);
+    if (!this.updateRunning(task, `UPDATE tasks SET status='retry_wait', next_eligible_at=?, last_error=?, last_exit=?, updated_at=? WHERE id=?`,
+      [plan.next_eligible_at ?? this.now(), tail.slice(-300).replace(/\s+/g, " "), res.code, this.now(), task.id])) return;
     this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "retry", dur_ms: durMs, next_eligible_in_ms: (plan.next_eligible_at ?? 0) - this.now() });
     this.log(`retry ${task.id}: attempt ${attempts} failed (rc=${res.code}); next eligible ${fmtIn(plan.next_eligible_at ?? this.now())}`);
   }
 
-  private retainOrphan(id: string, outcome: string) {
-    const status = outcome === "settled" ? "review_pending" : "retained_partial";
-    this.db.query(`UPDATE tasks SET status=?, finished_at=NULL, last_error=?, updated_at=? WHERE id=? AND status='running'`)
-      .run(status, `unverified orphan transport outcome=${outcome}; work retained, independent acceptance absent`, this.now(), id);
-    this.log(`reclaim ${id}: ${status}; orphan ${outcome} is not acceptance`);
+  private updateRunning(task: Pick<TaskRow, "id" | "dispatch_id">,
+                        sql: string, values: Array<string | number | null>): boolean {
+    const update = this.db.query(sql + " AND status='running' AND dispatch_id=?")
+      .run(...values, task.dispatch_id ?? "");
+    if (update.changes === 1) return true;
+    this.log(`retain ${task.id}: ownership changed; task state and evidence preserved`);
+    return false;
   }
 
-  private finish(id: string, _attempts: number, status: "review_pending" | "submitted" | "failed", rc: number | null, err: string, ref: string, runLog: string) {
-    this.db.query(`UPDATE tasks SET status=?, finished_at=?, updated_at=?, last_error=?, last_exit=?, result_ref=?, run_log=? WHERE id=? AND status='running'`)
-      .run(status, status === "failed" ? this.now() : null, this.now(), err, rc, ref, runLog, id);
+  private retainOrphan(task: TaskRow, outcome: string) {
+    const status = outcome === "settled" ? "review_pending" : "retained_partial";
+    if (this.updateRunning(task, `UPDATE tasks SET status=?, finished_at=NULL, last_error=?, updated_at=? WHERE id=?`,
+      [status, `unverified orphan transport outcome=${outcome}; work retained, independent acceptance absent`, this.now(), task.id]))
+      this.log(`reclaim ${task.id}: ${status}; orphan ${outcome} is not acceptance`);
+  }
+
+  private finish(task: TaskRow, _attempts: number, status: "review_pending" | "submitted" | "failed", rc: number | null, err: string, ref: string, runLog: string): boolean {
+    return this.updateRunning(task, `UPDATE tasks SET status=?, finished_at=?, updated_at=?, last_error=?, last_exit=?, result_ref=?, run_log=? WHERE id=?`,
+      [status, status === "failed" ? this.now() : null, this.now(), err, rc, ref, runLog, task.id]);
   }
 
   async serve() {
@@ -755,9 +786,9 @@ export class QueueServer {
     this.stopping = true;
     for (const [taskId, killFns] of this.spawnKills) {
       for (const kill of killFns.values()) { try { kill(); } catch { /* noop */ } }
-      this.db.query(`UPDATE tasks SET status='queued', attempts=MAX(attempts-1,0), updated_at=? WHERE id=? AND status='running'`)
-        .run(this.now(), taskId);
-      this.log(`shutdown: ${taskId} killed + deferred back to queued`);
+      if (this.updateRunning({ id: taskId, dispatch_id: this.dispatchIds.get(taskId) ?? "" },
+        `UPDATE tasks SET status='queued', attempts=MAX(attempts-1,0), updated_at=? WHERE id=?`, [this.now(), taskId]))
+        this.log(`shutdown: ${taskId} killed + deferred back to queued`);
     }
   }
 

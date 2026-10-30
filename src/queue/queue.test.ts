@@ -530,3 +530,75 @@ describe("independent completion remains separate from transport", () => {
     expect((db.query("SELECT status FROM tasks").get() as any).status).toBe("cancelled");
   });
 });
+
+
+describe("queue owner and physical dispatch fences", () => {
+  const failures = [
+    { label: "retry", code: 1, signal: null, timedOut: false, text: "temporary transport problem" },
+    { label: "cut", code: 5, signal: null, timedOut: false, text: "cut mid tool" },
+    { label: "budget", code: 4, signal: null, timedOut: false, text: "budget" },
+    { label: "signal", code: null, signal: "SIGTERM", timedOut: false, text: "shutdown" },
+    { label: "cooldown", code: 1, signal: null, timedOut: false, text: "rate limit try again in 3 hr" },
+    { label: "zero", code: 0, signal: null, timedOut: false, text: "ok" },
+  ];
+  for (const failure of failures) {
+    for (const replaced of [false, true]) {
+      test(`${failure.label} preserves ${replaced ? "another physical attempt" : "owner cancellation"}`, async () => {
+        const now = 1_700_000_000_000;
+        let database: ReturnType<typeof openDb>;
+        const { db, srv } = makeServer(async () => {
+          database.query("UPDATE tasks SET status=?, dispatch_id=?, finished_at=?, last_error='owner state', result_ref='preserved-result'")
+            .run(replaced ? "running" : "cancelled", "replacement-attempt", replaced ? null : now);
+          return { code: failure.code, signal: failure.signal, timedOut: failure.timedOut, stdout: failure.text, stderr: "" };
+        }, () => now);
+        database = db;
+        insertTask(db, { route: "zai-coding-plan" });
+        await srv.tick();
+        const row = db.query("SELECT * FROM tasks").get() as any;
+        expect(row.status).toBe(replaced ? "running" : "cancelled");
+        expect(row.dispatch_id).toBe("replacement-attempt");
+        expect(row.finished_at).toBe(replaced ? null : now);
+        expect(row.last_error).toBe("owner state");
+        expect(row.result_ref).toBe("preserved-result");
+        expect((db.query("SELECT COUNT(*) n FROM route_state").get() as any).n).toBe(0);
+      });
+    }
+  }
+
+  for (const recovery of ["boot", "sweep"] as const) {
+    test(`${recovery} fallback cannot resurrect a cancellation`, () => {
+      const now = 1_700_000_000_000;
+      const { db, srv } = makeServer(fakeSpawn(0, "unused"), () => now);
+      insertTask(db);
+      db.query("UPDATE tasks SET status='running', updated_at=?").run(now - 3_600_000);
+      (srv as any).adoptOrphanOutcome = () => {
+        db.query("UPDATE tasks SET status='cancelled', finished_at=?, last_error='owner stop'").run(now);
+        return null;
+      };
+      if (recovery === "boot") srv.reclaimStale(); else srv.sweep();
+      const row = db.query("SELECT * FROM tasks").get() as any;
+      expect(row.status).toBe("cancelled");
+      expect(row.finished_at).toBe(now);
+      expect(row.last_error).toBe("owner stop");
+    });
+  }
+
+  test("reused ordinal gets a fresh identity and separate retained artifacts", async () => {
+    const paths: string[] = [];
+    const { db, srv } = makeServer(async (_cmd, opts) => {
+      paths.push(opts.logFile);
+      return { code: 0, signal: null, stdout: "ok", stderr: "", timedOut: false };
+    }, () => 1_700_000_000_000);
+    insertTask(db);
+    await srv.tick();
+    const first = db.query("SELECT dispatch_id FROM tasks").get() as any;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    db.query("UPDATE tasks SET status='queued', attempts=0").run();
+    await srv.tick();
+    const second = db.query("SELECT dispatch_id FROM tasks").get() as any;
+    expect(first.dispatch_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second.dispatch_id).not.toBe(first.dispatch_id);
+    expect(paths.length).toBe(2);
+    expect(paths[0]).not.toBe(paths[1]);
+  });
+});

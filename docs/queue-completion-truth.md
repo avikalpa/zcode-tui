@@ -5,6 +5,13 @@ a deliverable path, or an orphan transcript. Successful local transport
 enters `review_pending`. A remote idle-ticket marker enters `submitted`:
 the ticket exists, while the actual remote work and acceptance are unknown.
 An orphan budget or interrupted-tool outcome enters `retained_partial`.
+Every dispatch has a fresh `dispatch_id`, also used in physical attempt
+filenames and dispatch events. Reused attempt ordinals cannot overwrite an
+earlier artifact. Exit, orphan recovery and shutdown updates compare the
+current running dispatch atomically; losing ownership retains the current
+owner state. Existing databases add the field transactionally, rechecking
+columns under the migration lock. Legacy empty IDs remain unverified.
+
 These states preserve the task, result reference and log, leave finished_at
 unset, free the execution slot, and remain visible in queue list/status.
 They are held from automatic redispatch and ordinary rerouting until their
