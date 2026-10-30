@@ -1,14 +1,14 @@
 // Queue tests — policy math (peak window IST, cooldown parser, backoff
 // ladder) + dispatcher state machine with a fake spawner and fake clock.
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   parseCooldownMs, backoffMs, isPeak, minutesToPeak, minutesToPeakEnd, maxRunMinutes,
-  classifyFailure, rerouteTask, ROUTES, type RouteName,
+  classifyFailure, sha256, rerouteTask, ROUTES, type RouteName,
 } from "./core";
-import { QueueServer, openDb, buildCommand, type SpawnFn } from "../bin/queue";
+import { QueueServer, openDb, buildCommand, queueRuntimeIdentity, type SpawnFn } from "../bin/queue";
 
 // 2026-10-26 is a Monday; IST = UTC+5:30 → 11:30 IST == 06:00 UTC.
 const mon = (hUtc: number, mUtc = 0) => new Date(Date.UTC(2026, 9, 26, hUtc, mUtc));
@@ -601,4 +601,33 @@ describe("queue owner and physical dispatch fences", () => {
     expect(paths.length).toBe(2);
     expect(paths[0]).not.toBe(paths[1]);
   });
+});
+
+
+describe("queue startup source identity", () => {
+  test("a fresh serve records its actual module digest and unique launch", async () => {
+    const { db, srv } = makeServer(fakeSpawn(0, "unused"), () => 1_700_000_000_000);
+    srv.stop(); // exercise real startup without dispatching any provider work
+    await srv.serve();
+    const one = JSON.parse((db.query("SELECT v FROM meta WHERE k='serve_identity'").get() as any).v);
+    expect(one.pid).toBe(process.pid);
+    expect(one.launch_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(one.source_sha256).toBe(sha256(readFileSync(new URL("../bin/queue.ts", import.meta.url), "utf8")));
+    await srv.serve();
+    const two = JSON.parse((db.query("SELECT v FROM meta WHERE k='serve_identity'").get() as any).v);
+    expect(two.launch_id).not.toBe(one.launch_id);
+    expect(two.source_sha256).toBe(one.source_sha256);
+  });
+});
+
+
+test("queue source identity refuses stale owners, PID reuse and malformed receipts", () => {
+  const row = { schema_version: 1, pid: 17, start_token: "100", launch_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", source_sha256: "b".repeat(64) };
+  expect(queueRuntimeIdentity(JSON.stringify(row), 17, true, () => "100")?.source_sha256).toBe(row.source_sha256);
+  expect(queueRuntimeIdentity(JSON.stringify(row), 18, true, () => "100")).toBeNull();
+  expect(queueRuntimeIdentity(JSON.stringify(row), 17, true, () => "101")).toBeNull();
+  expect(queueRuntimeIdentity(JSON.stringify(row), 17, false, () => "100")).toBeNull();
+  expect(queueRuntimeIdentity(JSON.stringify(row), 17, true, () => null)).toBeNull();
+  for (const value of [null, [], { ...row, schema_version: 99 }, { ...row, source_sha256: [row.source_sha256] }, { ...row, launch_id: "untrusted body" }])
+    expect(queueRuntimeIdentity(JSON.stringify(value), 17, true, () => "100")).toBeNull();
 });

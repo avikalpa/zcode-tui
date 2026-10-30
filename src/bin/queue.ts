@@ -33,6 +33,32 @@ import { syncAuthHeadless } from "../auth/sync";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BUN = process.env.BUN_INSTALL ? join(process.env.BUN_INSTALL, "bin", "bun") : join(homedir(), ".bun", "bin", "bun");
+const MODULE_SHA256 = (() => {
+  try { return sha256(readFileSync(fileURLToPath(import.meta.url), "utf8")); }
+  catch { return null; } // compiled payloads need their own build identity
+})();
+
+function processStart(pid: number): string | null {
+  try {
+    const text = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const token = text.slice(text.lastIndexOf(")") + 2).trim().split(/\s+/)[19];
+    return /^\d+$/.test(token ?? "") ? token! : null;
+  } catch { return null; }
+}
+
+export function queueRuntimeIdentity(raw: string | null, pid: number | null, alive: boolean,
+                                    readStart: (pid: number) => string | null = processStart) {
+  try {
+    const value = raw ? JSON.parse(raw) : null;
+    if (alive && value?.schema_version === 1 && value.pid === pid && value.start_token
+        && value.start_token === readStart(value.pid)
+        && typeof value.launch_id === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.launch_id)
+        && (value.source_sha256 === null || typeof value.source_sha256 === "string"
+          && /^[a-f0-9]{64}$/.test(value.source_sha256))) return value as {
+            source_sha256: string | null; launch_id: string; pid: number; start_token: string };
+  } catch { /* malformed, foreign or legacy state remains unknown */ }
+  return null;
+}
 
 export function defaultStateDir(): string {
   return process.env.ZCODE_TUI_QUEUE_DIR ?? join(homedir(), ".local", "state", "zcode-tui", "queue");
@@ -178,7 +204,10 @@ function cmdStatus(db: Database, json: boolean, stateDir: string) {
   let serveAlive = false;
   if (pid) {
     try { process.kill(Number(pid.v), 0); serveAlive = Date.now() - Number(beat?.v ?? 0) < 90_000; } catch { serveAlive = false; }
-  }  const byRoute: Record<string, unknown> = {};
+  }
+  const identityRow = db.query("SELECT v FROM meta WHERE k='serve_identity'").get() as { v: string } | null;
+  const identity = queueRuntimeIdentity(identityRow?.v ?? null, pid ? Number(pid.v) : null, serveAlive);
+  const byRoute: Record<string, unknown> = {};
   for (const r of ROUTE_NAMES) {
     const counts: Record<string, number> = {};
     for (const row of db.query(`SELECT status, COUNT(*) n FROM tasks WHERE route=? GROUP BY status`).all(r) as { status: string; n: number }[])
@@ -197,11 +226,14 @@ function cmdStatus(db: Database, json: boolean, stateDir: string) {
     };
   }
   const status = {
-    serve: { alive: serveAlive, pid: pid ? Number(pid.v) : null, last_beat: beat ? fmtAgo(Number(beat.v)) : null, state_dir: stateDir },
+    serve: { alive: serveAlive, pid: pid ? Number(pid.v) : null, last_beat: beat ? fmtAgo(Number(beat.v)) : null,
+      source_sha256: identity?.source_sha256 ?? null, launch_id: identity?.launch_id ?? null,
+      identity_quality: identity?.source_sha256 ? "process-bound-startup-file" : "unknown", state_dir: stateDir },
     routes: byRoute,
   };
   if (json) { console.log(JSON.stringify(status, null, 1)); return; }
   console.log(`serve: ${serveAlive ? `ALIVE (pid ${pid?.v ?? "?"}, beat ${beat ? fmtAgo(Number(beat.v)) : "?"})` : "not running"}  state: ${stateDir}`);
+  console.log(`source: ${identity?.source_sha256 ?? "UNKNOWN (no current process-bound source receipt)"}`);
   if (isPeak("zai-coding-plan")) console.log(`PEAK WINDOW ACTIVE — zai-coding-plan/autoclaw blocked for ${minutesToPeakEnd()}m`);
   for (const r of ROUTE_NAMES) {
     const x = byRoute[r] as Record<string, { completed?: number; failed?: number; queued?: number; running?: number; retry_wait?: number; cooldown_wait?: number }>;
@@ -760,6 +792,9 @@ export class QueueServer {
   }
 
   async serve() {
+    this.db.query("INSERT INTO meta(k,v) VALUES('serve_identity',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v")
+      .run(JSON.stringify({ schema_version: 1, pid: process.pid, start_token: processStart(process.pid),
+        launch_id: crypto.randomUUID(), source_sha256: MODULE_SHA256 }));
     this.log(`zcode-tui queue serve — state ${this.opts.stateDir} routes=${this.opts.routes.join(",")} poll=${this.opts.pollMs}ms${this.opts.dryRun ? " DRY-RUN" : ""}`);
     this.reclaimStale();
     let lastMetric = 0;

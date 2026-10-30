@@ -29,3 +29,13 @@ are outside the dispatcher contract.
 Peak windows, funding routes, native model selection and failure retry
 policy retain their existing owners. This change uses no banked resets and
 makes no native-provider or whole-swarm readiness claim.
+
+
+Queue status also reports a startup source-file fingerprint and launch UUID
+only when its PID and Linux process-start token match the live heartbeat
+owner. Legacy, malformed or reused-process receipts remain UNKNOWN. The
+fingerprint measures the module file at startup; it is not an attestation
+of every loaded dependency or a compiled executable. Compiled or unsupported
+platform identities remain unknown until they have their own qualified
+build/start adapter. This helps verify an upgrade without treating a moved
+checkout, live PID or old metadata as deployment proof.
