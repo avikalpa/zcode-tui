@@ -31,9 +31,11 @@ export type TaskStatus =
   | "running" // dispatched, in flight (one per route)
   | "retry_wait" // failed, backing off 30/60/120s + jitter
   | "cooldown_wait" // refused with a server cooldown ("...in X hr Y min")
-  | "completed" // terminal — never retried
+  | "review_pending" // transport yielded; independent acceptance absent
+  | "retained_partial" // interrupted work awaits lifecycle reconciliation
+  | "submitted" // remote ticket accepted; remote work outcome unknown
+  | "completed" // historical completion claim, never inferred from exit
   | "failed" // terminal (attempt cap or deterministic error)
-  | "cancelled" // terminal — cancelled via `queue rm` before dispatch
   | "cancelled" // terminal — cancelled via `queue rm` before dispatch
 export const TERMINAL_STATUSES: TaskStatus[] = ["completed", "failed", "cancelled"];
 export const PENDING_STATUSES: TaskStatus[] = ["queued", "retry_wait", "cooldown_wait"];
@@ -126,6 +128,8 @@ export function rerouteTask(db: Database, id: string, toRoute: string, now = Dat
   const row = db.query("SELECT status FROM tasks WHERE id = ?").get(id) as { status: TaskStatus } | null;
   if (!row) return { ok: false, reason: "unknown", id, status: null };
   if (row.status === "running") return { ok: false, reason: "running", id, status: row.status };
+  if (["review_pending", "retained_partial", "submitted"].includes(row.status))
+    return { ok: false, reason: "unresolved attempt requires reconciliation before redispatch", id, status: row.status };
   // A model ref is plane-specific (autoclaw's zaicoding_glm-5.3 is invalid on
   // zai and vice versa) — a reroute falls back to the TARGET route's default
   // model law instead of carrying the source plane's ref (measured 2026-10-24:

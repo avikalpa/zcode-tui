@@ -1,12 +1,12 @@
 // Queue tests — policy math (peak window IST, cooldown parser, backoff
 // ladder) + dispatcher state machine with a fake spawner and fake clock.
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   parseCooldownMs, backoffMs, isPeak, minutesToPeak, minutesToPeakEnd, maxRunMinutes,
-  classifyFailure, ROUTES, type RouteName,
+  classifyFailure, rerouteTask, ROUTES, type RouteName,
 } from "./core";
 import { QueueServer, openDb, buildCommand, type SpawnFn } from "../bin/queue";
 
@@ -136,15 +136,15 @@ const fakeSpawn = (rc: number, out: string): SpawnFn =>
   async () => ({ code: rc, signal: null, stdout: out, stderr: "", timedOut: false });
 
 describe("QueueServer state machine", () => {
-  test("success completes and is never re-dispatched", async () => {
+  test("zero exit awaits independent review and is never re-dispatched", async () => {
     const { db, srv } = makeServer(fakeSpawn(0, "ok"), () => 1_700_000_000_000);
     insertTask(db);
     await srv.tick();
     const row = db.query(`SELECT status, result_ref, attempts FROM tasks`).get() as { status: string; result_ref: string; attempts: number };
-    expect(row.status).toBe("completed");
+    expect(row.status).toBe("review_pending");
     expect(row.attempts).toBe(1);
     await srv.tick(); // nothing pending — no error, no re-dispatch
-    const n = db.query(`SELECT COUNT(*) n FROM tasks WHERE status='completed'`).get() as { n: number };
+    const n = db.query(`SELECT COUNT(*) n FROM tasks WHERE status='review_pending'`).get() as { n: number };
     expect(n.n).toBe(1);
   });
 
@@ -192,12 +192,12 @@ describe("QueueServer state machine", () => {
     await new Promise((r) => setTimeout(r, 250));
     const st = db.query(`SELECT id,status FROM tasks ORDER BY id`).all() as { id: string; status: string }[];
     const m = Object.fromEntries(st.map((r) => [r.id, r.status]));
-    expect(m["a"]).toBe("completed");
-    expect(m["c"]).toBe("completed");
+    expect(m["a"]).toBe("review_pending");
+    expect(m["c"]).toBe("review_pending");
     expect(m["b"]).toBe("queued"); // one in-flight per route held it back
     await srv.tick(); // b's turn
     await new Promise((r) => setTimeout(r, 250));
-    expect((db.query(`SELECT status FROM tasks WHERE id='b'`).get() as { status: string }).status).toBe("completed");
+    expect((db.query(`SELECT status FROM tasks WHERE id='b'`).get() as { status: string }).status).toBe("review_pending");
     expect(maxBusy).toBe(2); // a+c overlapped; b never overlapped a
   });
 
@@ -209,15 +209,15 @@ describe("QueueServer state machine", () => {
     await srv.tick();
     const m = Object.fromEntries((db.query(`SELECT id,status FROM tasks`).all() as { id: string; status: string }[]).map((r) => [r.id, r.status]));
     expect(m["z"]).toBe("queued");
-    expect(m["o"]).toBe("completed");
+    expect(m["o"]).toBe("review_pending");
   });
 
-  test("zai-offpeak success requires the ZT-IDLE-CREATE marker", async () => {
+  test("zai-offpeak marker means submitted, not work accepted", async () => {
     const { db, srv } = makeServer(fakeSpawn(0, 'ZT-IDLE-CREATE {"ok":true,"offPeakTaskId":"offpeak-abc","queuePosition":2}'), () => 1_700_000_000_000);
     insertTask(db, { route: "zai-offpeak" });
     await srv.tick();
     const row = db.query(`SELECT status, result_ref FROM tasks`).get() as { status: string; result_ref: string };
-    expect(row.status).toBe("completed");
+    expect(row.status).toBe("submitted");
     expect(row.result_ref).toBe("offpeak-abc");
   });
 
@@ -459,5 +459,74 @@ describe("off-peak admission phases (sol Q4)", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+
+describe("independent completion remains separate from transport", () => {
+  test("an old artifact plus rc0 cannot establish current work acceptance", async () => {
+    const artifact = join(dir, "RESULT.json");
+    writeFileSync(artifact, JSON.stringify({ status: "COMPLETE", verdict: "PASS" }));
+    let calls = 0;
+    const { db, srv } = makeServer(async () => { calls++; return { code: 0, signal: null, stdout: "ok", stderr: "", timedOut: false }; }, () => 1_700_000_000_000);
+    insertTask(db, { expect_file: artifact });
+    await srv.tick();
+    let row = db.query("SELECT * FROM tasks").get() as any;
+    expect(row.status).toBe("review_pending");
+    expect(row.finished_at).toBeNull();
+    expect(row.last_error).toContain("independent current-subject acceptance");
+    await srv.tick();
+    expect(calls).toBe(1);
+    insertTask(db, { id: "next-worker" });
+    await srv.tick();
+    expect(calls).toBe(2); // retained review debt does not occupy a worker slot
+    expect(rerouteTask(db, "ztq-test", "codex").ok).toBe(false);
+    expect((db.query("SELECT status FROM tasks WHERE id='ztq-test'").get() as any).status).toBe("review_pending");
+  });
+
+  test("remote submission does not require the future remote output to exist", async () => {
+    const { db, srv } = makeServer(fakeSpawn(0, 'ZT-IDLE-CREATE {"ok":true,"offPeakTaskId":"invented-ticket"}'), () => 1_700_000_000_000);
+    insertTask(db, { route: "zai-offpeak", expect_file: join(dir, "future-output.json") });
+    await srv.tick();
+    const row = db.query("SELECT * FROM tasks").get() as any;
+    expect(row.status).toBe("submitted");
+    expect(row.result_ref).toBe("invented-ticket");
+    expect(row.finished_at).toBeNull();
+    expect(rerouteTask(db, row.id, "codex").ok).toBe(false);
+    await srv.tick();
+    expect((db.query("SELECT attempts FROM tasks").get() as any).attempts).toBe(1);
+  });
+
+  for (const recovery of ["boot", "sweep"] as const) {
+    for (const outcome of ["settled", "budget", "cut-midtool"] as const) {
+      test(`${recovery} retains orphan ${outcome} without claiming completion`, () => {
+        const now = 1_700_000_000_000;
+        const { db, srv } = makeServer(fakeSpawn(0, "unused"), () => now);
+        insertTask(db);
+        db.query("UPDATE tasks SET status='running', updated_at=?, run_log='retained-log', result_ref='retained-result'").run(now - 3_600_000);
+        mkdirSync(join(dir, "runs"), { recursive: true });
+        writeFileSync(join(dir, "runs/ztq-test-attempt.json.log"), JSON.stringify({ outcome }, null, 2));
+        if (recovery === "boot") srv.reclaimStale(); else srv.sweep();
+        const row = db.query("SELECT * FROM tasks").get() as any;
+        expect(row.status).toBe(outcome === "settled" ? "review_pending" : "retained_partial");
+        expect(row.finished_at).toBeNull();
+        expect(row.run_log).toBe("retained-log");
+        expect(row.result_ref).toBe("retained-result");
+        expect(row.last_error).toContain("independent acceptance absent");
+        expect(rerouteTask(db, row.id, "codex").ok).toBe(false);
+      });
+    }
+  }
+
+  test("a concurrent owner cancellation is not overwritten by process exit", async () => {
+    let database: ReturnType<typeof openDb>;
+    const { db, srv } = makeServer(async () => {
+      database.query("UPDATE tasks SET status='cancelled'").run();
+      return { code: 0, signal: null, stdout: "ok", stderr: "", timedOut: false };
+    }, () => 1_700_000_000_000);
+    database = db;
+    insertTask(db);
+    await srv.tick();
+    expect((db.query("SELECT status FROM tasks").get() as any).status).toBe("cancelled");
   });
 });

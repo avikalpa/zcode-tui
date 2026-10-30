@@ -152,12 +152,13 @@ function cmdList(db: Database, json: boolean) {
     return;
   }
   if (rows.length === 0) { console.log("queue: empty"); return; }
-  const w = { id: 40, route: 16, st: 13, pos: 4, att: 5, next: 12 };
+  const w = { id: 40, route: 16, st: 19, pos: 4, att: 5, next: 12 };
   console.log(`${"id".padEnd(w.id)}${"route".padEnd(w.route)}${"status".padEnd(w.st)}pos att ${"eligible".padEnd(w.next)}title`);
   for (const t of rows) {
     const next = posMap.has(t.id)
       ? (t.status === "running" ? "running" : t.next_eligible_at > nowMs() ? fmtIn(t.next_eligible_at) : "now")
-      : (TERMINAL_STATUSES.includes(t.status) ? "—" : "?");
+      : (["review_pending", "retained_partial", "submitted"].includes(t.status)
+          ? "held" : TERMINAL_STATUSES.includes(t.status) ? "—" : "?");
     console.log(`${t.id.padEnd(w.id)}${t.route.padEnd(w.route)}${t.status.padEnd(w.st)}${String(posMap.get(t.id) ?? "-").padStart(w.pos)} ${String(t.attempts).padStart(w.att)} ${next.padEnd(w.next)}${t.title.slice(0, 48)}`);
   }
 }
@@ -431,7 +432,7 @@ export class QueueServer {
       }
       if (!newestPath) return null;
       const txt = readFileSync(newestPath, "utf8").slice(-4000);
-      const m = /"outcome":"(settled|budget|cut-midtool|failed)"/.exec(txt);
+      const m = /"outcome"\s*:\s*"(settled|budget|cut-midtool|failed)"/.exec(txt);
       if (!m) return null;
       return m[1];
     } catch { return null; }
@@ -450,10 +451,8 @@ export class QueueServer {
       const attempts = t.attempts;
       const final = attempts >= t.max_attempts;
       const outcome = this.adoptOrphanOutcome(t.id);
-      if (outcome === "settled" || outcome === "budget") {
-        this.db.query(`UPDATE tasks SET status='completed', last_error=?, updated_at=? WHERE id=?`)
-          .run(`adopted orphan collector outcome=${outcome}`, this.now(), t.id);
-        this.log(`reclaim ${t.id}: adopted ${outcome} from survivor transcript`);
+      if (outcome === "settled" || outcome === "budget" || outcome === "cut-midtool") {
+        this.retainOrphan(t.id, outcome);
         continue;
       }
       this.db.query(`UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`)
@@ -496,10 +495,8 @@ export class QueueServer {
       const attempts = t.attempts;
       const final = attempts >= t.max_attempts;
       const outcome = this.adoptOrphanOutcome(t.id);
-      if (outcome === "settled" || outcome === "budget") {
-        this.db.query(`UPDATE tasks SET status='completed', last_error=?, updated_at=? WHERE id=?`)
-          .run(`adopted orphan collector outcome=${outcome}`, this.now(), t.id);
-        this.log(`reclaim ${t.id}: adopted ${outcome} from survivor transcript`);
+      if (outcome === "settled" || outcome === "budget" || outcome === "cut-midtool") {
+        this.retainOrphan(t.id, outcome);
         continue;
       }
       this.db.query(`UPDATE tasks SET status=?, last_error=?, updated_at=? WHERE id=?`)
@@ -637,21 +634,32 @@ export class QueueServer {
       return;
     }
 
-    // Honest success check: exit 0 AND (for idle-create) the marker line.
+    // Transport settlement and ticket submission are not work acceptance.
     let resultRef = "";
     if (task.route === "zai-offpeak") {
       const m = res.stdout.match(/ZT-IDLE-CREATE (\{[^\n]*\})/);
-      if (m) { try { resultRef = (JSON.parse(m[1]) as { offPeakTaskId?: string }).offPeakTaskId ?? ""; } catch { /* keep "" */ } }
+      if (m) {
+        try {
+          const marker = JSON.parse(m[1]);
+          if (marker?.ok === true && typeof marker.offPeakTaskId === "string"
+              && marker.offPeakTaskId.length > 0 && marker.offPeakTaskId.length <= 512
+              && !/[\r\n\0]/.test(marker.offPeakTaskId)) resultRef = marker.offPeakTaskId;
+        } catch { /* unverified submission, keep empty */ }
+      }
     } else if (task.route === "zai-coding-plan") {
       const m = res.stdout.match(/session (sess_[A-Za-z0-9-]+)/);
       if (m) resultRef = m[1];
     }
 
     const expectOk = !task.expect_file || existsSync(task.expect_file);
-    if (res.code === 0 && expectOk && (task.route !== "zai-offpeak" || resultRef)) {
-      this.finish(task.id, attempts, "completed", res.code, "", resultRef, runLog);
-      this.metric({ ev: "done", id: task.id, route: task.route, rc: res.code, outcome: "completed", dur_ms: durMs });
-      this.log(`done ${task.id} completed in ${Math.round(durMs / 1000)}s${resultRef ? ` (${resultRef})` : ""}`);
+    if (res.code === 0 && (task.route === "zai-offpeak" ? !!resultRef : expectOk)) {
+      const state = task.route === "zai-offpeak" ? "submitted" : "review_pending";
+      this.finish(task.id, attempts, state, res.code,
+        state === "submitted" ? "remote ticket accepted; work outcome and independent acceptance unknown"
+          : "transport yielded; independent current-subject acceptance required", resultRef, runLog);
+      this.metric({ ev: "done", phase: "transport_yield", work_accepted: false,
+        id: task.id, route: task.route, rc: res.code, outcome: state, dur_ms: durMs });
+      this.log(`yield ${task.id} ${state} in ${Math.round(durMs / 1000)}s${resultRef ? ` (${resultRef})` : ""}`);
       return;
     }
 
@@ -708,9 +716,16 @@ export class QueueServer {
     this.log(`retry ${task.id}: attempt ${attempts} failed (rc=${res.code}); next eligible ${fmtIn(plan.next_eligible_at ?? this.now())}`);
   }
 
-  private finish(id: string, _attempts: number, status: "completed" | "failed", rc: number | null, err: string, ref: string, runLog: string) {
-    this.db.query(`UPDATE tasks SET status=?, finished_at=?, updated_at=?, last_error=?, last_exit=?, result_ref=?, run_log=? WHERE id=?`)
-      .run(status, this.now(), this.now(), err, rc, ref, runLog, id);
+  private retainOrphan(id: string, outcome: string) {
+    const status = outcome === "settled" ? "review_pending" : "retained_partial";
+    this.db.query(`UPDATE tasks SET status=?, finished_at=NULL, last_error=?, updated_at=? WHERE id=? AND status='running'`)
+      .run(status, `unverified orphan transport outcome=${outcome}; work retained, independent acceptance absent`, this.now(), id);
+    this.log(`reclaim ${id}: ${status}; orphan ${outcome} is not acceptance`);
+  }
+
+  private finish(id: string, _attempts: number, status: "review_pending" | "submitted" | "failed", rc: number | null, err: string, ref: string, runLog: string) {
+    this.db.query(`UPDATE tasks SET status=?, finished_at=?, updated_at=?, last_error=?, last_exit=?, result_ref=?, run_log=? WHERE id=? AND status='running'`)
+      .run(status, status === "failed" ? this.now() : null, this.now(), err, rc, ref, runLog, id);
   }
 
   async serve() {
@@ -752,7 +767,8 @@ export class QueueServer {
 // ---------------------------------------------------------------------------
 
 export async function main() {
-  syncAuthHeadless();
+  // Read-only inventory must not refresh unrelated native authentication.
+  if (process.argv[2] === "serve") syncAuthHeadless();
   // The autoclaw route is dispatchable only when the harness AND a
   // provisioned plan credential exist on this host (measured honestly).
   if (planExists() || (autoclawPiCli() && autoclawCredential())) {
