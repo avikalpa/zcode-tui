@@ -229,6 +229,13 @@ export function needsRecoveryContinue(outcome: RunOutcome, lastError: string,
   return outcome === "settled" && !!lastError && !progressAfterError && used < maximum;
 }
 
+export function classifyRuntimeError(payload: Record<string, unknown>): "stop" | "recoverable" {
+  const full = JSON.stringify(payload).toLowerCase();
+  if (/auth|quota|permission|insufficient|cancelled|canceled|forbidden|rate.limit|1302|3103/.test(full)) return "stop";
+  if (/econnreset|econnrefused|etimedout|fetch failed|socket hang up|network (error|timeout)|connection (closed|error|dropped)/.test(full)) return "recoverable";
+  return "stop"; // An unknown failure never authorizes another billable turn.
+}
+
 const { values } = parseArgs({
   strict: false, // imported as a module by other verbs: foreign argv must not throw
   options: {
@@ -264,6 +271,7 @@ const content = import.meta.main && values.unattended
 const t0 = Date.now();
 const events: { method: string; kind: string; ms: number; summary: string }[] = [];
 let lastEvent = 0;
+let activityEpoch = 0;
 let sessionId = "";
 let transportError = "";
 let continuesUsed = 0;
@@ -274,13 +282,13 @@ let stopHb: (() => void) | null = null;
 let ref: ModelRef | null = null;
 let selected: ModelRef | null = null;
 let turnProgress: TurnProgress = { pending: [], replyComplete: false, textSeen: false };
-const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
 const deadlineMs = Number(values["max-run-min"]) > 0
   ? t0 + Number(values["max-run-min"]) * 60_000
   : 0;
 const backoffMs = (n: number) => (30 * 2 ** n + Math.floor(Math.random() * 10)) * 1000;
 
-const sv = new AppServer({
+let sv: AppServer;
+if (import.meta.main) sv = new AppServer({
   onNotification: (m: Record<string, unknown>) => {
     const method = String(m.method);
     let kind = "";
@@ -300,6 +308,7 @@ const sv = new AppServer({
     // a final reply and otherwise occupies the worker slot until timeout.
     if (!isSessionActivity(m, sessionId)) return;
     lastEvent = Date.now();
+    activityEpoch++;
     turnProgress = observeTurn(turnProgress, ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>);
     events.push({ method, kind, ms: Date.now() - t0, summary });
     // Tool-in-flight tracking (trial finding #5, T-036): a long tool call
@@ -315,10 +324,10 @@ const sv = new AppServer({
     } else if (/end|stop|complete|idle/.test(kindLow)) {
       toolInFlight = 0;
     }
-    if (kind.includes("error")) {
-      const low = summary.toLowerCase();
-      if (STOP_KINDS.some((k) => low.includes(k))) {
-        transportError = summary; // stop-class: report, never steer
+    if (kindLow.includes("error")) {
+      const payload = ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>;
+      if (classifyRuntimeError(payload) === "stop") {
+        transportError = "stop-or-unclassified:" + kind;
       } else {
         lastErrorKind = kind;
         sawProgressAfterLastError = false;
@@ -421,7 +430,11 @@ async function main() {
     if (stop === "settled") {
       // Confirm the owning runtime is idle; closing the client during an
       // active generation or tool is not successful transport settlement.
+      const observedEpoch = activityEpoch;
       const snapshot = await sv.request("session/read", { sessionId }, 10000) as Snapshot;
+      const afterRead = decision();
+      if (afterRead && afterRead !== "settled") { outcome = afterRead; break; }
+      if (!afterRead || activityEpoch !== observedEpoch) continue;
       const status = (snapshot as { session?: { status?: string } }).session?.status;
       if (status !== "idle") { await new Promise((r) => setTimeout(r, 5000)); continue; }
     }
