@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertFundingRoute, chooseEffort, collectionDecision, configureSession,
-  createSession, matchAvailableModel, observeTurn, outcomeExitCode, type ModelRef, type RunClient,
+  createSession, matchAvailableModel, observeTurn, outcomeExitCode,
+  isSessionActivity, needsRecoveryContinue, type ModelRef, type RunClient,
 } from "./run";
 
 const wanted: ModelRef = { providerId: "zai-api", modelId: "GLM-5.3-Flash", options: { reasoningLevel: "max" } };
@@ -84,6 +85,24 @@ const collecting = {
   modelInFlight: false, replyComplete: true, error: false,
 };
 describe("collection termination is not completion", () => {
+  test("telemetry after a final reply cannot postpone the work clock", () => {
+    const own = "sess_fixture";
+    expect(isSessionActivity({ method: "v4/telemetry/event", params: { sessionId: own } }, own)).toBe(false);
+    expect(isSessionActivity({ method: "session/event", params: { sessionId: "sess_other" } }, own)).toBe(false);
+    expect(isSessionActivity({ method: "session/event", params: { sessionId: own } }, own)).toBe(true);
+    let lastWork = 100;
+    for (let now = 200; now <= 1000; now += 100) {
+      if (isSessionActivity({ method: "v4/telemetry/event" }, own)) lastWork = now;
+    }
+    expect(collectionDecision({ ...collecting, maxMs: 2000, lastEvent: lastWork })).toBe("settled");
+  });
+  test("normal final yields never get automatic continuation prompts", () => {
+    expect(needsRecoveryContinue("settled", "", false, 0, 3)).toBe(false);
+    expect(needsRecoveryContinue("settled", "transient", true, 0, 3)).toBe(false);
+    expect(needsRecoveryContinue("cut-midtool", "transient", false, 0, 3)).toBe(false);
+    expect(needsRecoveryContinue("settled", "transient", false, 0, 3)).toBe(true);
+    expect(needsRecoveryContinue("settled", "transient", false, 3, 3)).toBe(false);
+  });
   test("the canary request-start silence never settles", () => {
     expect(collectionDecision({ ...collecting, maxMs: 2000, lastEvent: 1,
       modelInFlight: true, replyComplete: false })).toBeNull();

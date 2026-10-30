@@ -216,6 +216,19 @@ export function outcomeExitCode(outcome: RunOutcome): number {
     "cut-midtool": 5, "no-events": 1, error: 1 })[outcome];
 }
 
+export function isSessionActivity(message: Record<string, unknown>, ownedSession: string): boolean {
+  if (message.method !== "session/event") return false;
+  const params = message.params as { sessionId?: unknown } | undefined;
+  return !params?.sessionId || params.sessionId === ownedSession;
+}
+
+export function needsRecoveryContinue(outcome: RunOutcome, lastError: string,
+  progressAfterError: boolean, used: number, maximum: number): boolean {
+  // A completed reply is a yield boundary. Generic silence never authorizes
+  // another model turn, especially when a worker has retained review debt.
+  return outcome === "settled" && !!lastError && !progressAfterError && used < maximum;
+}
+
 const { values } = parseArgs({
   strict: false, // imported as a module by other verbs: foreign argv must not throw
   options: {
@@ -283,10 +296,10 @@ const sv = new AppServer({
     // mirrors out-numbered session events 19k vs ~700 and hit the max-events
     // cap at ~12min, exiting the collector mid-generation; the sticky tool
     // flag then misbilled the healthy session as cut-midtool. Telemetry
-    // updates liveness (lastEvent) but is NOT mirrored into the transcript
-    // and does NOT count toward the cap.
+    // must not extend the work clock: unrelated telemetry can continue after
+    // a final reply and otherwise occupies the worker slot until timeout.
+    if (!isSessionActivity(m, sessionId)) return;
     lastEvent = Date.now();
-    if (method !== "session/event") return;
     turnProgress = observeTurn(turnProgress, ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>);
     events.push({ method, kind, ms: Date.now() - t0, summary });
     // Tool-in-flight tracking (trial finding #5, T-036): a long tool call
@@ -412,7 +425,8 @@ async function main() {
       const status = (snapshot as { session?: { status?: string } }).session?.status;
       if (status !== "idle") { await new Promise((r) => setTimeout(r, 5000)); continue; }
     }
-    if ((stop === "settled" || stop === "cut-midtool") && continuesUsed < maxContinues) {
+    if (needsRecoveryContinue(stop, lastErrorKind, sawProgressAfterLastError,
+                              continuesUsed, maxContinues)) {
       const wait = backoffMs(continuesUsed);
       console.log(`zt-run: continue-steer #${continuesUsed + 1} after ${Math.round(wait / 1000)}s (lastError=${lastErrorKind || "silence"})`);
       await new Promise((r) => setTimeout(r, wait));
