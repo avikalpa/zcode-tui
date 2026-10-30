@@ -422,7 +422,19 @@ async function cmdExec(v: Record<string, string | boolean | undefined>): Promise
     }
     console.log(`idle exec: ticket ${row.serverTicketId} window-missed on re-poll but serve observed admit ${Math.round(observedMsAgo / 1000)}s ago — attempting admission on the fresh observation`);
   }
-  if (phase !== "admit") {
+  // Time-trigger privilege (measured 2026-10-31 00:4xZ): on the time-trigger
+  // path the serve's fresh observation is the admission signal — status
+  // visibility of ready/active LAGS the window, so the poll-only stand-down
+  // here would stand down on EVERY time-triggered exec. The server's 3104
+  // remains the authoritative rejection.
+  const onTimeTrigger = Number(v["observed-admit-ms"] ?? Infinity) === 0;
+  if (phase === "poll-only") {
+    if (!onTimeTrigger) {
+      console.log(`idle exec: ticket ${row.serverTicketId} state=${state}${pt?.position != null ? ` #${pt.position}` : ""} (phase=poll-only; poll again later)`);
+      return 3;
+    }
+    console.log(`idle exec: ticket ${row.serverTicketId} poll-only on status — attempting admission on the fresh time-trigger observation`);
+  } else if (phase !== "admit") {
     console.log(`idle exec: ticket ${row.serverTicketId} state=${state}${pt?.position != null ? ` #${pt.position}` : ""} (phase=${phase}; poll again later)`);
     return 3;
   }
