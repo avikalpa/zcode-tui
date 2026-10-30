@@ -35,6 +35,8 @@ async function replay(scenario: string) {
      push(requestEvent('model_request_started','tool-turn'));
      push({...requestEvent('model_request_completed','tool-turn'),finishReason:'tool-calls'});
      push({type:'tool_start',toolCallId:'invented-failing-check'});
+     push({type:'error',toolCallId:'invented-failing-check',
+       error:{type:'tool_execution_failed',message:'invented check exited 7'}});
      push({type:'tool_error',toolCallId:'invented-failing-check',message:'invented check exited 7'});
      push(requestEvent('model_request_started','repair-turn'));
      push({type:'text_delta',delta:'Expected failure inspected; artifact repaired.'});

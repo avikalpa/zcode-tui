@@ -90,6 +90,10 @@ describe("collection termination is not completion", () => {
     expect(isToolFailure('tool_failed')).toBe(true);
     expect(isToolFailure('model_error')).toBe(false);
     expect(isToolFailure('error')).toBe(false);
+    expect(isToolFailure('error', { toolCallId: 'fixture', error: { type: 'tool_execution_failed' } })).toBe(true);
+    expect(isToolFailure('error', { toolCallId: 'fixture', error: { type: 'quota_exceeded' } })).toBe(false);
+    expect(isToolFailure('error', { error: { type: 'tool_execution_failed' } })).toBe(false);
+    expect(isToolFailure('model_error', { toolCallId: 'fixture', error: { type: 'tool_execution_failed' } })).toBe(false);
   });
   test("error classification reads full fields and holds unknown failures", () => {
     expect(classifyRuntimeError({ type: "error", details: "padding".repeat(50),
