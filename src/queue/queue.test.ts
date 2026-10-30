@@ -335,9 +335,9 @@ describe("GLM-5.3 routing law (owner 2026-10-24)", () => {
     expect(DEFAULT_PROVIDER).toBe("zai-api");
   });
 
-  test("full model falls over to Flash max on plan refusal, never otherwise", () => {
+  test("unverified full-model quota refusal never authorizes another funding route", () => {
     const ref = buildModelRef('{"modelId":"GLM-5.3","providerId":"zai-api"}', "x");
-    expect(fallbackOnQuotaRefusal(ref, "quota_exceeded for glm-5.3")?.modelId).toBe("GLM-5.3-Flash");
+    expect(fallbackOnQuotaRefusal(ref, "quota_exceeded for glm-5.3")).toBeNull();
     expect(fallbackOnQuotaRefusal(ref, "network dropped")).toBeNull();
     const flash = buildModelRef('{"modelId":"GLM-5.3-Flash","providerId":"zai-api"}', "x");
     expect(fallbackOnQuotaRefusal(flash, "quota exceeded")).toBeNull(); // flash has no fallback
