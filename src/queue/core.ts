@@ -63,6 +63,7 @@ export interface TaskRow {
   run_log: string;
   result_ref: string;
   expect_file: string;
+  dispatch_id?: string; // physical attempt identity; ordinals may be reused
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +379,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   last_exit INTEGER,
   run_log TEXT NOT NULL DEFAULT '',
   result_ref TEXT NOT NULL DEFAULT '',
-  expect_file TEXT NOT NULL DEFAULT ''
+  expect_file TEXT NOT NULL DEFAULT '',
+  dispatch_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_route_status ON tasks(route, status, next_eligible_at);
 CREATE TABLE IF NOT EXISTS route_state (
