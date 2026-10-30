@@ -14,10 +14,15 @@ those re-derives days of reverse engineering.
 ## Checks before every PR
 
 ```sh
+bun install --frozen-lockfile
 bun run typecheck        # tsc --noEmit, must be clean
 bun test                 # full client and TUI suite
 bun run probe:battery    # protocol acceptance, GREEN (needs /opt/ZCode)
 ```
+
+Keep the directory containing Bun on `PATH`, including in unattended CI.
+Package scripts invoke `bun` themselves; invoking only the outer command by
+an absolute path does not provide that executable to nested scripts.
 
 `probe:battery` and `bun test`'s runtime group talk to a real app-server
 spawned from the locally installed ZCode desktop; they create short-lived

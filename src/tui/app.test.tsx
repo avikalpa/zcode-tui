@@ -62,7 +62,10 @@ describe("zcode-tui OpenCode-shaped shell", () => {
       await act(async () => { await setup.mockInput.pressKeys(["\x1b[H", "\x1b[1;2F", ..."Fixture renamed", "\r"]); });
       await setup.waitForFrame((f) => f.includes("rename pending host support · Fixture renamed"));
       await act(async () => { await setup.mockInput.pressKeys([..."/status", "\r"]); });
-      expect(await setup.waitForFrame((f) => f.includes("Z.AI Coding Plan"))).toContain("Status");
+      // The plan label also exists in the background composer. Wait for the
+      // requested dialog before reading a frame, rather than that stale label.
+      expect(await setup.waitForFrame((f) => f.includes("Z.AI Coding Plan")
+        && f.includes("Status"))).toContain("Status");
     } finally { setup.renderer.destroy(); }
   });
   test("home MCP count and shortcuts fit on the same footer row", async () => {
