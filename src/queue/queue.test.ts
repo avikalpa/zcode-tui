@@ -622,7 +622,7 @@ describe("queue startup source identity", () => {
 
 
 test("queue source identity refuses stale owners, PID reuse and malformed receipts", () => {
-  const row = { schema_version: 1, pid: 17, start_token: "100", launch_id: "a".repeat(36), source_sha256: "b".repeat(64) };
+  const row = { schema_version: 1, pid: 17, start_token: "100", launch_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", source_sha256: "b".repeat(64) };
   expect(queueRuntimeIdentity(JSON.stringify(row), 17, true, () => "100")?.source_sha256).toBe(row.source_sha256);
   expect(queueRuntimeIdentity(JSON.stringify(row), 18, true, () => "100")).toBeNull();
   expect(queueRuntimeIdentity(JSON.stringify(row), 17, true, () => "101")).toBeNull();

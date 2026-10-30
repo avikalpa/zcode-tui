@@ -52,7 +52,7 @@ export function queueRuntimeIdentity(raw: string | null, pid: number | null, ali
     const value = raw ? JSON.parse(raw) : null;
     if (alive && value?.schema_version === 1 && value.pid === pid && value.start_token
         && value.start_token === readStart(value.pid)
-        && typeof value.launch_id === "string" && /^[a-f0-9-]{36}$/.test(value.launch_id)
+        && typeof value.launch_id === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.launch_id)
         && (value.source_sha256 === null || typeof value.source_sha256 === "string"
           && /^[a-f0-9]{64}$/.test(value.source_sha256))) return value as {
             source_sha256: string | null; launch_id: string; pid: number; start_token: string };
