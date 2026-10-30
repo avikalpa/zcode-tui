@@ -8,7 +8,7 @@
 // SAME session (30/60/120s+jitter backoff); auth/quota/permission/cancel
 // are STOP outcomes (no blind replay of possibly-completed work).
 // --max-run-min enforces a consumption budget (peak-window guard feeds it);
-// outcome in the transcript is honest: settled | budget | no-events.
+// outcome records quiet settlement, limits, and failures separately.
 import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -16,13 +16,12 @@ import { AppServer } from "../protocol/client";
 import { syncAuthHeadless } from "../auth/sync";
 import { startHeartbeat } from "../queue/heartbeat";
 
-export const DEFAULT_PROVIDER = "zai-api"; // the ONLY providerId the registry resolves (measured 2026-10-24)
-const QUOTA_REFUSAL = /quota|3103|coding_plan|entitle|insufficient|plan_required|exceeded/i;
+export const DEFAULT_PROVIDER = "zai-api"; // measured alias: older runtimes use zai
 
 export interface ModelRef { modelId: string; providerId: string; options?: { reasoningLevel?: string } }
 
 /** Build the session/create model ref. Owner law (2026-10-24): MAX thinking
- *  on every plan — options.reasoningLevel is MANDATORY for zai-api models
+ *  on capable models — options.reasoningLevel is required on some runtimes
  *  ("Reasoning level is required for zai-api/GLM-5.3-Flash", measured). */
 export function buildModelRef(model: string, provider: string): ModelRef {
   let ref: ModelRef;
@@ -37,15 +36,21 @@ export function buildModelRef(model: string, provider: string): ModelRef {
   return ref;
 }
 
-/** GLM-5.3 full is a start-plan-only model (owner law 2026-10-24): when the
- *  plan bucket refuses (quota/entitlement), fall over to GLM-5.3-Flash max —
- *  never run full on the regular coding plan. */
-export function fallbackOnQuotaRefusal(ref: ModelRef, errText: string): ModelRef | null {
-  if (!QUOTA_REFUSAL.test(errText)) return null;
-  if (ref.modelId.toLowerCase() === "glm-5.3") {
-    return { modelId: "GLM-5.3-Flash", providerId: ref.providerId, options: { reasoningLevel: "max" } };
+/** No proven StartPlan grant is available to this transport. Never migrate a
+ * requested funding route or full model onto the coding plan. */
+export function assertFundingRoute(ref: ModelRef): void {
+  if (ref.modelId.toLowerCase() === "glm-5.3" || /start[\s_-]*plan/i.test(ref.providerId)) {
+    throw new Error("StartPlan route/grant is unverified; full_allowed=false; refusing session/send");
   }
-  return null;
+}
+
+export function fallbackOnQuotaRefusal(_ref: ModelRef, _errText: string): ModelRef | null {
+  return null; // quota refusal never authorizes a different model/funding route
+}
+
+export function sameProvider(a: string, b: string): boolean {
+  const canonical = (p: string) => p === "zai-api" ? "zai" : p;
+  return canonical(a) === canonical(b);
 }
 
 /** The reasoning level rides DIFFERENT keys per runtime version (measured
@@ -68,28 +73,31 @@ export function modelRefShapes(ref: ModelRef): Record<string, unknown>[] {
  *  listing and resolve the wanted modelId (case-insensitive, exact case
  *  preferred) to a concrete {providerId, modelId}. The fleet's runtimes
  *  disagree on provider ids too (jojo: zai-api, dev: zai — measured), so the
- *  error text is the portable source of truth. */
-export function matchAvailableModel(errText: string, modelId: string): ModelRef | null {
+ *  error text only authorizes exact-provider matching or the measured alias. */
+export function matchAvailableModel(errText: string, modelId: string, providerId: string = DEFAULT_PROVIDER): ModelRef | null {
   const m = errText.match(/Available models:\s*([^\n]+)/);
   if (!m) return null;
-  const entries = m[1].split(",").map((s) => s.trim().replace(/[.,;]+$/, "")).filter((s) => s.includes("/"));
+  const entries = m[1].split(",").map((s) => s.trim().replace(/[.,;]+$/, "")).filter((s) => s.includes("/") && sameProvider(s.split("/")[0], providerId));
   const want = modelId.toLowerCase();
   const exact = entries.find((e) => e.split("/")[1] === modelId);
   const ci = entries.find((e) => e.split("/")[1]?.toLowerCase() === want);
   const hit = exact ?? ci;
   if (!hit) return null;
-  const [providerId, resolved] = hit.split("/");
-  return { modelId: resolved, providerId, options: { reasoningLevel: "max" } };
+  const [resolvedProvider, resolved] = hit.split("/");
+  return { modelId: resolved, providerId: resolvedProvider, options: { reasoningLevel: "max" } };
 }
 
 /** Create the session trying every model-ref shape the fleet's runtimes
  *  speak (see modelRefShapes). With no ref, one bare attempt. */
-async function createSession(
-  sv: AppServer,
+export interface RunClient { request(method: string, params: Record<string, unknown>, timeout?: number): Promise<unknown> }
+
+export async function createSession(
+  sv: RunClient,
   createParams: Record<string, unknown>,
   ref: ModelRef | null,
 ): Promise<Record<string, unknown>> {
   if (!ref) return (await sv.request("session/create", createParams, 30000)) as Record<string, unknown>;
+  assertFundingRoute(ref);
   let wanted = ref;
   for (let attempt = 0; attempt < 6; attempt++) {
     let lastErr: unknown = null;
@@ -101,10 +109,10 @@ async function createSession(
         lastErr = e;
         const msg = String(e instanceof Error ? e.message : e);
         if (/Unsupported model/i.test(msg)) {
-          const alt = matchAvailableModel(msg, wanted.modelId);
+          const alt = matchAvailableModel(msg, wanted.modelId, wanted.providerId);
           if (alt) {
             console.log(`zt-run: model ref re-pointed by registry: ${wanted.providerId}/${wanted.modelId} -> ${alt.providerId}/${alt.modelId}`);
-            wanted = alt;
+            wanted = { ...alt, options: wanted.options };
             handled = true;
             break; // retry shapes against the re-pointed ref
           }
@@ -117,6 +125,115 @@ async function createSession(
     if (!handled) throw lastErr;
   }
   throw new Error("createSession: model-ref negotiation did not converge");
+}
+
+type Snapshot = {
+  session?: { model?: ModelRef };
+  settings?: {
+    model?: { current?: ModelRef };
+    thoughtLevel?: { current?: string; available?: { value: string }[]; enabled?: boolean };
+  };
+};
+
+export function actualSelection(snapshot: Snapshot): ModelRef {
+  const actual = snapshot.settings?.model?.current ?? snapshot.session?.model;
+  if (!actual?.modelId || !actual?.providerId) throw new Error("Native model/provider readback missing");
+  return { modelId: actual.modelId, providerId: actual.providerId,
+    options: { reasoningLevel: snapshot.settings?.thoughtLevel?.current ?? "unverified" } };
+}
+
+export function chooseEffort(snapshot: Snapshot, requested?: string): string | null {
+  const thought = snapshot.settings?.thoughtLevel;
+  const levels = thought?.available?.map((l) => l.value.toLowerCase()) ?? [];
+  if (requested) {
+    const level = requested.toLowerCase();
+    if (!levels.includes(level)) throw new Error(`Requested effort ${level} is unsupported or unverified`);
+    return level;
+  }
+  if (levels.includes("max")) return "max";
+  const current = thought?.current?.toLowerCase();
+  if (current && levels.includes(current)) return current;
+  if (thought?.enabled === false) return null;
+  throw new Error("Native effort metadata is ambiguous; refusing session/send");
+}
+
+/** Setter acknowledgement is insufficient: read the native selection before any send. */
+export async function configureSession(sv: RunClient, sessionId: string, created: Snapshot,
+  wanted: ModelRef | null, requestedEffort?: string): Promise<ModelRef> {
+  const initial = actualSelection(created);
+  assertFundingRoute(initial);
+  if (wanted && (!sameProvider(wanted.providerId, initial.providerId)
+    || wanted.modelId.toLowerCase() !== initial.modelId.toLowerCase())) {
+    throw new Error("Native model/provider differs from requested route; refusing session/send");
+  }
+  const level = chooseEffort(created, requestedEffort);
+  if (level) await sv.request("session/setThoughtLevel", { sessionId, thoughtLevel: level });
+  const read = await sv.request("session/read", { sessionId }) as Snapshot;
+  const actual = actualSelection(read);
+  assertFundingRoute(actual);
+  if (!sameProvider(initial.providerId, actual.providerId) || initial.modelId !== actual.modelId
+    || (level && actual.options?.reasoningLevel?.toLowerCase() !== level)) {
+    throw new Error("Native model/provider/effort readback mismatch; refusing session/send");
+  }
+  return actual;
+}
+
+export type RunOutcome = "settled" | "budget" | "collection-limit" | "event-limit" | "cut-midtool" | "no-events" | "error";
+export interface TurnProgress { pending: string[]; replyComplete: boolean; textSeen: boolean }
+export function observeTurn(state: TurnProgress, p: Record<string, unknown>): TurnProgress {
+  const kind = String(p.type ?? p.kind ?? "");
+  if (kind === "text_delta" && state.pending.length && typeof p.delta === "string" && p.delta.length) {
+    return { ...state, textSeen: true };
+  }
+  const model = p.model as { role?: string } | undefined;
+  if (model?.role !== "main" || p.querySource !== "main_turn" || typeof p.requestId !== "string") return state;
+  if (kind === "model_request_started") {
+    return { pending: [...new Set([...state.pending, p.requestId])], replyComplete: false, textSeen: false };
+  }
+  if (kind === "model_request_completed" && state.pending.includes(p.requestId)) {
+    return { pending: state.pending.filter(id => id !== p.requestId), textSeen: state.textSeen,
+      replyComplete: state.textSeen && ["stop", "end_turn"].includes(String(p.finishReason)) };
+  }
+  return state;
+}
+export function collectionDecision(s: { now: number; started: number; deadline: number; maxMs: number;
+  count: number; maxEvents: number; lastEvent: number; quietMs: number; toolQuietMs: number;
+  toolInFlight: boolean; modelInFlight: boolean; replyComplete: boolean; error: boolean }): RunOutcome | null {
+  if (s.error) return "error";
+  if (s.deadline && s.now >= s.deadline) return "budget";
+  if (s.now - s.started >= s.maxMs) return s.count ? "collection-limit" : "no-events";
+  if (s.count >= s.maxEvents) return "event-limit";
+  // Silence after request start or an intermediate tool-call response is
+  // not a completed model reply. A canary exposed the old zero-exit path.
+  if (s.modelInFlight || (!s.toolInFlight && !s.replyComplete)) return null;
+  if (s.count && s.now - s.lastEvent > (s.toolInFlight ? s.toolQuietMs : s.quietMs)) {
+    return s.toolInFlight ? "cut-midtool" : "settled";
+  }
+  return null;
+}
+export function outcomeExitCode(outcome: RunOutcome): number {
+  return ({ settled: 0, budget: 4, "collection-limit": 6, "event-limit": 6,
+    "cut-midtool": 5, "no-events": 1, error: 1 })[outcome];
+}
+
+export function isSessionActivity(message: Record<string, unknown>, ownedSession: string): boolean {
+  if (message.method !== "session/event") return false;
+  const params = message.params as { sessionId?: unknown } | undefined;
+  return !params?.sessionId || params.sessionId === ownedSession;
+}
+
+export function needsRecoveryContinue(outcome: RunOutcome, lastError: string,
+  progressAfterError: boolean, used: number, maximum: number): boolean {
+  // A completed reply is a yield boundary. Generic silence never authorizes
+  // another model turn, especially when a worker has retained review debt.
+  return outcome === "settled" && !!lastError && !progressAfterError && used < maximum;
+}
+
+export function classifyRuntimeError(payload: Record<string, unknown>): "stop" | "recoverable" {
+  const full = JSON.stringify(payload).toLowerCase();
+  if (/auth|quota|permission|insufficient|cancelled|canceled|forbidden|rate.limit|1302|3103/.test(full)) return "stop";
+  if (/econnreset|econnrefused|etimedout|fetch failed|socket hang up|network (error|timeout)|connection (closed|error|dropped)/.test(full)) return "recoverable";
+  return "stop"; // An unknown failure never authorizes another billable turn.
 }
 
 const { values } = parseArgs({
@@ -154,23 +271,24 @@ const content = import.meta.main && values.unattended
 const t0 = Date.now();
 const events: { method: string; kind: string; ms: number; summary: string }[] = [];
 let lastEvent = 0;
+let activityEpoch = 0;
 let sessionId = "";
 let transportError = "";
 let continuesUsed = 0;
 let sawProgressAfterLastError = false;
 let lastErrorKind = "";
-let lastErrorText = "";
 let toolInFlight = 0;
 let stopHb: (() => void) | null = null;
 let ref: ModelRef | null = null;
-const STOP_KINDS = ["auth", "quota", "permission", "insufficient", "cancelled", "canceled", "forbidden"];
-const TRANSPORT_DROP = /fetch failed|socket hang up|econnreset|econnrefused|terminated|aborted|connection (closed|error|dropped)|network|timeout/i;
+let selected: ModelRef | null = null;
+let turnProgress: TurnProgress = { pending: [], replyComplete: false, textSeen: false };
 const deadlineMs = Number(values["max-run-min"]) > 0
-  ? Date.now() + Number(values["max-run-min"]) * 60_000
+  ? t0 + Number(values["max-run-min"]) * 60_000
   : 0;
 const backoffMs = (n: number) => (30 * 2 ** n + Math.floor(Math.random() * 10)) * 1000;
 
-const sv = new AppServer({
+let sv: AppServer;
+if (import.meta.main) sv = new AppServer({
   onNotification: (m: Record<string, unknown>) => {
     const method = String(m.method);
     let kind = "";
@@ -186,10 +304,12 @@ const sv = new AppServer({
     // mirrors out-numbered session events 19k vs ~700 and hit the max-events
     // cap at ~12min, exiting the collector mid-generation; the sticky tool
     // flag then misbilled the healthy session as cut-midtool. Telemetry
-    // updates liveness (lastEvent) but is NOT mirrored into the transcript
-    // and does NOT count toward the cap.
+    // must not extend the work clock: unrelated telemetry can continue after
+    // a final reply and otherwise occupies the worker slot until timeout.
+    if (!isSessionActivity(m, sessionId)) return;
     lastEvent = Date.now();
-    if (method !== "session/event") return;
+    activityEpoch++;
+    turnProgress = observeTurn(turnProgress, ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>);
     events.push({ method, kind, ms: Date.now() - t0, summary });
     // Tool-in-flight tracking (trial finding #5, T-036): a long tool call
     // (measured: a 300s `timeout 300 tb mail fetch`) streams nothing and the
@@ -204,13 +324,12 @@ const sv = new AppServer({
     } else if (/end|stop|complete|idle/.test(kindLow)) {
       toolInFlight = 0;
     }
-    if (kind.includes("error")) {
-      const low = summary.toLowerCase();
-      if (STOP_KINDS.some((k) => low.includes(k))) {
-        transportError = summary; // stop-class: report, never steer
+    if (kindLow.includes("error")) {
+      const payload = ((m.params as Record<string, unknown>)?.payload ?? {}) as Record<string, unknown>;
+      if (classifyRuntimeError(payload) === "stop") {
+        transportError = "stop-or-unclassified:" + kind;
       } else {
         lastErrorKind = kind;
-        lastErrorText = summary;
         sawProgressAfterLastError = false;
       }
     } else if (kind === "text_delta" || kind.includes("tool")) {
@@ -239,7 +358,7 @@ const sv = new AppServer({
   },
 });
 
-function writeTranscript(outcome: string) {
+function writeTranscript(outcome: RunOutcome) {
   stopHb?.();
   stopHb = null;
   const elapsedSec = Number(((Date.now() - t0) / 1000).toFixed(1));
@@ -247,7 +366,14 @@ function writeTranscript(outcome: string) {
   mkdirSync(dirname(outPath), { recursive: true }); // --out parent may not exist on a fresh host
   writeFileSync(outPath, JSON.stringify({
     sessionId,
-    model: ref ? `${ref.providerId}/${ref.modelId}@${ref.options?.reasoningLevel}` : "(config default)",
+    model: selected ? `${selected.providerId}/${selected.modelId}@${selected.options?.reasoningLevel}` : "unverified",
+    requestedModel: ref,
+    selectedModel: selected,
+    completionVerified: false, // quiet is transport settlement, not editor/task acceptance
+    nativeReplyComplete: turnProgress.replyComplete,
+    nativeRequestsPending: turnProgress.pending.length,
+    processLiveness: "unverified", // closing this app-server does not prove a surviving worker
+    transportError,
     outcome,
     continuesUsed,
     lastErrorKind,
@@ -271,27 +397,18 @@ async function main() {
     mode: "build",
     persistence: "immediate",
   };
-  let created: Record<string, unknown>;
-  try {
-    created = await createSession(sv, createParams, ref);
-  } catch (e) {
-    const errText = String(e instanceof Error ? e.message : e);
-    // GLM-5.3 full is start-plan-only: a plan-bucket refusal falls over to
-    // Flash max (owner law 2026-10-24) on a FRESH session — the original
-    // create never opened a billable turn.
-    const alt = ref ? fallbackOnQuotaRefusal(ref, errText) : null;
-    if (!alt) throw e;
-    console.log(`zt-run: plan refusal on ${ref!.modelId} — auto-switching to ${alt.modelId} (max): ${errText.slice(0, 120)}`);
-    ref = alt;
-    created = await createSession(sv, createParams, alt);
-  }
+  const created = await createSession(sv, createParams, ref);
   const sAny = (created.session ?? created) as unknown;
   sessionId = typeof sAny === "string"
     ? sAny
     : String((sAny as Record<string, unknown>)?.sessionId
       ?? Object.values(sAny ?? {}).find((v) => typeof v === "string" && String(v).startsWith("sess_"))
       ?? "");
-  console.log(`zt-run: session ${sessionId} model=${ref ? `${ref.providerId}/${ref.modelId}@${ref.options?.reasoningLevel}` : "(config default)"}`);
+  if (!sessionId) throw new Error("Native session id missing");
+  let requestedEffort: string | undefined;
+  try { requestedEffort = JSON.parse(String(values.model)).options?.reasoningLevel; } catch { /* plain model id: use catalog */ }
+  selected = await configureSession(sv, sessionId, created, ref, requestedEffort);
+  console.log(`zt-run: session ${sessionId} model=${selected.providerId}/${selected.modelId}@${selected.options?.reasoningLevel}`);
   // Liveness for the queue's stall sweeper (BUG-001): touch <out>.hb every 60s.
   stopHb = startHeartbeat(`${String(values.out ?? "")}.hb`);
   await sv.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous", includeSnapshot: true });
@@ -302,58 +419,64 @@ async function main() {
   const toolQuietMs = Math.max(quietMs, Number(values["tool-quiet-sec"] ?? "600") * 1000);
   const maxEvents = Number(values["max-events"]);
   const maxContinues = Number(values["continues"]);
-  while (Date.now() - t0 < maxMs && events.length < maxEvents) {
-    if (deadlineMs && Date.now() > deadlineMs) {
-      console.log(`zt-run: run budget exhausted (max-run-min ${values["max-run-min"]}) - stopping`);
-      try { await sv.request("session/stop", { sessionId }); } catch { /* maybe ended */ }
-      writeTranscript("budget");
-      await sv.close();
-      process.exit(4);
+  const decision = () => collectionDecision({ now: Date.now(), started: t0, deadline: deadlineMs,
+    maxMs, count: events.length, maxEvents, lastEvent, quietMs, toolQuietMs,
+    toolInFlight: toolInFlight > 0, modelInFlight: turnProgress.pending.length > 0,
+    replyComplete: turnProgress.replyComplete, error: !!transportError });
+  let outcome: RunOutcome;
+  while (true) {
+    const stop = decision();
+    if (!stop) { await new Promise((r) => setTimeout(r, 5000)); continue; }
+    if (stop === "settled") {
+      // Confirm the owning runtime is idle; closing the client during an
+      // active generation or tool is not successful transport settlement.
+      const observedEpoch = activityEpoch;
+      const snapshot = await sv.request("session/read", { sessionId }, 10000) as Snapshot;
+      const afterRead = decision();
+      if (afterRead && afterRead !== "settled") { outcome = afterRead; break; }
+      if (!afterRead || activityEpoch !== observedEpoch) continue;
+      const status = (snapshot as { session?: { status?: string } }).session?.status;
+      if (status !== "idle") { await new Promise((r) => setTimeout(r, 5000)); continue; }
     }
-    await new Promise((r) => setTimeout(r, 5000));
-    // While a tool call is in flight, silence is EXPECTED (long ssh/build
-    // calls): extend the window instead of cutting a live session.
-    const effectiveQuiet = toolInFlight > 0 ? Math.max(quietMs, toolQuietMs) : quietMs;
-    const silent = events.length > 0 && Date.now() - lastEvent > effectiveQuiet;
-    if (!silent) continue;
-    if (transportError) break; // stop-class failure: report honestly
-    if (continuesUsed < maxContinues) {
+    if (needsRecoveryContinue(stop, lastErrorKind, sawProgressAfterLastError,
+                              continuesUsed, maxContinues)) {
       const wait = backoffMs(continuesUsed);
-      const drop = TRANSPORT_DROP.test(`${transportError} ${lastErrorText}`);
-      console.log(`zt-run: ${drop ? "resilient " : ""}continue-steer #${continuesUsed + 1} after ${Math.round(wait / 1000)}s (lastError=${lastErrorKind || "silence"}${drop ? " transport drop" : ""})`);
+      console.log(`zt-run: continue-steer #${continuesUsed + 1} after ${Math.round(wait / 1000)}s (lastError=${lastErrorKind || "silence"})`);
       await new Promise((r) => setTimeout(r, wait));
+      const afterWait = decision();
+      if (afterWait && afterWait !== "settled" && afterWait !== "cut-midtool") { outcome = afterWait; break; }
+      if (!afterWait) continue; // progress arrived while waiting
+      if (!needsRecoveryContinue(afterWait, lastErrorKind, sawProgressAfterLastError,
+                                 continuesUsed, maxContinues)) continue;
+      // The idle observation made before the backoff is no longer current.
+      const recoveryEpoch = activityEpoch;
+      const current = await sv.request("session/read", { sessionId }, 10000) as Snapshot;
+      const currentDecision = decision();
+      if (currentDecision && currentDecision !== "settled" && currentDecision !== "cut-midtool") {
+        outcome = currentDecision; break;
+      }
+      if (!currentDecision || activityEpoch !== recoveryEpoch
+          || (current as { session?: { status?: string } }).session?.status !== "idle"
+          || !needsRecoveryContinue(currentDecision, lastErrorKind,
+                                    sawProgressAfterLastError, continuesUsed, maxContinues)) continue;
       await sv.request("session/send", { sessionId, content: "Continue from where you stopped. Complete the task fully." });
       continuesUsed++;
       lastEvent = Date.now();
       continue;
     }
-    break; // settled (or continue budget exhausted)
+    outcome = stop === "settled" && lastErrorKind && !sawProgressAfterLastError ? "error" : stop;
+    break;
   }
-  if (toolInFlight > 0) {
-    // NEVER kill a live tool call and bill it as done: leave the session
-    // alive (resumable in the TUI / by the next continue), report honestly.
-    // Exit 5 (distinct from the budget 4): the queue must not mistake a
-    // mid-tool cut for a peak-boundary budget stop — measured 2026-10-24:
-    // the conflation re-dispatched big dreams every 5 minutes on a no-peak
-    // day, each with a fresh session redoing hours of work.
-    writeTranscript("cut-midtool");
-    await sv.close();
-    console.log(`zt-run: cut while tool call in flight (silent >${Math.round(toolQuietMs / 1000)}s) — session ${sessionId} left RUNNING for resume/steer`);
-    process.exit(5);
-  }
-  writeTranscript("settled");
-  try { await sv.request("session/stop", { sessionId }); } catch { /* maybe ended */ }
+  writeTranscript(outcome);
+  try { await sv.request("session/stop", { sessionId }); } catch { /* liveness remains unverified */ }
   await sv.close();
-  if (events.length === 0 && transportError) {
-    console.error(`zt-run: no events captured; backend said: ${transportError}`);
-    process.exit(1);
-  }
+  process.exitCode = outcomeExitCode(outcome);
 }
 
 if (import.meta.main) main().catch(async (e) => {
   console.error(`FATAL: ${e instanceof Error ? e.message : e}`);
-  stopHb?.();
-  stopHb = null;
+  transportError = String(e instanceof Error ? e.message : e);
+  writeTranscript("error");
   try { if (sessionId) await sv.request("session/stop", { sessionId }); } catch { /* noop */ }
   await sv.close();
   process.exit(1);
