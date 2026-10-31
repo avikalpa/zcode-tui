@@ -5,7 +5,7 @@
 // and the small keyboard state machines that make those surfaces feel like one
 // TUI. The surfaces follow the OpenCode reference UI (surfaces, spacing and
 // status grammar measured against its published TUI components), not its code.
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions, usePaste } from "@opentui/react";
 import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
 import { Toast, useToast } from "./toast";
@@ -54,6 +54,7 @@ import { ExplorationGroup, SplitBorder, ToolPart } from "./session/tool-parts";
 import { groupExplorationRows } from "./session/exploration";
 import { ThinkingBlock, appendThinking, completeThinking, thinkingDuration, nextThinkingMode, type ThinkingPart, type ThinkingMode } from "./session/thinking";
 import { createModelPreferenceRepository, modelKey, type UiState } from "./session/model-preference";
+import { TurnUsageRow, turnUsageRows, type TurnTokens, type UsageModel } from "./turn-usage";
 import { SessionTabsStrip, type SessionTab, type SessionTabStatus } from "./session/session-tabs";
 import {
   closeSessionTab,
@@ -255,6 +256,11 @@ export interface TurnMessage {
   // v2.0.8 counts reasoning tokens in the throughput numerator (upstream
   // rows.ts); our payload takes the field when one ever carries it.
   reasoningTokens?: number;
+  // rows.ts turn-usage voice: the per-step token counts (info.tokens) and
+  // the provider/model identity the cache-reuse law compares (usageModel —
+  // `model` above stays the footer display string).
+  tokens?: TurnTokens;
+  usageModel?: UsageModel;
   // Flat text remains the transcript-export voice; parts retain disclosure
   // boundaries and reasoning-only timestamps for presentation.
   thinking?: string;
@@ -882,6 +888,35 @@ function errorMessageText(error: unknown): string | undefined {
   return text && text !== "[object Object]" ? text : undefined;
 }
 
+// The payload's info.tokens (verified against a real session/resume dump
+// 2026-10-26): {input, output, reasoning, cache:{read, write}}. Numbers
+// sanitize to 0 so a malformed field can never NaN the usage sums.
+function tokenInfoOf(raw: unknown): TurnTokens | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  const cache = (record.cache && typeof record.cache === "object" ? record.cache : {}) as Record<string, unknown>;
+  return {
+    input: num(record.input),
+    output: num(record.output),
+    reasoning: num(record.reasoning),
+    cache: { read: num(cache.read), write: num(cache.write) },
+  };
+}
+
+// The turn-usage cache-reuse identity (rows.ts cacheReuseDrop compares
+// provider/model/variant). The reference voice is {providerID, id, variant};
+// the zcode payload carries {providerId, modelId} — both extract.
+function usageModelOf(raw: unknown): UsageModel | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const providerId = record.providerId ?? record.providerID;
+  const modelId = record.modelId ?? record.id;
+  if (typeof providerId !== "string" || typeof modelId !== "string") return undefined;
+  const variant = record.variant;
+  return { providerId, modelId, ...(typeof variant === "string" ? { variant } : {}) };
+}
+
 // The retry attempt block of the assistant info (AssistantRetry reads
 // retry.attempt / retry.at / retry.error.message).
 function retryOf(retry: unknown): TurnMessage["retry"] {
@@ -985,6 +1020,8 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
     retry: retryOf(info.retry),
     finish: typeof info.finish === "string" ? info.finish : undefined,
     completedAt: typeof infoTime.completed === "number" && Number.isFinite(infoTime.completed) ? infoTime.completed : undefined,
+    tokens: tokenInfoOf(info.tokens),
+    usageModel: usageModelOf(info.model),
   }];
   out.push(...toolRows);
   return out;
@@ -1609,6 +1646,8 @@ export function App({
   // Persisted in state.json; diff wrapping rides DiffPreferences.wrap.
   const [animations, setAnimations] = useState(uiState.current.animations);
   const [fileContext, setFileContext] = useState(uiState.current.fileContext);
+  // The v2 config.debug.turn_tokens gate for the per-turn token usage rows.
+  const [turnTokens, setTurnTokens] = useState<UiState["turnTokens"]>(uiState.current.turnTokens);
   // v2 home.footer status row (0.6.26): the MCP ⊙ count. Fetched on boot
   // and on every return home; the plugins-failed half is omitted (no
   // plugins plane in this TUI).
@@ -2336,6 +2375,17 @@ export function App({
     setAnimations(next);
     uiState.current = preferences.update(() => ({ animations: next }));
     flashStatus(next ? "animations enabled" : "animations disabled");
+  };
+
+  // The v2 debug.turn_tokens cycle (config/index.tsx 226-230): off → on →
+  // verbose. The reference toggles it from its DevTools bar (two Actions);
+  // ours is one settings row covering the same state space.
+  const cycleTurnTokens = (dir: 1 | -1) => {
+    const values: UiState["turnTokens"][] = [false, true, "verbose"];
+    const next = values[(values.indexOf(turnTokens) + dir + values.length) % values.length] as UiState["turnTokens"];
+    setTurnTokens(next);
+    uiState.current = preferences.update(() => ({ turnTokens: next }));
+    flashStatus(`turn token usage → ${next === false ? "off" : next === true ? "on" : "verbose"}`);
   };
 
   // opencode app.toggle.file_context (v2 config.prompt.editor): gates the
@@ -4137,6 +4187,18 @@ function DiffHelpDialog({ C, onClose, width, height }: { C: ThemeTokens; onClose
         },
       },
       { id: "thinking", title: "Thinking", group: "Session", hint: "reasoning visibility", value: thinkingMode, change: () => void toggleThinking() },
+      {
+        // The v2 debug.turn_tokens gate (config/index.tsx 226-230, "Show
+        // per-turn token usage diagnostics, optionally with tool call
+        // inputs"): off → on → verbose cycling in one row. The reference
+        // surfaces the toggle in its DevTools bar, which we do not port.
+        id: "turn-tokens",
+        title: "Turn token usage",
+        group: "Debug",
+        hint: "per-turn token diagnostics · tool call inputs",
+        value: turnTokens === false ? "off" : turnTokens === true ? "on" : "verbose",
+        change: cycleTurnTokens,
+      },
       { id: "sidebar", title: "Sidebar", group: "Session", hint: "the session side panel", value: sidebarOpen ? "shown" : "hidden", change: () => setSidebarOpen((v) => !v) },
       { id: "mode", title: "Mode", group: "Session", hint: "agent mode", value: mode, change: (dir) => void cycleMode(dir) },
       { id: "effort", title: "Effort", group: "Session", hint: "reasoning effort", value: effort, change: (dir) => cycleEffort(dir) },
@@ -4488,6 +4550,10 @@ footerHints={[
 
   const visibleEnd = windowEnd ?? msgs.length;
   const visibleMsgs = msgs.slice(Math.max(0, visibleEnd - SCROLL_WINDOW), visibleEnd);
+  // rows.ts turn-usage projection: computed over the WHOLE history (the
+  // reference reduces every message, so the cross-turn cache baseline
+  // spans scrolled-out turns) and rendered only when the debug gate is on.
+  const usageRows = turnTokens === false ? undefined : turnUsageRows(msgs);
   return (
     <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
       {view === "session" && tabs.length > 0 ? (
@@ -4529,18 +4595,33 @@ footerHints={[
             ) : null}
             {groupExplorationRows(visibleMsgs).map((row, index, rows) =>
               row.kind === "message" ? (
-                <MessageView
-                  key={`${row.m.messageId ?? index}-${row.m.role}`}
-                  m={row.m}
-                  running={running}
-                  thinkingMode={thinkingMode}
-                  C={C}
-                  mdStyle={mdStyle}
-                  isTail={index === rows.length - 1}
-                  width={dims.width}
-                  toolsExpanded={toolsExpanded}
-                  spinnerChar={spinner}
-                />
+                <Fragment key={`${row.m.messageId ?? index}-${row.m.role}`}>
+                  <MessageView
+                    m={row.m}
+                    running={running}
+                    thinkingMode={thinkingMode}
+                    C={C}
+                    mdStyle={mdStyle}
+                    isTail={index === rows.length - 1}
+                    width={dims.width}
+                    toolsExpanded={toolsExpanded}
+                    spinnerChar={spinner}
+                  />
+                  {(() => {
+                    // The turn-usage row rides the terminal step's
+                    // SessionRowView (marginTop 1 = our paddingTop 1 block);
+                    // when the terminal step's tool rows trail it, the row
+                    // anchors on the last trailing tool row instead so the
+                    // usage renders after the whole turn.
+                    const anchor = row.m.role === "tool" ? row.m.toolCallId : row.m.messageId;
+                    const usage = anchor ? usageRows?.get(anchor) : undefined;
+                    return usage ? (
+                      <box style={{ paddingTop: 1, flexShrink: 0 }}>
+                        <TurnUsageRow usage={usage} C={C} verbose={turnTokens === "verbose"} />
+                      </box>
+                    ) : null;
+                  })()}
+                </Fragment>
               ) : (
                 <box
                   key={`expl-${row.tools[0]?.toolCallId ?? index}`}

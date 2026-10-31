@@ -36,6 +36,11 @@ export type UiState = {
   // color-mode lock ("dark"|"light"|"system"; null = never set — an unset
   // or "system" mode is an unlocked mode).
   theme: { name: string | null; mode: string | null };
+  // The v2 config.debug.turn_tokens voice (config/index.tsx 226-230):
+  // false hides the per-turn token usage rows, true shows them, "verbose"
+  // adds the tool call inputs under each expanded step. The reference
+  // toggles it in its DevTools bar; ours rides the settings dialog.
+  turnTokens: boolean | "verbose";
 };
 
 const EMPTY: UiState = {
@@ -48,6 +53,7 @@ const EMPTY: UiState = {
   thinking: "hide",
   paste: "fold",
   theme: { name: null, mode: null },
+  turnTokens: false,
 };
 
 export function modelKey(model: ModelKey): string {
@@ -100,6 +106,7 @@ function decode(raw: unknown): UiState {
       fileContext: typeof obj.fileContext === "boolean" ? obj.fileContext : true,
       thinking: obj.thinking === "show" ? "show" : "hide",
       paste: obj.paste === "full" ? "full" : "fold",
+      turnTokens: obj.turnTokens === "verbose" || obj.turnTokens === true ? obj.turnTokens : false,
       theme: (() => {
         const raw = (obj.theme && typeof obj.theme === "object" ? obj.theme : {}) as Record<string, unknown>;
         return {
