@@ -1047,3 +1047,41 @@ upstream when it releases) — continue until this file's Remaining is empty
   the sitting-8 spinner law, and an m literal missing the tool field —
   superseded by sitting-10-unit3-red2.log), green after. Full suite
   334/334 across 44 files, typecheck exit 0, live smoke exit 0.
+
+- Unit 18 (sitting 11): completed turns take the reference turn-usage row
+  law (routes/session/rows.ts turn-usage flush + cacheReuseDrop +
+  hasTokenUsage/tokenTotal, routes/session/index.tsx TurnTokenUsage
+  1484-1628, pinned v2ref). partsToTurns extracts info.tokens and the
+  usage model identity (the payload carries {input,output,reasoning,
+  cache:{read,write}} and model {providerId,modelId} — dump-verified
+  2026-10-26 and re-verified this sitting); the new src/tui/turn-usage.tsx
+  ports the legacy flush (steps accumulate until a terminal step — finish
+  terminal or errored; the flush filters to token-bearing steps; a turn
+  with none produces no row and leaves the cross-turn cache baseline
+  untouched) and renders the reference row: subdued
+  `+ Tokens: N steps · X new · Y cached · Z total` with a warning
+  ` · ! N likely cache bust(s)` suffix, hover brightens to text.default,
+  click (selection-guarded) expands the per-step table — Step padded past
+  the widest label, bold right-aligned New, two-space gutters, the
+  verbose-mode tool rows (primary key first, scalars in entry order) and
+  the per-step `! Likely cache bust: N fewer cached tokens than the
+  previous step` line. The row anchors on the terminal message id, or the
+  last trailing tool row's call id when the terminal step's own tool rows
+  trail it in the flat stream — the drafted walk dropped those tools
+  (flush cleared pending before the trailing rows arrived) and anchored
+  the usage row ahead of them; the reference order is part rows → footer
+  → usage. The gate is debug.turn_tokens (false | true | "verbose") in
+  state.json; the reference toggles it in its DevTools bar, which we do
+  not port — ours is one settings-dialog row cycling off → on → verbose
+  (ledgered adaptation). Rows compute over the whole history (the
+  reference reduces every message, so the cache baseline spans
+  scrolled-out turns) and the LIVE event path stays without rows: our
+  session/event voice carries usage {inputTokens,outputTokens,...} on the
+  stopReason event, not info.tokens — when the protocol surfaces the
+  info shape live, the same extraction lights the rows up. Fifteen law
+  tests in turn-usage.test.ts + three extraction tests and four
+  gate/frame tests in turn-usage-frame.test.tsx; 5 red against parent
+  e57d354 via a targeted stash of app.tsx + model-preference.ts
+  (behavioral: missing extraction + no gated row; the negative control
+  passes; log /tmp/zq-ux-parity/sitting-11-red.log), green after. Full
+  suite 361/361 across 46 files, typecheck exit 0, live smoke exit 0.
