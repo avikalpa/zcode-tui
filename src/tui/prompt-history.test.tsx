@@ -59,7 +59,7 @@ describe("production prompt-history reference interaction", () => {
     const h = harness(dir);
     const s = await h.mount();
     try {
-      await s.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await s.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await s.mockInput.pasteBracketedText(FOLDED); });
       await s.waitForFrame((f) => f.includes(LABEL));
       await act(async () => { await s.mockInput.pressKeys(["\r"]); });
@@ -95,7 +95,7 @@ describe("production prompt-history reference interaction", () => {
     const h = harness(dir);
     const s = await h.mount();
     try {
-      await s.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await s.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await s.mockInput.pasteBracketedText(shot); });
       await s.waitForFrame((f) => f.includes("[Image 1]"));
       await act(async () => { await s.mockInput.pressKeys(["\r"]); });
@@ -128,7 +128,7 @@ describe("production prompt-history reference interaction", () => {
     const h1 = harness(dir);
     const s1 = await h1.mount();
     try {
-      await s1.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await s1.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await s1.mockInput.pasteBracketedText(FOLDED); });
       await s1.waitForFrame((f) => f.includes(LABEL));
       await act(async () => { await s1.mockInput.pressKeys(["\r"]); });
@@ -143,7 +143,7 @@ describe("production prompt-history reference interaction", () => {
     const h2 = harness(dir);
     const s2 = await h2.mount();
     try {
-      await s2.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await s2.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await s2.mockInput.pressKeys(["\x1b[A"]); });
       await s2.waitForFrame((f) => f.includes(LABEL));
       await act(async () => { await s2.mockInput.pressKeys(["\r"]); });

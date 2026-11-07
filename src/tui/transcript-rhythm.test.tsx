@@ -31,7 +31,7 @@ async function transcript(width = 100) {
     <App client={client} preferences={preferences} resumeId="fixture-rhythm" onQuit={() => {}} />,
     { width, height: 30 },
   );
-  await setup.waitForFrame((f) => f.includes("Ask anything"));
+  await setup.waitForFrame((f) => f.includes("Build ·"));
   const keys = async (values: string[]) => {
     await act(async () => { await setup.mockInput.pressKeys(values); });
     await setup.renderOnce();
@@ -87,7 +87,7 @@ describe("production transcript vertical rhythm", () => {
     try {
       await s.keys([..."run the fixture", "\r"]);
       await s.pushEvent({ content: "Fixture done.", stopReason: "end_turn" });
-      const frame = await s.waitForFrame((f) => f.includes("Fixture done.") && f.includes("Build"));
+      const frame = await s.waitForFrame((f) => f.includes("Fixture done.") && f.includes("Build ·"));
       expect(blanksBetween(frame, "Fixture done.", "Build")).toEqual({ blanks: 1, distance: 2 });
     } finally { s.cleanup(); }
   });

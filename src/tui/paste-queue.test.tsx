@@ -50,7 +50,7 @@ async function pasteHarness(resolver: Resolver, pending: unknown[] = []) {
     <App client={client} preferences={preferences} resumeId="fixture-paste-queue" pasteResolver={resolver} onQuit={() => {}} />,
     { width: 100, height: 30 },
   );
-  await setup.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+  await setup.waitForFrame((f) => f.includes("Build ·"));
   const keys = async (values: string[]) => {
     await act(async () => { await setup.mockInput.pressKeys(values); });
     await setup.renderOnce();

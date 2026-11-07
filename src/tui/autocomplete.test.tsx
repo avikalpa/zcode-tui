@@ -54,7 +54,7 @@ describe("popup interaction (reference keybind-layer laws)", () => {
   test("unmatched slash token shows the empty message and swallows return until escape", async () => {
     const { setup, sent, cleanup } = await harness();
     try {
-      await setup.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await setup.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await setup.mockInput.pressKeys([..." /nosuch".trim().split("")]); });
       // The burst coalescer flushes on a real 8ms timer; give it wall clock.
       await act(async () => { await new Promise((r) => setTimeout(r, 15)); });
@@ -83,7 +83,7 @@ describe("popup interaction (reference keybind-layer laws)", () => {
   test("mid-text slash never opens the popup; the draft submits as a prompt", async () => {
     const { setup, sent, cleanup } = await harness();
     try {
-      await setup.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await setup.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await setup.mockInput.pressKeys([..."run bin/ses"]); });
       await setup.waitForFrame((f) => f.includes("run bin/ses"));
       // "ses" after a non-whitespace "/" is not a trigger — no command rows.
@@ -101,7 +101,7 @@ describe("popup interaction (reference keybind-layer laws)", () => {
   test("the row window reveals at the edges and wraps, never recenters", async () => {
     const { setup, cleanup } = await harness();
     try {
-      await setup.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await setup.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await setup.mockInput.pressKeys(["/"]); });
       await act(async () => { await new Promise((r) => setTimeout(r, 15)); });
       await setup.waitForFrame((f) => f.includes("┃ /agents"), { maxPasses: 40 });

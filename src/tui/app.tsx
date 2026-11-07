@@ -1242,11 +1242,11 @@ function Composer({
     <box style={{ width, flexDirection: "column", flexShrink: 0 }}>
       <box style={{ flexDirection: "row", flexShrink: 0 }}>
         <box style={{ width: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface }}>
-          {/* The reference edge is a thin uniform bar, not a painted cell:
-              one left-half-block glyph per composer row (top pad, input rows,
-              status pad, status row), ending with the box — nothing below. */}
+          {/* The reference composer edge (component/prompt/index.tsx 1650-1656):
+              a left SplitBorder in the agent-tinted highlight colour — `┃` per
+              body row — and the strip below opens with its `╹` corner. */}
           {Array.from({ length: inputRows.length + 3 }, (_, accentRow) => (
-            <text key={accentRow} content="▌" fg={accent} />
+            <text key={accentRow} content="┃" fg={accent} />
           ))}
         </box>
         <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
@@ -1272,7 +1272,11 @@ function Composer({
         </box>
       </box>
       <box style={{ flexDirection: "row", flexShrink: 0 }}>
-        <box style={{ width: 1, flexShrink: 0 }} />
+        {/* The reference strip under the composer body (prompt/index.tsx
+            1846-1864): a 1-row box whose left border renders the ╹ corner in
+            the highlight colour, wrapping a bottom border of ▀ in the
+            surface colour. */}
+        <text content="╹" fg={accent} />
         <text content={"▀".repeat(underline)} fg={C.surface} />
       </box>
     </box>
@@ -4554,15 +4558,16 @@ footerHints={[
   // v2 imagePreviewHeight: clamp(4, 8, quarter of the terminal rows).
   const stripHeight = Math.max(4, Math.min(8, Math.floor(dims.height / 4)));
   const PLACEHOLDERS = [
-    'Ask anything…  "What is the tech stack of this project?"',
-    'Ask anything…  "How do I run the test suite?"',
-    'Ask anything…  "Find where authentication is configured"',
-    'Ask anything…  "Explain this repository layout"',
-    'Ask anything…  "Fix the failing build"',
+    'Ask anything… "What is the tech stack of this project?"',
+    'Ask anything… "How do I run the test suite?"',
+    'Ask anything… "Find where authentication is configured"',
+    'Ask anything… "Explain this repository layout"',
+    'Ask anything… "Fix the failing build"',
   ];
-  const promptPlaceholder = view === "home"
-    ? PLACEHOLDERS[placeholderTick % PLACEHOLDERS.length]
-    : activeId ? "Ask anything…" : "a new session · type a prompt";
+  // The session-route <Prompt> takes NO placeholders prop (routes/session/
+  // index.tsx 1403-1416) — only home carries the quoted list — so a session
+  // composer renders no placeholder at all.
+  const promptPlaceholder = view === "home" ? PLACEHOLDERS[placeholderTick % PLACEHOLDERS.length] : "";
   const promptText = draft || promptPlaceholder;
   const providerLabel = activeModel?.providerId ?? "zai";
   const composerProps = {

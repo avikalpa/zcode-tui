@@ -26,12 +26,14 @@ export function PromptFooter({ C, width, location, running, spinner, lost, conte
   const usage = layout.usage ? context : "";
   const mcpLabel = mcp?.total ? `⊙ ${mcp.failed ? `${mcp.failed} MCP failed` : `${mcp.total} MCP`}` : "";
   const labels = [mcpLabel, usage, hints && !context ? "shift+tab agents" : "", hints ? "ctrl+p commands" : "", version ?? ""].filter(Boolean) as string[];
-  const rightWidth = labels.reduce((n, label) => n + stringWidth(label), 0) + Math.max(0, labels.length - 1) * 3;
+  // The reference hint strip is one space-between row with gap 2
+  // (component/prompt/index.tsx 1866): two cells between the hint texts.
+  const rightWidth = labels.reduce((n, label) => n + stringWidth(label), 0) + Math.max(0, labels.length - 1) * 2;
   const leftWidth = Math.max(0, width - rightWidth - (labels.length ? 2 : 0));
   const left = running ? `${spinner ?? "[⋯]"} esc interrupt` : lost ? "backend lost · r to reconnect" : truncateFilePath(location, leftWidth);
   return <box style={{ height: 1, width, flexDirection: "row", justifyContent: "space-between", gap: 2, flexShrink: 0, minWidth: 0 }}>
     <text content={left} fg={running ? C.fg : C.subtle} wrapMode="none" truncate style={{ width: leftWidth, flexShrink: 1, minWidth: 0 }} />
-    <box style={{ flexDirection: "row", gap: 3, flexShrink: 0 }}>
+    <box style={{ flexDirection: "row", gap: 2, flexShrink: 0 }}>
       {mcpLabel ? <text content={mcpLabel} fg={mcp!.failed ? C.error : C.success} wrapMode="none" /> : null}
       {usage ? <text content={usage} fg={C.subtle} wrapMode="none" /> : null}
       {hints && !context ? <text fg={C.fg} wrapMode="none">shift+tab <span fg={C.subtle}>agents</span></text> : null}

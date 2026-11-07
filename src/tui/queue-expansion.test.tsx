@@ -47,7 +47,7 @@ describe("production queued-prompt expansion interaction", () => {
       await setup.renderOnce();
     };
     try {
-      await setup.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await setup.waitForFrame((f) => f.includes("Build ·"));
       await act(async () => { await setup.mockInput.pressKeys([..."first", "\r"]); });
       await setup.renderOnce();
       expect(sent.at(-1)?.content).toBe("first");

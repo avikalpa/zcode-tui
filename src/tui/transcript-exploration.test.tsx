@@ -31,7 +31,7 @@ async function transcript(width = 100) {
     <App client={client} preferences={preferences} resumeId="fixture-expl" onQuit={() => {}} />,
     { width, height: 30 },
   );
-  await setup.waitForFrame((f) => f.includes("Ask anything"));
+  await setup.waitForFrame((f) => f.includes("Build ·"));
   const keys = async (values: string[]) => {
     await act(async () => { await setup.mockInput.pressKeys(values); });
     await setup.renderOnce();

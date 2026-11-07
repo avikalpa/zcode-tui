@@ -71,7 +71,7 @@ describe("production submit-failure rollback interaction", () => {
     const h = harness({ gateUploads: true });
     const s = await h.mount();
     try {
-      await s.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await s.waitForFrame((f) => f.includes("Build ·"));
       await composeShot(s, h.shot);
       await act(async () => { await s.mockInput.pressKeys(["\r"]); });
       await h.settle(s);
@@ -93,7 +93,7 @@ describe("production submit-failure rollback interaction", () => {
     const h = harness({ sendError: new Error("host refused") });
     const s = await h.mount();
     try {
-      await s.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await s.waitForFrame((f) => f.includes("Build ·"));
       await composeShot(s, h.shot);
       await act(async () => { await s.mockInput.pressKeys(["\r"]); });
       await h.settle(s, 60);
@@ -111,7 +111,7 @@ describe("production submit-failure rollback interaction", () => {
     const h = harness({ gateUploads: true });
     const s = await h.mount();
     try {
-      await s.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+      await s.waitForFrame((f) => f.includes("Build ·"));
       await composeShot(s, h.shot);
       await act(async () => { await s.mockInput.pressKeys(["\r"]); });
       await h.settle(s);

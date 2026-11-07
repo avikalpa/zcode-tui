@@ -25,7 +25,7 @@ async function composer(width = 100, state: Record<string, unknown> = {}) {
     onAsk: () => {}, onBackendLost: () => {},
   } as unknown as AppServer;
   const setup = await testRender(<App client={client} preferences={preferences} resumeId="fixture-composer" onQuit={() => {}} />, { width, height: 30 });
-  await setup.waitForFrame((f) => f.includes("Ask anything") && f.includes("Build"));
+  await setup.waitForFrame((f) => f.includes("Build ·"));
   const keys = async (values: string[]) => {
     await act(async () => { await setup.mockInput.pressKeys(values); });
     await setup.renderOnce();
@@ -114,7 +114,7 @@ describe("production composer reference interaction", () => {
       await act(async () => { await s.mockInput.pasteBracketedText("unexpected fixture text"); });
       // Bare Esc waits for the terminal parser's Alt-prefix timeout.
       await act(async () => { await s.mockInput.pressKeys(["\x1b"], 100); });
-      await s.waitForFrame((f) => !f.includes("Sessions") && f.includes("Ask anything"));
+      await s.waitForFrame((f) => !f.includes("Sessions"));
       await s.keys([..."intended fixture"]);
       expect(await s.send()).toBe("intended fixture");
     } finally { s.cleanup(); }

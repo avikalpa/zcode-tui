@@ -93,7 +93,7 @@ describe("zcode-tui OpenCode-shaped shell", () => {
       await setup.waitForFrame((f) => f.includes("Checking sessions list"));
       await act(async () => { await setup.mockInput.pressKeys([..."Fixing", "\r"]); });
       expect(resumed).toEqual(["sess_fixture_two"]);
-      await setup.waitForFrame((f) => f.includes("Ask anything") && !f.includes("Search"));
+      await setup.waitForFrame((f) => f.includes("Build ·") && !f.includes("Search"));
     } finally { setup.renderer.destroy(); }
   });
   test("opens the sessions picker from the front-page slash command", async () => {
