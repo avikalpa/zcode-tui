@@ -5,7 +5,7 @@
 // and the small keyboard state machines that make those surfaces feel like one
 // TUI. The surfaces follow the OpenCode reference UI (surfaces, spacing and
 // status grammar measured against its published TUI components), not its code.
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions, usePaste } from "@opentui/react";
 import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
 import { Toast, useToast } from "./toast";
@@ -261,6 +261,10 @@ export interface TurnMessage {
   // `model` above stays the footer display string).
   tokens?: TurnTokens;
   usageModel?: UsageModel;
+  // AssistantFooter model law: the catalog name when the provider/model pair
+  // is in the local catalog, else `providerId/modelId`. Only the resume path
+  // knows the provider — the live path stamps the catalog label directly.
+  providerId?: string;
   // Flat text remains the transcript-export voice; parts retain disclosure
   // boundaries and reasoning-only timestamps for presentation.
   thinking?: string;
@@ -721,6 +725,7 @@ export const MessageView = memo(function MessageView({
   toolsExpanded,
   spinnerChar,
   padTop = 1,
+  resolveModel,
 }: {
   m: TurnMessage;
   running: boolean;
@@ -734,6 +739,9 @@ export const MessageView = memo(function MessageView({
   // The reference builds one row per part (SessionRowView marginTop 1);
   // exploration-group children render as bare ToolParts with no row gap.
   padTop?: number;
+  // AssistantFooter model law: catalog name for the provider/model pair,
+  // else `providerId/modelId`. Omitted keeps the stored model string.
+  resolveModel?: (m: TurnMessage) => string;
 }) {
   if (m.role === "tool") {
     // The v2 tool row (deviation queue 1 re-port): per-tool icon + title
@@ -795,7 +803,7 @@ export const MessageView = memo(function MessageView({
   // error) or retrying — a metrics-less errored turn still renders the
   // head, just without duration/tok segments.
   const footer = (m.durationMs !== undefined || errored || retrying) && !streaming
-    ? formatTurnFooter("auto", m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, interruptedTurn)
+    ? formatTurnFooter("auto", resolveModel ? resolveModel(m) : m.model, m.durationMs, m.outputTokens, m.reasoningTokens, width, interruptedTurn)
     : null;
   // The reference builds rows from message parts, so an assistant message
   // with no parts yet contributes no SessionRowView; the submit-time
@@ -961,24 +969,41 @@ export function attachTurnMetrics(turns: TurnMessage[]): TurnMessage[] {
 export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
   const info = (m.info ?? {}) as Record<string, unknown>;
   const role = String(info.role ?? "?");
-  const model = (info.model as Record<string, unknown> | undefined)?.modelId;
+  const modelInfo = (info.model as Record<string, unknown> | undefined);
+  const model = modelInfo?.modelId;
+  const providerId = modelInfo?.providerId ?? modelInfo?.providerID;
   const infoTime = (info.time ?? {}) as Record<string, unknown>;
   const parts = Array.isArray(m.parts) ? (m.parts as Record<string, unknown>[]) : [];
-  let text = "";
-  let thinkingText = "";
-  const thinkingParts: ThinkingPart[] = [];
-  const toolRows: TurnMessage[] = [];
+  // rows.ts part projection: each part becomes its own row IN PART ORDER —
+  // reasoning, then tools, then text, footer last. The inherited build
+  // collapsed every part into one turn and emitted the tool rows AFTER it,
+  // so a resumed session rendered tools below the reply instead of between
+  // the reasoning and the reply. Consecutive non-tool parts share one
+  // segment (the live path's ThinkingBlock merge); each tool part splits.
+  type Segment = { text: string; thinking: string; thinkingParts: ThinkingPart[] };
+  const emptySegment = (): Segment => ({ text: "", thinking: "", thinkingParts: [] });
+  let segment: Segment = emptySegment();
+  const rows: TurnMessage[] = [];
+  let lastWasTool = false;
+  const timestamp = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const pushSegment = () => {
+    if (!segment.text && !segment.thinking && segment.thinkingParts.length === 0) return;
+    rows.push({
+      role,
+      text: segment.text,
+      thinking: segment.thinking || undefined,
+      thinkingParts: segment.thinkingParts.length ? segment.thinkingParts : undefined,
+      thinkingMs: thinkingDuration(segment.thinkingParts),
+      messageId: String(info.id ?? info.messageId ?? "") || undefined,
+    });
+    segment = emptySegment();
+    lastWasTool = false;
+  };
   for (const p of parts) {
     const type = String(p.type ?? "");
-    if (type === "reasoning" && typeof p.text === "string") {
-      thinkingText += (thinkingText ? "\n" : "") + p.text;
-      const time = (p.time ?? {}) as Record<string, unknown>;
-      const timestamp = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
-      thinkingParts.push({ text: p.text,
-        startedAt: timestamp(time.created ?? infoTime.created),
-        completedAt: timestamp(time.completed ?? infoTime.completed),
-      });
-    } else if (type === "tool") {
+    if (type === "tool") {
+      pushSegment();
+      lastWasTool = true;
       const state = (p.state ?? {}) as Record<string, unknown>;
       const input = (state.input ?? {}) as Record<string, unknown>;
       const summary = String(
@@ -986,7 +1011,7 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
       );
       const status = String(state.status ?? "");
       const rawError = state.error;
-      toolRows.push({
+      rows.push({
         role: "tool",
         text: summary,
         toolName: String(p.tool ?? "tool"),
@@ -1003,28 +1028,46 @@ export function partsToTurns(m: Record<string, unknown>): TurnMessage[] {
               ? rawError
               : undefined,
       });
+    } else if (type === "reasoning" && typeof p.text === "string") {
+      segment.thinking += (segment.thinking ? "\n" : "") + p.text;
+      const time = (p.time ?? {}) as Record<string, unknown>;
+      segment.thinkingParts.push({ text: p.text,
+        startedAt: timestamp(time.created ?? infoTime.created),
+        completedAt: timestamp(time.completed ?? infoTime.completed),
+      });
     } else if (typeof p.text === "string") {
-      text += p.text;
+      segment.text += p.text;
     }
   }
-  const out: TurnMessage[] = [{
+  pushSegment();
+  const identity: TurnMessage = {
     role,
-    text,
+    text: "",
     model: String(model ?? "") || undefined,
+    providerId: typeof providerId === "string" && providerId ? providerId : undefined,
     messageId: String(info.id ?? info.messageId ?? "") || undefined,
     createdAt: Number(infoTime.created ?? info.createdAt ?? info.updatedAt ?? 0) || undefined,
-    thinking: thinkingText || undefined,
-    thinkingParts: thinkingParts.length ? thinkingParts : undefined,
-    thinkingMs: thinkingDuration(thinkingParts),
     error: errorMessageText(info.error),
     retry: retryOf(info.retry),
     finish: typeof info.finish === "string" ? info.finish : undefined,
     completedAt: typeof infoTime.completed === "number" && Number.isFinite(infoTime.completed) ? infoTime.completed : undefined,
     tokens: tokenInfoOf(info.tokens),
     usageModel: usageModelOf(info.model),
-  }];
-  out.push(...toolRows);
-  return out;
+  };
+  const hasIdentity = Boolean(identity.finish || identity.completedAt !== undefined || identity.error || identity.retry);
+  if (rows.length > 0 && !lastWasTool) {
+    // The last segment closes the message: metrics and footer land here.
+    const last = rows.length - 1;
+    rows[last] = { ...identity, text: rows[last].text, thinking: rows[last].thinking, thinkingParts: rows[last].thinkingParts, thinkingMs: rows[last].thinkingMs };
+  } else if (hasIdentity || rows.length === 0) {
+    // Parts ended with tools: the assistant-footer entry follows every part
+    // row, so a footer-only segment closes the message. A message with no
+    // visible parts keeps its bare turn row — the live path streams into it
+    // (updateActiveAssistant needs the tail row), while MessageView renders
+    // nothing for a metrics-less empty turn.
+    rows.push(identity);
+  }
+  return rows;
 }
 
 function sortedThemes(): ThemeName[] {
@@ -1624,6 +1667,15 @@ export function App({
   useEffect(() => {
     modelsRef.current = models;
   }, [models]);
+  // AssistantFooter model law (routes/session/index.tsx AssistantFooter
+  // model memo): the catalog display name for the message's provider/model
+  // pair, else the reference's `providerId/id` fallback. Only the resume
+  // path carries the provider — the live path stamps the label directly.
+  const resolveModelDisplay = useCallback((m: TurnMessage): string => {
+    if (!m.providerId) return m.model ?? "";
+    const hit = modelsRef.current.find((x) => x.providerId === m.providerId && x.modelId === m.model);
+    return hit ? modelLabel(hit) : `${m.providerId}/${m.model ?? ""}`;
+  }, []);
   // The UX-state store (opencode model.json pattern) — loaded once, saved on
   // every model/effort choice through the v2.0.8 repository (lock-merged
   // writes + live cross-client subscribe).
@@ -4606,6 +4658,7 @@ footerHints={[
                     width={dims.width}
                     toolsExpanded={toolsExpanded}
                     spinnerChar={spinner}
+                    resolveModel={resolveModelDisplay}
                   />
                   {(() => {
                     // The turn-usage row rides the terminal step's

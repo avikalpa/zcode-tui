@@ -126,7 +126,16 @@ export function turnUsageRows(turns: TurnMessage[]): Map<string, TurnUsage> {
       continue;
     }
     register();
-    pending.push({ message: turn, tools: [] });
+    const open = pending.at(-1);
+    if (open && turn.messageId && open.message.messageId === turn.messageId) {
+      // partsToTurns splits one resumed message into ordered segments; the
+      // identity-bearing tail upgrades the open entry instead of opening a
+      // second step — one message is one usage step (rows.ts steps are
+      // messages, and the intermediate segments carry no tokens anyway).
+      pending[pending.length - 1] = { message: turn, tools: open.tools };
+    } else {
+      pending.push({ message: turn, tools: [] });
+    }
     if (!isTerminalStep(turn)) continue;
     const steps: UsageStep[] = [];
     let cacheCursor = previousTurnCache;
