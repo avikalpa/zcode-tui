@@ -1085,3 +1085,51 @@ upstream when it releases) — continue until this file's Remaining is empty
   (behavioral: missing extraction + no gated row; the negative control
   passes; log /tmp/zq-ux-parity/sitting-11-red.log), green after. Full
   suite 361/361 across 46 files, typecheck exit 0, live smoke exit 0.
+
+- Unit 19 (sitting 12): resumed messages take the reference part-row
+  projection (routes/session/rows.ts reduce: one row per part IN PART
+  ORDER — reasoning, tools, text — with the assistant-footer entry after
+  every part row; AssistantFooter model memo for the display string).
+  Ground truth by the sitting-7 method upgraded to whole sessions: the
+  reference's own full-app harness (test/session-home.test.tsx recipe —
+  fake fetch server + createTestRenderer + captureCharFrame at 100x30)
+  rendered a scripted session, and the identical fixture on our side made
+  the transcript region BYTE-IDENTICAL after the fix (frames kept at
+  /tmp/zq-ux-parity/ref-session-100x30.txt and our-session-100x30.txt;
+  the only residual diff is our tab-strip header, a unit-2 chrome
+  leftover). The inherited build collapsed every part into one turn and
+  emitted tool rows after it, so a resumed session rendered tools below
+  the reply, lost the inter-part rhythm (no blank between the reasoning
+  row and the reply), and showed the bare model id. Now: partsToTurns
+  splits a message into ordered segments at tool parts (consecutive
+  non-tool parts share one segment, the live path's ThinkingBlock merge);
+  the terminal identity (finish/completedAt/tokens/usageModel/error/
+  retry/providerId) rides the last segment; parts ending with tools close
+  with a footer-only segment (footer after trailing rows, rows.ts order);
+  a metrics-less partless turn keeps its bare row (the live path streams
+  into it; MessageView renders nothing for it — sitting-5 law preserved).
+  The footer model reads the catalog name for the provider/model pair,
+  else the reference's `providerId/modelId` fallback (TurnMessage
+  providerId + a resolveModel prop; the live path stamps the label
+  directly and passes through unchanged). The turn-usage flush merges
+  same-messageId segments so one message stays one usage step and the
+  split's tools are not lost (turn-usage.tsx pending-upgrade branch).
+  Verified NOT a divergence: fenced code blocks rendered blank in early
+  probes — the tree-sitter worker parses asynchronously and the probe
+  frame was captured before the grammar warmed; with the wait, the fence
+  renders identically on both sides (probe evidence
+  /tmp/zq-ux-parity/fence-wait.txt). Five projection/flush tests + one
+  App frame test in src/tui/resume-parts.test.tsx; 5 red against parent
+  a11f4e1 via a targeted stash of app.tsx + turn-usage.tsx (behavioral:
+  part order, identity placement, flush steps, frame geometry; the
+  negative control passes; log /tmp/zq-ux-parity/sitting-12-red.log),
+  green after. Full suite 367/367 across 47 files, typecheck exit 0,
+  live smoke exit 0 (home composer + ⊙ 5 MCP). Chrome divergences found
+  by the same comparison and deferred to the next unit: composer wall
+  glyph (ours ▌, reference ┃ with ╹ bottom-left corner + the ╹▀▀▀ strip
+  row), session-view placeholder (reference session Prompt takes NO
+  placeholders prop — only home has the quoted list; ours shows the bare
+  "Ask anything…"), footer hint gap (reference gap 2 — two spaces; ours
+  three), location label (reference `directory:branch` from vcs; ours
+  directory only), home placeholder separator (reference one space after
+  the ellipsis; ours two).
