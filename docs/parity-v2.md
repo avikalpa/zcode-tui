@@ -1272,3 +1272,40 @@ upstream when it releases) — continue until this file's Remaining is empty
   space-above-anchor clamp (sitting-9 design note); picker fuzzy edge
   cases beyond sitting 4 unit 2; WebSearch "via provider" + Question
   answered block (protocol data gaps).
+
+- Unit 23 (sitting 14): the color layer of the ground-truth-frame method —
+  STYLED span captures on both sides (captureSpans: per-cell RGBA +
+  attributes; same @opentui test-renderer). Reference ground truth: the
+  full-app harness rendered home at 100x30 (probe test file added untracked
+  to packages/tui and removed after — checkout verified clean; spans kept
+  at /tmp/zq-ux-parity/ref-spans-home.txt). Findings: (1) the PALETTE is
+  already parity — THEMES.opencode is the reference's own numbers verbatim
+  (bg #0a0a0a, body #1e1e1e, border #484848, default #eeeeee, subdued
+  #808080, warning #f5a742, success #7fd88f) and design/00-brand.md keeps
+  the zcode theme tokens as brand for the other arms, so hex-swapping is
+  NOT the unit; (2) the COLOR ROLE laws all match — wall + agent slot on
+  the accent (C.user, exactly the reference categorical[0][200] agent
+  colour under the opencode palette), subdued separators/provider/
+  location/words, default model text and hint keys, warning+BOLD variant,
+  strip ▀ extending the composer body surface over the base background,
+  bottom strip success ⊙ with default count and subdued /mcps + version;
+  (3) the reference wall follows `agentColor ?? border.default` with a
+  muted→border/shell→action.selected override — our modeAccent adaptation
+  (muted→C.border analogue) is the ledgered sitting-13 agent-slot
+  adaptation, re-confirmed by spans; (4) reference fade-in alphas pin at 0
+  under animations:false (metadata invisible) — the steady-state capture
+  needs animations on, folded into the probe. One test in
+  src/tui/home-chrome-colors.test.tsx pins all of the roles via
+  captureSpans against the ACTIVE theme resolved the way the App resolves
+  it for a fresh repository (legacy flat file → default), so it holds
+  under any enrolled theme; red against parent 4688804 via checkout of
+  the parent's app.tsx + prompt-footer.tsx (the parent painted the whole
+  ⊙ label in success and the version in faint inside the prompt footer
+  row; log /tmp/zq-ux-parity/sitting-14-colors-red.log), green after.
+  Suite 390/390 across 52 files (one run showed the known cross-file
+  flake family on four untouched files — all green in isolation and on
+  the full re-run; sitting-5 precedent), tsc exit 0, live smoke exit 0.
+  The color-parity leftover CLOSES as: palette verbatim + roles pinned;
+  remaining: popup space-above-anchor clamp (sitting-9 design note);
+  picker fuzzy edge cases beyond sitting 4 unit 2; WebSearch "via
+  provider" + Question answered block (protocol data gaps).
