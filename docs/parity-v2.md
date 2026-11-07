@@ -1133,3 +1133,33 @@ upstream when it releases) — continue until this file's Remaining is empty
   three), location label (reference `directory:branch` from vcs; ours
   directory only), home placeholder separator (reference one space after
   the ellipsis; ours two).
+
+- Unit 20 (sitting 12): composer chrome takes the reference laws
+  (component/prompt/index.tsx 1650-1680, 1846-1866, 1588-1601;
+  routes/session/index.tsx 1403-1416; feature-plugins/prompt/footer.tsx
+  96-105, pinned v2ref). The session composer edge is the SplitBorder `┃`
+  in the agent-tinted highlight colour — the inherited `▌` painted-bar
+  treatment was an invented read — and the strip below the body opens on
+  the 1-row box's `╹` corner before the ▀ rule (the probe frames showed
+  `▌` rows and a bare ` ▀▀▀` row against the reference's `┃` rows and
+  `╹▀▀▀`). The session-route <Prompt> takes NO placeholders prop — only
+  home carries the quoted suggestion list — so a session composer renders
+  no placeholder at all; the inherited bare "Ask anything…" in session
+  view is gone, and the home list's `Ask anything… "example"` drops to the
+  reference's single space after the ellipsis. The footer hint strip is
+  one space-between row with gap 2: the hint texts separate with exactly
+  two cells (was three). The `directory:branch` location label was
+  verified ALREADY ours (the probe diff was a fixture artifact — the stub
+  client serves no branch). Resumed-session test waits that keyed on the
+  removed placeholder moved to the session metadata row (`Build ·`, which
+  home's `Build auto ·` cannot match); home-context waits keep the
+  quoted-placeholder needle. Four frame tests in
+  src/tui/composer-chrome.test.tsx (no session placeholder, ┃ wall + ╹▀
+  strip adjacency, two-cell hint gap, home quoted list single-spaced); all
+  4 red against parent cea026c^ via a targeted stash of app.tsx +
+  prompt-footer.tsx (log /tmp/zq-ux-parity/sitting-12-unit2-red.log),
+  green after. Full suite 371 tests across 48 files: three of five runs
+  fully green (371/371) with the known intermittent cross-file
+  dialog-focus flake (sitting-5 unit 3 precedent) on the others; the
+  flake passes in isolation and on re-run. Typecheck exit 0, live smoke
+  exit 0.
