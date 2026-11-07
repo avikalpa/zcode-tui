@@ -21,6 +21,7 @@ import { homedir, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { probe } from "./probes";
 import { Announcer, type AnnouncePhase } from "./announce";
+import { promptMetadataLayout } from "./prompt-metadata";
 import {
   formatDateHeading,
   formatContextLabel,
@@ -1165,7 +1166,7 @@ function Composer({
   model,
   provider,
   effort,
-  thinkingOff,
+  terminalWidth,
   leaderActive,
   pasteParts,
 }: {
@@ -1182,12 +1183,24 @@ function Composer({
   model: string;
   provider: string;
   effort: string;
-  thinkingOff: boolean;
+  terminalWidth: number;
   leaderActive: boolean;
   pasteParts: { start: number; end: number }[];
 }) {
   const label = modeLabel(mode);
   const accent = leaderActive ? C.border : modeAccent(mode, C);
+  // The reference metadata row (component/prompt/metadata.tsx) gates on the
+  // terminal width, not the composer width: below 44 columns the agent and
+  // provider drop; otherwise segments yield by candidate until they fit.
+  const meta = promptMetadataLayout({
+    width: Math.max(0, terminalWidth - (terminalWidth < 44 ? 9 : 13)),
+    terminalWidth,
+    agent: label.label,
+    auto: label.auto,
+    model,
+    provider,
+    variant: effort || undefined,
+  });
   const underline = Math.max(0, underlineWidth);
   const wrapWidth = Math.max(12, underline - 4);
   // The cursor is a solid block that blinks while typing. With a draft it
@@ -1261,13 +1274,36 @@ function Composer({
               {row.glyphIdx === row.segs.length ? <text content={row.glyph} fg={draft ? C.fg : C.subtle} /> : null}
             </box>
           ))}
-          <box style={{ flexDirection: "row", paddingTop: 1, flexShrink: 0 }}>
-            <text content={`${label.label} `} fg={accent} />
-            {label.auto ? <text content="auto " fg={C.subtle} /> : null}
-            <text content={`· ${model} `} fg={leaderActive ? C.subtle : C.fg} />
-            <text content={`${provider} · `} fg={C.subtle} />
-            <text content={effort} fg={C.warning} />
-            {thinkingOff ? <text content=" · thinking off" fg={C.faint} /> : null}
+          <box style={{ flexDirection: "row", paddingTop: 1, gap: 1, flexShrink: 0 }}>
+            <box style={{ flexDirection: "row", gap: 1, flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
+              {meta.agent || meta.model ? (
+                <>
+                  {meta.agent ? <text content={meta.agent} fg={accent} /> : null}
+                  {meta.auto ? <text content="auto" fg={C.subtle} /> : null}
+                  {meta.model ? (
+                    <box style={{ flexDirection: "row", gap: 1, flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
+                      {meta.agent ? <text content="·" fg={C.subtle} /> : null}
+                      <text
+                        content={meta.model}
+                        fg={leaderActive ? C.subtle : C.fg}
+                        wrapMode="none"
+                        truncate
+                        style={{ flexShrink: 1, minWidth: 0 }}
+                      />
+                      {meta.provider ? <text content={meta.provider} fg={C.subtle} wrapMode="none" style={{ flexShrink: 0 }} /> : null}
+                      {meta.variant ? (
+                        <>
+                          <text content="·" fg={C.subtle} />
+                          <text content={meta.variant} fg={C.warning} attributes={TextAttributes.BOLD} />
+                        </>
+                      ) : null}
+                    </box>
+                  ) : null}
+                </>
+              ) : (
+                <box style={{ height: 1 }} />
+              )}
+            </box>
           </box>
         </box>
       </box>
@@ -4593,7 +4629,7 @@ footerHints={[
           <box style={{ width: promptWidth, flexShrink: 0 }}>
             <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
             {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={promptWidth} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} /> : null}
-            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
+            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} terminalWidth={dims.width} leaderActive={leaderActive} pasteParts={pasteParts} />
           </box>
           <box style={{ width: promptWidth, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
             <PromptFooter C={C} width={Math.max(1, promptWidth - 2)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} mcp={mcpStatus} version={VERSION} />
@@ -4862,14 +4898,14 @@ footerHints={[
           <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={dims.width} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} />
           <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
           <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-            <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
+            <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} terminalWidth={dims.width} leaderActive={leaderActive} pasteParts={pasteParts} />
           </box>
         </box>
       ) : (
         <>
           <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
           <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
-            <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} thinkingOff={thoughtLevel === "disabled"} leaderActive={leaderActive} pasteParts={pasteParts} />
+            <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} terminalWidth={dims.width} leaderActive={leaderActive} pasteParts={pasteParts} />
           </box>
         </>
       )}

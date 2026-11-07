@@ -1163,3 +1163,55 @@ upstream when it releases) — continue until this file's Remaining is empty
   dialog-focus flake (sitting-5 unit 3 precedent) on the others; the
   flake passes in isolation and on re-run. Typecheck exit 0, live smoke
   exit 0.
+
+- Unit 21 (sitting 13): the composer metadata row takes the reference
+  PromptMetadataRow law (component/prompt/metadata.tsx, pinned v2ref),
+  pinned by GROUND-TRUTH FRAMES — the reference's own harness rendered the
+  row with agents + a variant-bearing catalog served (7 frames at
+  /tmp/zq-ux-parity/ref-meta-*.txt: auto/plain/novariant at 100x30,
+  plain-60, plain-40, autosqueeze-44, longname-50). Ported divergences
+  from the invented flat row: (1) the row is a gap-1 flex row with
+  gated segments — agent (mode accent), `auto` (subdued, the
+  autoaccept analogue), `·` separator (subdued, only beside an agent)
+  + model (default; subdued under the leader mute), provider
+  (subdued), `·` + variant (warning BOLD — the inherited effort word
+  was plain); (2) the width law — below 44 terminal columns the agent
+  and provider drop outright (the row keeps the model + variant with no
+  leading `·`), otherwise segments yield by candidate (full → drop
+  auto → provider shortened to its last " / " path → drop provider)
+  against `terminalWidth - (terminalWidth < 44 ? 9 : 13)`, then the
+  model truncates into the remaining space (never below 9 columns,
+  trailing-space ellipsis collapsed); (3) no trailing `·` when no
+  variant exists; (4) the inherited ` · thinking off` suffix is REMOVED
+  — the reference's thinking show/hide has no composer indicator, and
+  the thought-level disabled state now reads as variant-absent exactly
+  like the reference. New src/tui/prompt-metadata.ts ports the law pure
+  (promptMetadataLayout + Locale takeWidth/truncateWidth over our
+  grapheme stringWidth). Eleven law tests in src/tui/prompt-metadata.test.ts
+  re-deriving each ground-truth frame's row; four App frame tests in
+  src/tui/composer-metadata.test.tsx (wide home/session rows, 44-column
+  auto yield, 40-column agent/provider drop) — the two width tests red
+  against parent cea026c via a targeted stash of app.tsx (behavioral:
+  the old flat row ignores the width law; log
+  /tmp/zq-ux-parity/sitting-13-red.log), green after. Test-boot lesson
+  folded into the helpers: below 44 columns the metadata row is
+  identical across the resume's mode flip, so a model-word boot needle
+  resolves one render earlier than the wide `Build ·` needle — before
+  the resume's finally arms typing — and the typed fixtures then race
+  the nav surface (letters hit the `t`-themes/`b`-sidebar handlers).
+  composer.test.tsx's helper settles 30ms after the narrow needle only
+  (the wide needle still resolves late, and a blanket settle trips the
+  paste-queue changed() drop law on the boot-paste fixtures). Suite 386
+  tests across 50 files: three runs with only the known cross-file
+  dialog-focus flake (passes in isolation; sitting-5 precedent), one
+  fully green; typecheck exit 0, live smoke exit 0 (home composer +
+  the ported row live), no-TTY boot exit 0. Deviations ledgered: the
+  agent slot is the mode adaptation (no agent-list protocol — the row
+  gate `mode shell || agent` is moot for us), variant/effort always
+  present (our EFFORTS is a fixed cycle, no per-model variant list),
+  the reference fade-in alphas are not ported (steady 1; animations are
+  the reference's motion layer). Known narrow-home artifact, next
+  leftover family: at 40-44 columns the home composer block clips a
+  few columns left (the wall, row head and strip corner fall off) — the
+  session composer does not; short-terminal home geometry needs its
+  own unit.

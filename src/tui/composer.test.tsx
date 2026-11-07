@@ -25,7 +25,16 @@ async function composer(width = 100, state: Record<string, unknown> = {}) {
     onAsk: () => {}, onBackendLost: () => {},
   } as unknown as AppServer;
   const setup = await testRender(<App client={client} preferences={preferences} resumeId="fixture-composer" onQuit={() => {}} />, { width, height: 30 });
-  await setup.waitForFrame((f) => f.includes("Build ·"));
+  // The session metadata row drops the agent word below 44 columns
+  // (reference PromptMetadataRow width law); the model word always shows.
+  // Below 44 the row is IDENTICAL before and after the resume's mode flip,
+  // so this needle can resolve one render earlier than the wide needle —
+  // before the resume's finally arms typing. The settle covers exactly that
+  // gap; at width >= 44 the "Build ·" needle only matches the flipped row,
+  // so no settle (a boot paste must still race the typing flip to be
+  // dropped by the paste-queue changed() law, sitting-5 unit 4).
+  await setup.waitForFrame((f) => f.includes(width >= 44 ? "Build ·" : "GLM-5.3-Flash"));
+  if (width < 44) await new Promise((resolve) => setTimeout(resolve, 30));
   const keys = async (values: string[]) => {
     await act(async () => { await setup.mockInput.pressKeys(values); });
     await setup.renderOnce();
