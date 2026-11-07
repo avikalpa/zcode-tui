@@ -70,7 +70,7 @@ function truncateChars(value: string, len: number): string {
 }
 // overflow="hidden" clip port: the visible row text is cut at the row width
 // with NO ellipsis marker — only the 61-character title cap carries one.
-function clipWidth(value: string, width: number): string {
+export function clipWidth(value: string, width: number): string {
   if (width <= 0) return "";
   if (stringWidth(value) <= width) return value;
   let out = "";

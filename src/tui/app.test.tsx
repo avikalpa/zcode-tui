@@ -65,13 +65,19 @@ describe("zcode-tui OpenCode-shaped shell", () => {
       expect(await setup.waitForFrame((f) => f.includes("Z.AI Coding Plan"))).toContain("Status");
     } finally { setup.renderer.destroy(); }
   });
-  test("home MCP count and shortcuts fit on the same footer row", async () => {
+  test("home MCP rides the bottom strip row; hints stay on the prompt footer row", async () => {
     const setup = await testRender(<App client={fakeClient(undefined, false, true)} onQuit={() => {}} />, { width: 100, height: 30 });
     try {
       const frame = await setup.waitForFrame((f) => f.includes("1 MCP"));
-      const status = frame.split("\n").find((line) => line.includes("1 MCP"));
-      expect(status).toContain("ctrl+p commands");
-      expect(status).toContain("shift+tab agents");
+      const mcp = frame.split("\n").find((line) => line.includes("1 MCP"));
+      expect(mcp).toBeDefined();
+      // Bottom home.footer strip (feature-plugins/home/footer.tsx): the ⊙
+      // count with /mcps and the version, far from the prompt footer.
+      expect(mcp).toContain("/mcps");
+      expect(mcp).toContain("0.8.0");
+      const footer = frame.split("\n").find((line) => line.includes("ctrl+p commands"));
+      expect(footer).toContain("shift+tab agents");
+      expect(footer).not.toContain("1 MCP");
     } finally { setup.renderer.destroy(); }
   });
   test("status preserves an MCP request failure as unavailable", async () => {

@@ -1215,3 +1215,60 @@ upstream when it releases) — continue until this file's Remaining is empty
   few columns left (the wall, row head and strip corner fall off) — the
   session composer does not; short-terminal home geometry needs its
   own unit.
+
+- Unit 22 (sitting 14): the home composer takes the reference container
+  law (routes/home.tsx + feature-plugins/home/footer.tsx, pinned v2ref),
+  pinned against the sitting-13 HOME ground-truth frames
+  (/tmp/zq-ux-parity/ref-meta-*.txt — ╹ at col 13/strip 75 at 100x30, col
+  2/40 at 44, col 1/38 at 40) plus freshly measured body/clip extents. The
+  sitting-13 narrow artifact (the home block clipping columns off its left
+  edge below 44 columns) was only the worst case of a container that was
+  wrong at EVERY width: the invented `max(56, min(86, 62%))` fixed-width
+  box rendered 62 wide at column 19 on a 100-column terminal where the
+  reference renders 75 wide at column 13, and 56 wide (wider than the
+  terminal) at 44 where the reference shrinks. Ported: (1) the prompt
+  container is `width 100%` capped at maxWidth 75 inside an outer pad of
+  `w < 44 ? 1 : 2` (reference home.tsx 85-86, 100) — no clip at any
+  width; (2) the Prompt body pads 1/2 on the same threshold
+  (prompt/index.tsx 1664-1665) and the input width follows it, so the
+  placeholder clips at 35 cells at both 40 and 44 (overflow-hidden, no
+  wrap, no ellipsis — clipWidth over the grapheme stringWidth); (3) the
+  footer row moves INSIDE the container at its left edge (the invented
+  paddingLeft-1 inset is gone) and the hints gate on the TERMINAL width
+  `>= 44` (feature-plugins/prompt/footer.tsx) instead of the container
+  width — hints show at 44 columns with a 40-cell container; the layout
+  reserve also reads `terminalWidth - 8`; (4) the MCP ⊙ count and version
+  move OUT of the prompt footer row into a new bottom home.footer strip
+  (View law: gate `height >= 12 && width >= 44`, paddings collapse below
+  16 rows, `⊙ N MCP` with the reference single-text ⊙ span + count,
+  `/mcps` and the version only at `>= 64`, flexGrow spacer, subdued
+  version) — the frame shows the prompt row carrying location + hints
+  ONLY; (5) composer visual-row cursor movement (wrapWidthRef) now reads
+  the real input width per view — the session path was reading the old
+  home 62% law (a live divergence), now `dims.width - 9` wide-equivalent.
+  Session view untouched (sitting-12 byte-identical law preserved; the
+  padding law change only bites below 44 columns where session was never
+  verified). Three frame tests in src/tui/home-composer.test.tsx (100:
+  centered 75-wide container + strip row/footer/hints + bottom strip row
+  28; 44: pad-2 40-cell container + hints + gated strip; 40: pad-1
+  38-cell container + one-row clipped placeholder + no hints + closed
+  strip gate) — all 3 red against parent 4688804 via a targeted stash of
+  app.tsx + prompt-footer.tsx + select-dialog.tsx (behavioral: 100
+  renders col 19 not 13; 44/40 the ╹ never renders — log
+  /tmp/zq-ux-parity/sitting-14-red.log), green after. app.test.tsx's
+  "MCP + hints share one footer row" (sitting-4 law) moved to the split
+  contract (MCP on the bottom strip with /mcps + version; hints alone on
+  the prompt footer row); prompt-footer.test.tsx rewritten to the
+  terminal-width gate (component-level, green on both sides of the
+  stash). Suite 389/389 across 51 files, tsc --noEmit exit 0, live
+  smoke exit 0 (home renders the ported law live: ┃ at 13, 75-wide
+  strip, `⊙ 5 MCP /mcps … 0.8.0` bottom strip against the real
+  backend). Deviations ledgered: the strip's `/mcps` click affordance is
+  not wired (the sitting-4 label had no mouse handler either); logo
+  spacer keeps flexShrink 0 (reference flexShrink 1 only matters below
+  ~12 rows, unverified at those heights). The sitting-13 narrow-home
+  leftover is CLOSED; remaining: full live side-by-side COLOR parity
+  (styled/ANSI layer of the ground-truth-frame method); popup
+  space-above-anchor clamp (sitting-9 design note); picker fuzzy edge
+  cases beyond sitting 4 unit 2; WebSearch "via provider" + Question
+  answered block (protocol data gaps).

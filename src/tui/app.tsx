@@ -10,7 +10,7 @@ import { useKeyboard, useTerminalDimensions, usePaste } from "@opentui/react";
 import { SyntaxStyle, TextAttributes, decodePasteBytes } from "@opentui/core";
 import { Toast, useToast } from "./toast";
 import { PromptFooter } from "./prompt-footer";
-import { SelectDialog, TextPromptDialog, ModalBackdrop, type DialogOption } from "./select-dialog";
+import { SelectDialog, TextPromptDialog, ModalBackdrop, clipWidth, type DialogOption } from "./select-dialog";
 import type { AppServer } from "../protocol/client";
 import { recentInputs } from "../store/history";
 import { isDuplicateEntry, mergeSeed, promptHistory, type HistoryFile, type HistoryItem, type RichPrompt } from "./session/prompt-history";
@@ -1202,7 +1202,12 @@ function Composer({
     variant: effort || undefined,
   });
   const underline = Math.max(0, underlineWidth);
-  const wrapWidth = Math.max(12, underline - 4);
+  // The reference Prompt body (prompt/index.tsx 1664-1665): padding 1 below
+  // 44 columns, else 2 — the input width follows it, and the placeholder
+  // clips at that width like the overflow-hidden buffer (no wrap, no
+  // ellipsis).
+  const bodyPad = terminalWidth < 44 ? 1 : 2;
+  const wrapWidth = Math.max(12, underline - bodyPad * 2);
   // The cursor is a solid block that blinks while typing. With a draft it
   // splits the text at the cursor index (wrapped independently on either
   // side); an empty draft shows the block over the first placeholder cell.
@@ -1216,7 +1221,7 @@ function Composer({
   const partCuts = pasteCuts(draft, pasteParts);
   let inputRows: { segs: InputSeg[]; glyphIdx: number; glyph: string }[];
   if (!draft) {
-    inputRows = [{ segs: [{ text: placeholder, sel: false, paste: false }], glyphIdx: 0, glyph: typing ? glyph : " " }];
+    inputRows = [{ segs: [{ text: clipWidth(placeholder, wrapWidth), sel: false, paste: false }], glyphIdx: 0, glyph: typing ? glyph : " " }];
   } else {
     const cur = cursor ?? draft.length;
     const lo = selection ? selection[0] : -1;
@@ -1262,7 +1267,7 @@ function Composer({
             <text key={accentRow} content="┃" fg={accent} />
           ))}
         </box>
-        <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
+        <box style={{ flexGrow: 1, flexShrink: 0, flexDirection: "column", backgroundColor: C.surface, paddingLeft: bodyPad, paddingRight: bodyPad, paddingTop: 1 }}>
           {inputRows.map((row, lineIndex) => (
             <box key={lineIndex} style={{ flexDirection: "row", flexShrink: 0 }}>
               {row.segs.map((seg, si) => (
@@ -1315,6 +1320,34 @@ function Composer({
         <text content="╹" fg={accent} />
         <text content={"▀".repeat(underline)} fg={C.surface} />
       </box>
+    </box>
+  );
+}
+
+// The reference home.footer strip (feature-plugins/home/footer.tsx View): a
+// bottom row — gated off below 44 columns or 12 rows — carrying the MCP ⊙
+// count (with /mcps hinted at >= 64 columns) and the version far right at
+// >= 64; vertical paddings collapse below 16 rows. The plugins-failed half
+// is omitted (no plugins plane in this TUI).
+function HomeFooterStrip({ C, width, height, mcp, version }: {
+  C: ThemeTokens; width: number; height: number; mcp: { total: number; failed: number } | null; version: string;
+}) {
+  if (height < 12 || width < 44) return null;
+  const wide = width >= 64;
+  const pad = height < 16 ? 0 : 1;
+  return (
+    <box style={{ width: "100%", paddingTop: pad, paddingBottom: pad, paddingLeft: 2, paddingRight: 2, flexDirection: "row", flexShrink: 0, gap: 2 }}>
+      {mcp?.total ? (
+        <box style={{ flexDirection: "row", gap: 1, flexShrink: 0 }}>
+          <text fg={C.fg} wrapMode="none">
+            <span fg={mcp.failed ? C.error : C.success}>⊙ </span>
+            {mcp.failed ? `${mcp.failed} MCP failed` : `${mcp.total} MCP`}
+          </text>
+          {wide ? <text content="/mcps" fg={C.subtle} wrapMode="none" /> : null}
+        </box>
+      ) : null}
+      <box style={{ flexGrow: 1 }} />
+      {wide ? <text content={version} fg={C.subtle} wrapMode="none" flexShrink={0} /> : null}
     </box>
   );
 }
@@ -1916,8 +1949,18 @@ export function App({
     ? displayTitle(sessions.find((s) => s.sessionId === activeId) ?? { sessionId: activeId, title: "", status: "", updatedAt: Date.now() })
     : "";
   const activeModel = models[modelIdx] ?? models[0];
-  const promptWidth = Math.max(56, Math.min(86, Math.floor(dims.width * 0.62)));
-  wrapWidthRef.current = Math.max(12, promptWidth - 5);
+  // Reference home law (routes/home.tsx 85-86, 100): the prompt container is
+  // width 100% capped at maxWidth 75 inside an outer pad of 1 below 44
+  // columns, else 2 — it shrinks with the terminal instead of clipping.
+  const homePad = dims.width < 44 ? 1 : 2;
+  const homePromptWidth = Math.min(75, Math.max(0, dims.width - homePad * 2));
+  // Composer visual rows: the real input width per view (home container, or
+  // the session width minus route pad 2 and wall 1), body padding per the
+  // reference Prompt law below.
+  const sessionInputWidth = Math.max(0, dims.width - 5);
+  wrapWidthRef.current = view === "home"
+    ? Math.max(12, homePromptWidth - 1 - (dims.width < 44 ? 2 : 4))
+    : Math.max(12, sessionInputWidth - (dims.width < 44 ? 2 : 4));
   const selRange = selAnchor === null
     ? null
     : ([Math.min(selAnchor, cursor ?? draft.length), Math.max(selAnchor, cursor ?? draft.length)] as [number, number]);
@@ -4621,21 +4664,20 @@ footerHints={[
   if (view === "home") {
     return (
       <box style={{ flexDirection: "column", backgroundColor: C.bg, width: "100%", flexGrow: 1 }}>
-        <box style={{ flexDirection: "column", alignItems: "center", flexGrow: 1, paddingLeft: 2, paddingRight: 2 }}>
+        <box style={{ flexDirection: "column", alignItems: "center", flexGrow: 1, paddingLeft: homePad, paddingRight: homePad }}>
           <box style={{ flexGrow: 1 }} />
           <box style={{ height: 3, flexShrink: 0 }} />
           <ZCodeLogo C={C} />
           <box style={{ height: 1, flexShrink: 0 }} />
-          <box style={{ width: promptWidth, flexShrink: 0 }}>
+          <box style={{ width: homePromptWidth, maxWidth: 75, paddingTop: 1, flexShrink: 0 }}>
             <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
-            {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={promptWidth} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} /> : null}
-            <Composer C={C} width={promptWidth} underlineWidth={promptWidth - 1} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} terminalWidth={dims.width} leaderActive={leaderActive} pasteParts={pasteParts} />
-          </box>
-          <box style={{ width: promptWidth, paddingLeft: 1, paddingRight: 1, flexShrink: 0 }}>
-            <PromptFooter C={C} width={Math.max(1, promptWidth - 2)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} mcp={mcpStatus} version={VERSION} />
+            {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={homePromptWidth} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} /> : null}
+            <Composer C={C} width="100%" underlineWidth={Math.max(10, homePromptWidth - 1)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} terminalWidth={dims.width} leaderActive={leaderActive} pasteParts={pasteParts} />
+            <PromptFooter C={C} width={homePromptWidth} terminalWidth={dims.width} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} />
           </box>
           <box style={{ flexGrow: 1 }} />
         </box>
+        <HomeFooterStrip C={C} width={dims.width} height={dims.height} mcp={mcpStatus} version={VERSION} />
         {toast ? <Toast C={C} toast={toast} pending={toastPending} width={dims.width} onHover={(hovered) => hovered ? toasts.pause() : toasts.resume()} onActivate={toasts.activate} /> : null}
       </box>
     );
@@ -4910,7 +4952,7 @@ footerHints={[
         </>
       )}
       <box style={{ height: 1, paddingLeft: 3, paddingRight: 2, flexShrink: 0 }}>
-        <PromptFooter C={C} width={Math.max(1, dims.width - 5)} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} running={running} spinner={spinner} lost={lost} context={ctxLabel} />
+        <PromptFooter C={C} width={Math.max(1, dims.width - 5)} terminalWidth={dims.width} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} running={running} spinner={spinner} lost={lost} context={ctxLabel} />
       </box>
       {toast ? <Toast C={C} toast={toast} pending={toastPending} width={dims.width} onHover={(hovered) => hovered ? toasts.pause() : toasts.resume()} onActivate={toasts.activate} /> : null}
     </box>
