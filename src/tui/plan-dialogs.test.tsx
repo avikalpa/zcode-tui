@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { act, useState } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import { ModelDialog, modelOptions, type ModelChoice } from "./model-dialog";
+import { ModelDialog, modelOptions, prioritizeFavorites, rankModelOptions, sortModelOptions, type ModelChoice } from "./model-dialog";
+import { modelKey } from "./session/model-preference";
 import { StatusDialog } from "./status-dialog";
 import type { PlanState } from "./plan-state";
 import { THEMES } from "./design";
@@ -48,6 +49,50 @@ describe("plan dialogs", () => {
       await act(async () => { await setup.mockInput.pressKeys(["\r"]); });
       expect(picked).toEqual(["coding-large", "coding-large"]);
     } finally { setup.renderer.destroy(); }
+  });
+  test("model search is the reference flat ranked bucket — favorites first, no section headers", async () => {
+    const picked: string[] = [];
+    const setup = await testRender(<ModelDialog models={models} plans={plans} prefs={{ recent: [], favorite: [models[0]] }} current={models[1]} C={THEMES.opencode}
+      onSelect={(m) => picked.push(m.modelId)} onFavorite={() => {}} onClose={() => {}} />, { width: 100, height: 30 });
+    try {
+      await setup.waitForFrame((f) => f.includes("Coding Large"));
+      await act(async () => { await setup.mockInput.pressKeys([..."cod"]); });
+      const frame = await setup.waitForFrame((f) => f.includes("cod█"));
+      // Reference flatten law: a live query renders ONE ranked bucket — the
+      // favorites pass ranks it, and no group headers survive the flatten.
+      expect(frame.indexOf("Coding Fast")).toBeLessThan(frame.indexOf("Coding Large"));
+      expect(frame).not.toContain("Favorites");
+      expect(frame).not.toContain("AutoClaw");
+      await act(async () => { await setup.mockInput.pressKeys(["\r"]); });
+      expect(picked).toEqual(["coding-fast"]);
+    } finally { setup.renderer.destroy(); }
+  });
+  test("browse rows beyond favorites take the reference grouped sort law", () => {
+    const mixed: ModelChoice[] = [
+      { label: "Beta Model", providerId: "acme", providerLabel: "Acme AI", modelId: "beta" },
+      { label: "Zulu Model", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "zulu" },
+      { label: "Alpha Model", providerId: "zai", providerLabel: "Z.AI Coding Plan", modelId: "alpha" },
+      { label: "Aardvark Model", providerId: "zoo", providerLabel: "Aardvark Labs", modelId: "aardvark" },
+    ];
+    const ids = modelOptions(mixed, plans, prefs).filter((o) => !o.disabled).map((o) => o.id);
+    // zai is the first-party Coding Plan (the opencode-go/opencode boost),
+    // then provider label alphabetically, then the model title.
+    expect(ids).toEqual(["zai/alpha", "zai/zulu", "zoo/aardvark", "acme/beta"]);
+  });
+  test("prioritizeFavorites moves favorites first and keeps the rest stable", () => {
+    const options = modelOptions(models, plans, prefs).filter((o) => !o.disabled);
+    const ordered = prioritizeFavorites(sortModelOptions(options, false), new Set(["zai/coding-large"]));
+    expect(ordered.map((o) => o.id)).toEqual(["zai/coding-large", "zai/coding-fast"]);
+    const model = models.map((m) => ({ value: m }));
+    expect(prioritizeFavorites(model, new Set([modelKey(models[1])])).map((o) => o.value.modelId))
+      .toEqual(["coding-large", "coding-fast"]);
+  });
+  test("the model search path filters by title/category then applies the law and favorites", () => {
+    const options = modelOptions(models, plans, prefs);
+    expect(rankModelOptions(options, "cod", new Set(["zai/coding-large"])).map((o) => o.id))
+      .toEqual(["zai/coding-large", "zai/coding-fast"]);
+    expect(rankModelOptions(options, "zzz", new Set())).toHaveLength(0);
+    expect(rankModelOptions(options, "", new Set())).toEqual(options);
   });
   test("both provider groups and all four cached models fit the normal picker", async () => {
     const setup = await testRender(<ModelDialog models={models} plans={plans} prefs={prefs} current={models[0]} C={THEMES.opencode} onSelect={() => {}} onFavorite={() => {}} onClose={() => {}} />, { width: 100, height: 30 });

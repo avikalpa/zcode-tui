@@ -85,7 +85,10 @@ export function clipWidth(value: string, width: number): string {
 }
 // Ported from OpenCode b084acc packages/tui/src/ui/dialog-select.tsx:
 // weighted fuzzy title/category/searchText matching, then stable grouping.
-export function filterDialogOptions<T>(options: DialogOption<T>[], query: string): DialogOption<T>[] {
+// flat=true mirrors the reference DialogSelect `flat` prop: with a live
+// query a flat dialog keeps the fuzzysort rank order instead of regrouping
+// (the reference's `flatten` memo); with an empty query it groups as usual.
+export function filterDialogOptions<T>(options: DialogOption<T>[], query: string, flat = false): DialogOption<T>[] {
   const needle = query.toLowerCase().trim();
   const filtered = !needle ? options : fuzzysort.go(needle,
     options.map((option) => ({ option, label: option.label, group: option.group,
@@ -93,6 +96,7 @@ export function filterDialogOptions<T>(options: DialogOption<T>[], query: string
       keys: ["label", "group", "searchText"],
       scoreFn: (r) => r[0].score * 2 + r[1].score + r[2].score,
     }).map((result) => result.obj.option);
+  if (needle && flat) return filtered;
   const groups = new Map<string, DialogOption<T>[]>();
   for (const option of filtered) {
     const group = option.group ?? "";
@@ -149,6 +153,8 @@ export function SelectDialog<T>({
   countLabel,
   footerHints,
   theme,
+  flat,
+  rankOptions,
 }: {
   title: string;
   options: DialogOption<T>[];
@@ -170,6 +176,13 @@ export function SelectDialog<T>({
    * space-between footer row. */
   footerHints?: { key: string; label: string; side?: "left" | "right" }[];
   theme?: ThemeTokens;
+  /** Reference DialogSelect `flat` (dialog-select.tsx): with a live query the
+   * results render as ONE ranked bucket — no group headers. */
+  flat?: boolean;
+  /** Reference dialogs that own their search (DialogModel passes pre-ranked
+   * options with skipFilter): replaces the generic fuzzysort filter when
+   * given. Receives the full option list and the raw query. */
+  rankOptions?: (options: DialogOption<T>[], query: string) => DialogOption<T>[];
 }) {
   const [filter, setFilter] = useState("");
   const filterRef = useRef("");
@@ -187,7 +200,15 @@ export function SelectDialog<T>({
   const C = theme ?? THEMES.opencode;
   const cardWidth = tierWidth(size, dims.width);
 
-  const shown = filterDialogOptions(options, filter);
+  // Reference flatten law (dialog-select.tsx `flatten`): a flat dialog with
+  // a live query renders ONE ranked bucket — group headers and their spacer
+  // rows disappear until the query empties again.
+  const resolve = (opts: DialogOption<T>[], query: string): DialogOption<T>[] => {
+    const rows = rankOptions ? rankOptions(opts, query) : filterDialogOptions(opts, query);
+    if (flat && query.trim()) return rows.map((o) => (o.group ? { ...o, group: undefined } : o));
+    return rows;
+  };
+  const shown = resolve(options, filter);
   // A favorite/pin can move a row between sections. Preserve its identity,
   // as the reference selection reconciler does, rather than its old index.
   const preserved = shown.findIndex((o) => o.id === selectedId.current);
@@ -224,7 +245,7 @@ export function SelectDialog<T>({
   // Solid's reference store updates within a key burst. React state lands
   // later, so keyboard truth must be immediate for filter -> arrows -> Enter
   // and actions such as session delete/model favorite.
-  const filteredNow = () => filterDialogOptions(options, filterRef.current);
+  const filteredNow = () => resolve(options, filterRef.current);
   const selectionNow = () => {
     const rows = filteredNow();
     return rows[clamp(idxRef.current, 0, Math.max(0, rows.length - 1))];
