@@ -1309,3 +1309,53 @@ upstream when it releases) — continue until this file's Remaining is empty
   remaining: popup space-above-anchor clamp (sitting-9 design note);
   picker fuzzy edge cases beyond sitting 4 unit 2; WebSearch "via
   provider" + Question answered block (protocol data gaps).
+
+## 2026-11-23 UX parity sitting 15 (lane; never merged here)
+
+Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`.
+
+- Unit 1: the autocomplete popup takes the reference space-above-anchor
+  clamp (SlashPopup + App in app.tsx, pinned v2ref), closing the sitting-8
+  ledgered deviation. The reference caps the OPEN popup at the anchor's
+  absolute terminal y — `height = Math.min(10, count, Math.max(1,
+  anchor.y))` (component/prompt/autocomplete.tsx 849-854) — and its
+  reveal window rides the clamped height (`limit: Math.min(height(),
+  options().length)`, 622-626). Ours rendered `min(10, count)`
+  unconditionally: on a short terminal the popup pushed its top rows off
+  screen while the App-side window still counted 10, so navigation could
+  select rows that were never drawn (the sitting-9 design note). Ported:
+  (1) SlashPopup takes `maxRows` — the anchor's absolute y, undefined =
+  not yet measured — into the height; the empty message stays its single
+  row (the reference's `max(1, …)` floor); (2) the App measures the
+  anchor renderable the reference's own way: `.y` is absolute and IS the
+  rows above the anchor's top edge, but layout settles only after the
+  renderer paints — render-time and layout-effect reads see the previous
+  frame (measured: always 0 pre-paint) — so the clamp is sampled by a
+  50ms poll while the popup is open (autocomplete.tsx 103-115
+  positionTick), a synchronous sample from the key path (which runs after
+  the previous frame's layout), and a passive effect that resamples every
+  render; (3) both mount sites carry the anchor ref — the home prompt
+  container and the session [strip+composer] wrapper (the wrapper exists
+  only while the popup is open, exactly the measured block); (4)
+  revealSug's window limit follows the cap. Five tests: four
+  discriminating frames (component cap/floor/selection-repair in
+  autocomplete-popup.test.tsx; the App 100x14 session frame in
+  autocomplete.test.tsx — anchor at row 8: the uncapped render clipped
+  /agents off row 0 and left the selection stranded after an up-walk;
+  capped shows 8 rows with window 1..8 after the walk, /timeline
+  excluded) plus two clamp-inert guards (empty-message 1-row,
+  clamp-never-inflates). Red against parent 9d956da with the new tests
+  only (log /tmp/zq-ux-parity/sitting-15-red.log: 4 fail), green after.
+  Suite 395/395 across 52 files (one known-flake re-run — app.test.tsx
+  "closing a text dialog…" failed once in-full and passed in isolation
+  and on the full re-run; sitting-5 precedent), tsc --noEmit exit 0,
+  live smoke exit 0, and a live-backend 100x14 frame proof
+  (/tmp/zq-ux-parity/sitting-15-clamp-proof.log) shows the 8-row popup
+  at the terminal top with /agents first. Deviations (ledger): the
+  pre-measurement frame renders unclamped for ~50ms, exactly the
+  reference's own poll latency; y=0 anchors (composer at terminal top)
+  fall back to unclamped — unreachable behind the transcript and footer
+  chrome, noted not guarded. Remaining: picker fuzzy edge cases beyond
+  sitting 4 unit 2; WebSearch "via provider" + Question answered block
+  (protocol data gaps); full live side-by-side pixel sweep stays the
+  standing acceptance bar.
