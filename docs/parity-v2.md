@@ -1359,3 +1359,49 @@ Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`
   sitting 4 unit 2; WebSearch "via provider" + Question answered block
   (protocol data gaps); full live side-by-side pixel sweep stays the
   standing acceptance bar.
+
+## 2026-11-23 UX parity sitting 16 (lane; never merged here)
+
+Reference remains OpenCode `v2ref` at `b084acc55ea2cdb50e9c2ec49a8d9ab3608d43ad`.
+
+- Unit 1: the model dialog takes the reference sort law — the sitting-4
+  "specialized upstream model sorting" leftover. Three ported pieces from
+  component/dialog-model.tsx: (1) sortModelOptions — the grouped browse law
+  orders the non-section model rows first-tier-provider (zai is the zcode
+  first-party plan; the reference boosts opencode-go/opencode), then
+  provider label alphabetics, then model title; the reference's Free-footer
+  and release-date stages have NO data source in the zcode payload and are
+  coded inert (slice-then-sort keeps them live if a payload ever grows the
+  fields — sort stability preserves fuzzysort rank inside ties, the
+  reference's toSorted, absent from our ES2022 lib); (2) prioritizeFavorites
+  — the stable favorites-first pass over any ranked list; (3) the dialog's
+  own search path (upstream runs it with skipFilter+flat instead of the
+  generic DialogSelect filter): fuzzysort over title+category decides
+  MEMBERSHIP, the ungrouped law (no provider boost/name compare) decides
+  order, favorites ride first. SelectDialog gains the reference `flat` prop
+  (dialog-select.tsx `flatten`: a live query on a flat dialog renders ONE
+  ranked bucket — group headers and spacer rows vanish until the query
+  empties) and a `rankOptions` hook so dialogs that own their search plug
+  in; the generic path is byte-identical when neither is set. Favorites/
+  Recent sections now emit in prefs order minus cross-membership (the
+  reference toOptions shape), replacing the old rank -2/-1 sort. Visible
+  law consequence (noted, not guarded): with the allowlist's two zai models
+  and no release dates, title alphabetics puts GLM-5.3 above GLM-5.3-Flash
+  in browse and in search-without-favorites — the reference renders the
+  same order given the same data; the default model still rides isDefault,
+  not row order, and the ● current marker follows it. Four new tests
+  (browse grouped law across three providers, prioritizeFavorites
+  stability, search membership+order+empty-needle identity, and the
+  rendered flat-bucket frame: favorites first, no "Favorites"/"AutoClaw"
+  headers, enter selects the favorite) — red against the parent with the
+  fix stashed (behavioral: the regroup path BOTH reordered matched rows,
+  losing the favorites slot, AND kept headers inside the live-query frame;
+  plus a module-load red on the new exports; log
+  /tmp/zq-ux-parity/sitting-16-red.log), green after. One honest note in
+  the red log: an earlier red capture used a pre-typing frame (test-sync
+  artifact), replaced with a "cod█" wait predicate before the decisive
+  behavioral red. Suite 399/399 across 52 files, tsc --noEmit exit 0,
+  live smoke exit 0. Remaining: picker edge leftovers beyond this unit
+  (server-backed session search stays host-blocked); WebSearch "via
+  provider" + Question answered block (protocol data gaps); full live
+  side-by-side pixel sweep stays the standing acceptance bar.
