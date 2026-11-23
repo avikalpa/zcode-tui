@@ -87,4 +87,90 @@ describe("popup treatment (reference autocomplete frames)", () => {
       setup.renderer.destroy();
     }
   });
+
+  // The reference caps the popup at the anchor's absolute y when open —
+  // height = min(10, count, max(1, anchor.y)) — autocomplete.tsx 849-854.
+  const clampCommands = ["aa", "bb", "cc", "dd", "ee", "ff"].map((name) => ({
+    name,
+    aliases: [] as string[],
+    description: `desc ${name}`,
+  }));
+  const popupRows = (frame: string) => frame.split("\n").filter((l) => (l.match(/┃/g) ?? []).length >= 2);
+
+  test("the popup height is capped at the anchor's y when the anchor clamp is given", async () => {
+    const setup = await testRender(
+      mount(<SlashPopup commands={clampCommands} files={[]} idx={0} win={0} C={C} width={40} maxRows={3} />),
+      { width: 60, height: 20 },
+    );
+    try {
+      await setup.waitForFrame((f) => f.includes("desc bb"), { maxPasses: 20 });
+      const frame = await setup.waitForFrame((f) => (f.match(/┃/g) ?? []).filter(Boolean).length >= 2, { maxPasses: 20 });
+      const rows = popupRows(frame);
+      expect(rows.length).toBe(3);
+      expect(rows[0]).toContain("┃ /aa");
+      expect(rows[2]).toContain("┃ /cc");
+    } finally {
+      setup.renderer.destroy();
+    }
+  });
+
+  test("the clamp never drops below one row and never inflates a short list", async () => {
+    const setup = await testRender(
+      mount(<SlashPopup commands={clampCommands.slice(0, 2)} files={[]} idx={0} win={0} C={C} width={40} maxRows={0} />),
+      { width: 60, height: 20 },
+    );
+    try {
+      await setup.waitForFrame((f) => f.includes("desc"), { maxPasses: 20 });
+      const frame = await setup.waitForFrame((f) => (f.match(/┃/g) ?? []).filter(Boolean).length >= 2, { maxPasses: 20 });
+      const rows = popupRows(frame);
+      expect(rows.length).toBe(1);
+      expect(rows[0]).toContain("┃ /aa");
+    } finally {
+      setup.renderer.destroy();
+    }
+    const wide = await testRender(
+      mount(<SlashPopup commands={clampCommands.slice(0, 3)} files={[]} idx={0} win={0} C={C} width={40} maxRows={99} />),
+      { width: 60, height: 20 },
+    );
+    try {
+      await wide.waitForFrame((f) => f.includes("desc bb"), { maxPasses: 20 });
+      const wideFrame = await wide.waitForFrame((f) => f.includes("desc aa"), { maxPasses: 20 });
+      expect(popupRows(wideFrame).length).toBe(3);
+    } finally {
+      wide.renderer.destroy();
+    }
+  });
+
+  test("the empty message stays a single row under the clamp", async () => {
+    const setup = await testRender(
+      mount(<SlashPopup commands={[]} files={[]} idx={0} win={0} C={C} width={40} maxRows={0} empty="No matching commands" />),
+      { width: 60, height: 20 },
+    );
+    try {
+      const frame = await setup.waitForFrame((f) => f.includes("No matching commands"), { maxPasses: 20 });
+      expect(popupRows(frame).length).toBe(1);
+    } finally {
+      setup.renderer.destroy();
+    }
+  });
+
+  test("the selection stays inside the clamped window without inventing rows", async () => {
+    const setup = await testRender(
+      mount(<SlashPopup commands={clampCommands} files={[]} idx={5} win={0} C={C} width={40} maxRows={3} />),
+      { width: 60, height: 20 },
+    );
+    try {
+      await setup.waitForFrame((f) => f.includes("desc bb"), { maxPasses: 20 });
+      const frame = await setup.waitForFrame((f) => (f.match(/┃/g) ?? []).filter(Boolean).length >= 2, { maxPasses: 20 });
+      const rows = popupRows(frame);
+      // The App's reveal window already slid past the cap, so the render
+      // repairs the slice: exactly maxRows rows, the off-window tail gone.
+      expect(rows.length).toBe(3);
+      expect(rows[0]).toContain("┃ /aa");
+      expect(rows[2]).toContain("┃ /cc");
+      expect(frame).not.toContain("desc ff");
+    } finally {
+      setup.renderer.destroy();
+    }
+  });
 });

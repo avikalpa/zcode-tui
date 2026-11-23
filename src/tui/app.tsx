@@ -1081,7 +1081,10 @@ function sortedThemes(): ThemeName[] {
 // colour, background.default inside), rows padded 1 both sides, the selected
 // row on the primary action background, descriptions joined with a leading
 // space in the subdued colour, command names aligned to the full-set pad,
-// and per-trigger empty messages while the trigger stays active.
+// and per-trigger empty messages while the trigger stays active. The height
+// takes the reference clamp law (autocomplete.tsx 849-854): when open,
+// min(10, count, max(1, anchor.y)) — maxRows carries the anchor's absolute
+// terminal y (rows above its top edge); undefined means not yet measured.
 export function SlashPopup({
   commands,
   files,
@@ -1090,6 +1093,7 @@ export function SlashPopup({
   C,
   width,
   empty,
+  maxRows,
 }: {
   commands: SlashCommandSpec[];
   files: string[];
@@ -1098,12 +1102,13 @@ export function SlashPopup({
   C: ThemeTokens;
   width: number;
   empty?: string;
+  maxRows?: number;
 }) {
   const items: { key: string; name: string; description?: string }[] = [
     ...commands.map((c) => ({ key: `/${c.name}`, name: `/${c.name}`.padEnd(SLASH_PAD), description: c.description })),
     ...files.map((f) => ({ key: `@${f}`, name: `@${truncateMiddle(f, Math.max(1, width - 4))}` })),
   ];
-  const visibleCount = Math.min(10, items.length);
+  const visibleCount = Math.min(10, items.length, maxRows !== undefined ? Math.max(1, maxRows) : 10);
   const clampedWin = Math.max(0, Math.min(win, Math.max(0, items.length - visibleCount)));
   const sel = Math.max(clampedWin, Math.min(idx, clampedWin + visibleCount - 1));
   return (
@@ -1582,7 +1587,11 @@ export function App({
     if (n === 0 && sugWinRef.current !== 0) { sugWinRef.current = 0; setSugWin(0); }
   };
   const revealSug = (selected: number, total: number) => {
-    const limit = Math.min(10, total);
+    // The reveal window rides the clamped popup height, like the reference
+    // scrollTo (limit: Math.min(height(), options().length), autocomplete.tsx
+    // 622-626) — height() there includes the anchor.y cap.
+    const cap = anchorYRef.current !== undefined ? Math.max(1, anchorYRef.current) : 10;
+    const limit = Math.min(10, cap, total);
     const max = Math.max(0, total - limit);
     const off = sugWinRef.current;
     const next = selected < off ? Math.min(max, selected)
@@ -1590,6 +1599,14 @@ export function App({
       : Math.max(0, Math.min(max, off));
     if (next !== sugWinRef.current) { sugWinRef.current = next; setSugWin(next); }
   };
+  // The space-above-anchor clamp (reference autocomplete.tsx 849-854): the
+  // popup's height is capped at the anchor's absolute terminal y. The anchor
+  // renderable is measured after layout; .y is absolute, so it IS the rows
+  // above the anchor's top edge. Undefined until the first measurement —
+  // the reference reads the same value through its 50ms position poll.
+  const promptAnchorRef = useRef<{ y?: number } | null>(null);
+  const [promptAnchorY, setPromptAnchorY] = useState<number | undefined>(undefined);
+  const anchorYRef = useRef<number | undefined>(undefined);
   // Prompts typed while a turn runs queue visibly instead of being dropped or
   // mangled mid-burst; the pump effect sends them when the turn ends. An
   // entry carries the folded composer form (the queue-time draft plus its
@@ -1993,6 +2010,29 @@ export function App({
     : [];
   const fileMatches: string[] = atToken !== null ? cwdFileMatches(atToken) : [];
   const sugOpen = (slashToken !== null || atToken !== null) && !sugDismissed.current;
+
+  // Sample the anchor's absolute y for the space-above-anchor clamp. Layout
+  // settles after the renderer paints — render-time reads see the previous
+  // frame (usually 0) — so the clamp is measured the reference's own way:
+  // a poll while the popup is open (autocomplete.tsx 103-115, 50ms
+  // positionTick) plus a synchronous sample from the key path, which runs
+  // after the previous frame's layout. .y is absolute, so it IS the rows
+  // above the anchor's top edge.
+  const sampleAnchorY = useCallback(() => {
+    const y = promptAnchorRef.current?.y;
+    if (typeof y === "number" && y > 0 && y !== anchorYRef.current) {
+      anchorYRef.current = y;
+      setPromptAnchorY(y);
+    }
+  }, []);
+  useEffect(() => {
+    sampleAnchorY();
+  });
+  useEffect(() => {
+    if (!sugOpen) return;
+    const timer = setInterval(sampleAnchorY, 50);
+    return () => clearInterval(timer);
+  }, [sugOpen, sampleAnchorY]);
 
   // Placeholder cycles through the reference example set every 4s while the
   // composer is empty and focused.
@@ -3545,6 +3585,7 @@ export function App({
       const atTokenNow = !pendingBuf.current && fileContext ? triggerToken(draftRef.current, "@") : null;
       const fileMatchesNow = atTokenNow !== null ? cwdFileMatches(atTokenNow) : [];
       const sugOpenNow = (token !== null || atTokenNow !== null) && !sugDismissed.current;
+      if (sugOpenNow) sampleAnchorY();
       if (key.name === "escape") {
         if (sugOpenNow) { sugDismissed.current = true; return; }
         if (running) { void stopTurn(); return; }
@@ -4669,9 +4710,9 @@ footerHints={[
           <box style={{ height: 3, flexShrink: 0 }} />
           <ZCodeLogo C={C} />
           <box style={{ height: 1, flexShrink: 0 }} />
-          <box style={{ width: homePromptWidth, maxWidth: 75, paddingTop: 1, flexShrink: 0 }}>
+          <box ref={promptAnchorRef as never} style={{ width: homePromptWidth, maxWidth: 75, paddingTop: 1, flexShrink: 0 }}>
             <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
-            {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={homePromptWidth} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} /> : null}
+            {sugOpen ? <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={homePromptWidth} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} maxRows={promptAnchorY} /> : null}
             <Composer C={C} width="100%" underlineWidth={Math.max(10, homePromptWidth - 1)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} terminalWidth={dims.width} leaderActive={leaderActive} pasteParts={pasteParts} />
             <PromptFooter C={C} width={homePromptWidth} terminalWidth={dims.width} location={`${cwd}${gitBranch ? `:${gitBranch}` : ""}`} />
           </box>
@@ -4933,11 +4974,11 @@ footerHints={[
         </box>
       ) : null}
       {sugOpen ? (
-        <box style={{ flexDirection: "column", flexShrink: 0 }}>
+        <box ref={promptAnchorRef as never} style={{ flexDirection: "column", flexShrink: 0 }}>
           {/* The popup's anchor is the whole [strip + composer] block, the
               reference prompt body: bottom:"100%" floats it above the strip
               without displacing any flow row. */}
-          <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={dims.width} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} />
+          <SlashPopup commands={sugMatches} files={fileMatches} idx={sugIdx} win={sugWin} C={C} width={dims.width} empty={slashToken !== null ? "No matching commands" : "No matching files, agents, or references"} maxRows={promptAnchorY} />
           <AttachmentStrip C={C} files={imageFiles} more={(index) => openImagePreview(index)} height={stripHeight} />
           <box style={{ flexDirection: "row", paddingLeft: 2, paddingRight: 2, flexShrink: 0 }}>
             <Composer C={C} width="100%" underlineWidth={Math.max(10, dims.width - 5)} draft={draft} placeholder={promptPlaceholder} cursor={cursor} selection={selRange} cursorBlink={cursorBlink} typing={typing} mode={mode} model={modelLabel(activeModel)} provider={(activeModel as { providerLabel?: string })?.providerLabel ?? providerLabel} effort={effort} terminalWidth={dims.width} leaderActive={leaderActive} pasteParts={pasteParts} />
